@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2018 IBM Corp. and others
+ * Copyright (c) 2001, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -163,7 +163,11 @@ public:
 		}
 	}
 
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+	U_32 getInvokeCacheCount() const { return _invokeCacheCount; }
+#else /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 	U_32 getMethodTypeCount() const { return _methodTypeCount; }
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 	U_32 getVarHandleMethodTypeCount() const { return _varHandleMethodTypeCount; }
 	U_32 getVarHandleMethodTypePaddedCount() const { return _varHandleMethodTypeCount + (_varHandleMethodTypeCount & 0x1); /* Rounding up to an even number */ }
 	U_16 *getVarHandleMethodTypeLookupTable() const { return _varHandleMethodTypeLookupTable; }
@@ -230,9 +234,9 @@ public:
 				&& (_context->alwaysSplitBytecodes()
 					|| isMarked(cfrCPIndex, INVOKE_INTERFACE)
 					|| isMarked(cfrCPIndex, INVOKE_SPECIAL)
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 					|| isMarked(cfrCPIndex, INVOKE_VIRTUAL)
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 				));
 	}
 
@@ -246,9 +250,9 @@ public:
 		return (isMarked(cfrCPIndex, INVOKE_SPECIAL)
 				&& (_context->alwaysSplitBytecodes()
 					|| isMarked(cfrCPIndex, INVOKE_INTERFACE)
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 					|| isMarked(cfrCPIndex, INVOKE_VIRTUAL)
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 				));
 	}
 
@@ -287,8 +291,25 @@ public:
 	void markMethodRefAsUsedByInvokeSpecial(U_16 methodRefCfrCPIndex)       { mark(methodRefCfrCPIndex, INVOKE_SPECIAL); }
 	void markMethodRefAsUsedByInvokeStatic(U_16 methodRefCfrCPIndex)        { mark(methodRefCfrCPIndex, INVOKE_STATIC); }
 	void markMethodRefAsUsedByInvokeInterface(U_16 methodRefCfrCPIndex)     { mark(methodRefCfrCPIndex, INVOKE_INTERFACE); }
-	void markMethodRefAsUsedByInvokeHandle(U_16 methodRefCfrCPIndex)        { mark(methodRefCfrCPIndex, INVOKE_HANDLEEXACT); _methodTypeCount++; }
-	void markMethodRefAsUsedByInvokeHandleGeneric(U_16 methodRefCfrCPIndex) { mark(methodRefCfrCPIndex, INVOKE_HANDLEGENERIC); _methodTypeCount++; }
+
+	void markMethodRefAsUsedByInvokeHandle(U_16 methodRefCfrCPIndex) {
+		mark(methodRefCfrCPIndex, INVOKE_HANDLEEXACT);
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+		_invokeCacheCount++;
+#else /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
+		_methodTypeCount++;
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
+	}
+
+	void markMethodRefAsUsedByInvokeHandleGeneric(U_16 methodRefCfrCPIndex) {
+		mark(methodRefCfrCPIndex, INVOKE_HANDLEGENERIC);
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+		_invokeCacheCount++;
+#else /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
+		_methodTypeCount++;
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
+	}
+
 
 	void markInvokeDynamicInfoAsUsedByInvokeDynamic(U_16 cfrCPIndex)
 	{
@@ -303,8 +324,6 @@ public:
 	}
 
 private:
-	bool isVarHandleMethod(U_32 classIndex, U_32 nasIndex);
-
 	/* TODO turn EntryFlags into static const UDATAs instead of an enum type that is never used */
 
 	/* Indices into the ConstantPoolEntry.flags bool array. See comment at the top of the file for more info. */
@@ -341,7 +360,11 @@ private:
 	U_8 *_romConstantPoolTypes;
 	U_16 *_staticSplitEntries;
 	U_16 *_specialSplitEntries;
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+	U_32 _invokeCacheCount;
+#else /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 	U_32 _methodTypeCount;
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 	U_16 _varHandleMethodTypeCount;
 	U_16 *_varHandleMethodTypeLookupTable;
 	U_32 _callSiteCount;

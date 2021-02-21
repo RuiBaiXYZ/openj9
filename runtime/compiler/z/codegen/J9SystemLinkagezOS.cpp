@@ -42,12 +42,14 @@
 #include "il/ResolvedMethodSymbol.hpp"
 #include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
+#include "runtime/Runtime.hpp"
 #include "runtime/RuntimeAssumptions.hpp"
 #include "z/codegen/CallSnippet.hpp"
 #include "z/codegen/OpMemToMem.hpp"
 #include "z/codegen/S390Evaluator.hpp"
 #include "z/codegen/S390GenerateInstructions.hpp"
 #include "z/codegen/S390HelperCallSnippet.hpp"
+#include "z/codegen/S390J9CallSnippet.hpp"
 #include "z/codegen/S390StackCheckFailureSnippet.hpp"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -63,10 +65,11 @@ J9::Z::zOSSystemLinkage::zOSSystemLinkage(TR::CodeGenerator * cg)
 //  customization of callNativeFunction
 ////////////////////////////////////////////////////////////////////////////////
 void
-J9::Z::zOSSystemLinkage::generateInstructionsForCall(TR::Node * callNode, TR::RegisterDependencyConditions * deps, intptrj_t targetAddress,
+J9::Z::zOSSystemLinkage::generateInstructionsForCall(TR::Node * callNode, TR::RegisterDependencyConditions * deps, intptr_t targetAddress,
       TR::Register * methodAddressReg, TR::Register * javaLitOffsetReg, TR::LabelSymbol * returnFromJNICallLabel,
-      TR::S390JNICallDataSnippet * jniCallDataSnippet, bool isJNIGCPoint)
+      TR::Snippet * callDataSnippet, bool isJNIGCPoint)
    {
+   TR::S390JNICallDataSnippet * jniCallDataSnippet = static_cast<TR::S390JNICallDataSnippet *>(callDataSnippet);
    TR::CodeGenerator * codeGen = cg();
    TR::Compilation *comp = codeGen->comp();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(codeGen->fe());
@@ -111,14 +114,14 @@ J9::Z::zOSSystemLinkage::generateInstructionsForCall(TR::Node * callNode, TR::Re
    if (fej9->needRelocationsForHelpers()
          && !(callNode->getSymbol()->isResolvedMethod() || jniCallDataSnippet))
       {
-      generateRegLitRefInstruction(cg(), TR::InstOpCode::getLoadOpCode(), callNode, methodAddressReg, (uintptrj_t) callNode->getSymbolReference(),
+      generateRegLitRefInstruction(cg(), TR::InstOpCode::getLoadOpCode(), callNode, methodAddressReg, (uintptr_t) callNode->getSymbolReference(),
       TR_HelperAddress, NULL, NULL, NULL);
       }
    else if (!callNode->getSymbol()->isResolvedMethod()  || !jniCallDataSnippet) // An unresolved method means a helper being called  using system linkage
       {
       if (codeGen->needClassAndMethodPointerRelocations() && callNode->isPreparedForDirectJNI())
          {
-         uint32_t reloType;
+         TR_ExternalRelocationTargetKind reloType;
          if (callNode->getSymbol()->castToResolvedMethodSymbol()->isSpecial())
             reloType = TR_JNISpecialTargetAddress;
          else if (callNode->getSymbol()->castToResolvedMethodSymbol()->isStatic())
@@ -130,7 +133,7 @@ J9::Z::zOSSystemLinkage::generateInstructionsForCall(TR::Node * callNode, TR::Re
             reloType = TR_NoRelocation;
             TR_ASSERT(0,"JNI relocation not supported.");
             }
-         generateRegLitRefInstruction(cg(), TR::InstOpCode::getLoadOpCode(), callNode, methodAddressReg, (uintptrj_t) targetAddress, reloType, NULL, NULL, NULL);
+         generateRegLitRefInstruction(cg(), TR::InstOpCode::getLoadOpCode(), callNode, methodAddressReg, (uintptr_t) targetAddress, reloType, NULL, NULL, NULL);
          }
       else
          genLoadAddressConstant(codeGen, callNode, targetAddress, methodAddressReg, NULL, NULL, javaLitPoolRegister);
@@ -145,7 +148,7 @@ J9::Z::zOSSystemLinkage::generateInstructionsForCall(TR::Node * callNode, TR::Re
    //save litpool reg GPR6
    generateRRInstruction(codeGen, TR::InstOpCode::getLoadRegOpCode(), callNode, javaLitOffsetReg, systemEntryPointRegister);
 
-   if (cg()->comp()->target().is64Bit())
+   if (comp->target().is64Bit())
       {
       //Load Environment Pointer in R5 and entry point of the JNI function in R6
       generateRSInstruction(codeGen, TR::InstOpCode::getLoadMultipleOpCode(), callNode, systemEnvironmentRegister,
@@ -166,16 +169,7 @@ J9::Z::zOSSystemLinkage::generateInstructionsForCall(TR::Node * callNode, TR::Re
    if (cg()->supportsJITFreeSystemStackPointer())
       {
       auto* systemSPOffsetMR = generateS390MemoryReference(methodMetaDataVirtualRegister, static_cast<int32_t>(fej9->thisThreadGetSystemSPOffset()), codeGen);
-
-      if (cg()->comp()->target().cpu.getSupportsArch(TR::CPU::z10))
-         {
-         generateSILInstruction(codeGen, TR::InstOpCode::getMoveHalfWordImmOpCode(), callNode, systemSPOffsetMR, 0);
-         }
-      else
-         {
-         generateRIInstruction(codeGen, TR::InstOpCode::getLoadHalfWordImmOpCode(), callNode, methodAddressReg, 0);
-         generateRXInstruction(codeGen, TR::InstOpCode::getStoreOpCode(), callNode, methodAddressReg, systemSPOffsetMR);
-         }
+      generateSILInstruction(codeGen, TR::InstOpCode::getMoveHalfWordImmOpCode(), callNode, systemSPOffsetMR, 0);
       }
 
    /**

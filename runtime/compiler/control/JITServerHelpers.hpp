@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,7 +23,7 @@
 #ifndef JITSERVER_HELPERS_H
 #define JITSERVER_HELPERS_H
 
-#include "net/gen/compile.pb.h"
+#include "net/MessageTypes.hpp"
 #include "runtime/JITClientSession.hpp"
 
 class JITServerHelpers
@@ -51,7 +51,8 @@ class JITServerHelpers
       CLASSINFO_REMOTE_ROM_CLASS,
       CLASSINFO_CLASS_FLAGS,
       CLASSINFO_METHODS_OF_CLASS,
-      CLASSINFO_CONSTANT_POOL
+      CLASSINFO_CONSTANT_POOL,
+      CLASSINFO_CLASS_CHAIN_OFFSET,
       };
    // NOTE: when adding new elements to this tuple, add them to the end,
    // to not mess with the established order.
@@ -61,19 +62,21 @@ class JITServerHelpers
       TR_OpaqueClassBlock *, int32_t,                                // 2:  _baseComponentClass     3:  _numDimensions
       TR_OpaqueClassBlock *, std::vector<TR_OpaqueClassBlock *>,     // 4:  _parentClass            5:  _tmpInterfaces
       std::vector<uint8_t>, bool,                                    // 6:  _methodTracingInfo      7:  _classHasFinalFields
-      uintptrj_t, bool,                                              // 8:  _classDepthAndFlags     9:  _classInitialized
+      uintptr_t, bool,                                               // 8:  _classDepthAndFlags     9:  _classInitialized
       uint32_t, TR_OpaqueClassBlock *,                               // 10: _byteOffsetToLockword   11: _leafComponentClass
       void *, TR_OpaqueClassBlock *,                                 // 12: _classLoader            13: _hostClass
       TR_OpaqueClassBlock *, TR_OpaqueClassBlock *,                  // 14: _componentClass         15: _arrayClass
-      uintptrj_t, J9ROMClass *,                                      // 16: _totalInstanceSize      17: _remoteRomClass
-      uintptrj_t, uintptrj_t                                         // 18: _constantPool           19: _classFlags
+      uintptr_t, J9ROMClass *,                                       // 16: _totalInstanceSize      17: _remoteRomClass
+      uintptr_t, uintptr_t,                                          // 18: _constantPool           19: _classFlags
+      uintptr_t, std::vector<J9ROMMethod *>                          // 20: _classChainOffsetOfIdentifyingLoaderForClazz 21. _origROMMethods
       >;
 
-   static ClassInfoTuple packRemoteROMClassInfo(J9Class *clazz, J9VMThread *vmThread, TR_Memory *trMemory);
+   static ClassInfoTuple packRemoteROMClassInfo(J9Class *clazz, J9VMThread *vmThread, TR_Memory *trMemory, bool serializeClass);
    static void cacheRemoteROMClass(ClientSessionData *clientSessionData, J9Class *clazz, J9ROMClass *romClass, ClassInfoTuple *classInfoTuple);
    static void cacheRemoteROMClass(ClientSessionData *clientSessionData, J9Class *clazz, J9ROMClass *romClass, ClassInfoTuple *classInfoTuple, ClientSessionData::ClassInfo &classInfo);
    static J9ROMClass *getRemoteROMClassIfCached(ClientSessionData *clientSessionData, J9Class *clazz);
    static J9ROMClass *getRemoteROMClass(J9Class *, JITServer::ServerStream *stream, TR_Memory *trMemory, ClassInfoTuple *classInfoTuple);
+   static J9ROMClass *getRemoteROMClass(J9Class *, JITServer::ServerStream *stream, TR_PersistentMemory *trMemory, ClassInfoTuple *classInfoTuple);
    static J9ROMClass *romClassFromString(const std::string &romClassStr, TR_PersistentMemory *trMemory);
    static bool getAndCacheRAMClassInfo(J9Class *clazz, ClientSessionData *clientSessionData, JITServer::ServerStream *stream, ClassInfoDataType dataType, void *data);
    static bool getAndCacheRAMClassInfo(J9Class *clazz, ClientSessionData *clientSessionData, JITServer::ServerStream *stream, ClassInfoDataType dataType1, void *data1,
@@ -82,22 +85,24 @@ class JITServerHelpers
 
    static void insertIntoOOSequenceEntryList(ClientSessionData *clientData, TR_MethodToBeCompiled *entry);
 
+   static uintptr_t getRemoteClassDepthAndFlagsWhenROMClassNotCached(J9Class *clazz, ClientSessionData *clientSessionData, JITServer::ServerStream *stream);
+
    // Functions used for allowing the client to compile locally when server is unavailable.
    // Should be used only on the client side.
-   static void postStreamFailure(OMRPortLibrary *portLibrary);
+   static void postStreamFailure(OMRPortLibrary *portLibrary, TR::CompilationInfo *compInfo);
    static bool shouldRetryConnection(OMRPortLibrary *portLibrary);
    static void postStreamConnectionSuccess();
    static bool isServerAvailable() { return _serverAvailable; }
 
-   static void printJITServerMsgStats(J9JITConfig *);
+   static void printJITServerMsgStats(J9JITConfig *, TR::CompilationInfo *);
    static void printJITServerCHTableStats(J9JITConfig *, TR::CompilationInfo *);
    static void printJITServerCacheStats(J9JITConfig *, TR::CompilationInfo *);
 
-   static uint32_t serverMsgTypeCount[JITServer::MessageType_ARRAYSIZE];
+   static uint32_t serverMsgTypeCount[JITServer::MessageType_MAXTYPE];
 
    static bool isAddressInROMClass(const void *address, const J9ROMClass *romClass);
 
-   static uintptrj_t walkReferenceChainWithOffsets(TR_J9VM * fe, const std::vector<uintptrj_t>& listOfOffsets, uintptrj_t receiver);
+   static uintptr_t walkReferenceChainWithOffsets(TR_J9VM * fe, const std::vector<uintptr_t>& listOfOffsets, uintptr_t receiver);
 
    private:
    static void getROMClassData(const ClientSessionData::ClassInfo &classInfo, ClassInfoDataType dataType, void *data);

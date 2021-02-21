@@ -1,4 +1,4 @@
-dnl Copyright (c) 2017, 2020 IBM Corp. and others
+dnl Copyright (c) 2017, 2021 IBM Corp. and others
 dnl
 dnl This program and the accompanying materials are made available under
 dnl the terms of the Eclipse Public License 2.0 which accompanies this
@@ -334,6 +334,14 @@ SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitReportInstanceFieldWrite,3)
 SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitReportStaticFieldRead,1)
 SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitReportStaticFieldWrite,2)
 FAST_PATH_ONLY_HELPER(jitAcmpHelper,2)
+OLD_DUAL_MODE_HELPER(jitGetFlattenableField,2)
+OLD_DUAL_MODE_HELPER(jitWithFlattenableField,3)
+OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE(jitPutFlattenableField,3)
+OLD_DUAL_MODE_HELPER(jitGetFlattenableStaticField,2)
+OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE(jitPutFlattenableStaticField,3)
+OLD_DUAL_MODE_HELPER(jitLoadFlattenableArrayElement,2)
+OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE(jitStoreFlattenableArrayElement,3)
+SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitResolveFlattenableField,3)
 
 dnl Trap handlers
 
@@ -382,6 +390,7 @@ dnl Exception throw helpers
 
 EXCEPTION_THROW_HELPER(jitThrowCurrentException,0)
 EXCEPTION_THROW_HELPER(jitThrowException,1)
+EXCEPTION_THROW_HELPER(jitThrowUnreportedException,1)
 EXCEPTION_THROW_HELPER(jitThrowAbstractMethodError,0)
 EXCEPTION_THROW_HELPER(jitThrowArithmeticException,0)
 EXCEPTION_THROW_HELPER(jitThrowArrayIndexOutOfBounds,0)
@@ -424,7 +433,6 @@ UNUSED(jitResolvePackedArrayFieldLength)
 UNUSED(jitResolveIsPackedFieldNested)
 UNUSED(jitNewObjectNoTenantInit)
 UNUSED(jitFindFieldSignatureClass)
-UNUSED(icallVMprJavaSendInvokeWithArgumentsHelperL)
 UNUSED(j2iInvokeWithArguments)
 
 dnl Switch from the C stack to the java stack and jump via tempSlot

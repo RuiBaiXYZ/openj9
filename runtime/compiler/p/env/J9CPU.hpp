@@ -39,19 +39,6 @@ namespace J9 { typedef J9::Power::CPU CPUConnector; }
 #include "infra/Assert.hpp"
 #include "infra/Flags.hpp"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#define PROCESSOR_FEATURES_SIZE 1
-typedef struct TR_ProcessorFeatureFlags {
-  uint32_t featureFlags[PROCESSOR_FEATURES_SIZE];
-} TR_ProcessorFeatureFlags;
-
-#ifdef __cplusplus
-}
-#endif
-
 namespace J9
 {
 
@@ -66,18 +53,21 @@ protected:
    CPU(const OMRProcessorDesc& processorDescription) : J9::CPU(processorDescription) {}
 
 public:
-   bool getPPCSupportsVMX();
-   bool getPPCSupportsVSX();
-   bool getPPCSupportsAES();
-   bool getPPCSupportsTM();
-   bool getPPCSupportsLM();
 
-   bool hasPopulationCountInstruction();
-   bool supportsDecimalFloatingPoint();
+   /**
+    * @brief Intialize _supportedFeatureMasks to the list of processor features that will be utilized by the compiler and set _isSupportedFeatureMasksEnabled to true
+    * @return void
+    */
+   static void enableFeatureMasks();
 
-   TR_ProcessorFeatureFlags getProcessorFeatureFlags();
-   bool isCompatible(TR_Processor processorSignature, TR_ProcessorFeatureFlags processorFeatureFlags);
-
+   /** 
+    * @brief A factory method used to construct a CPU object for portable AOT compilations
+    * @param[in] omrPortLib : the port library
+    * @return TR::CPU
+    */
+   static TR::CPU detectRelocatable(OMRPortLibrary * const omrPortLib);
+   
+   bool isCompatible(const OMRProcessorDesc& processorDescription);
    };
 
 }

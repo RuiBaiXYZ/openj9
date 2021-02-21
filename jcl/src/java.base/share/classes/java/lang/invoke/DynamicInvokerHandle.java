@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar17]*/
+/*[INCLUDE-IF Sidecar17 & !OPENJDK_METHODHANDLES]*/
 /*******************************************************************************
- * Copyright (c) 2011, 2011 IBM Corp. and others
+ * Copyright (c) 2011, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -22,6 +22,10 @@
  *******************************************************************************/
 package java.lang.invoke;
 
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+import java.util.List;
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
+
 @VMCONSTANTPOOL_CLASS
 class DynamicInvokerHandle extends MethodHandle {
 	@VMCONSTANTPOOL_FIELD
@@ -36,6 +40,13 @@ class DynamicInvokerHandle extends MethodHandle {
 		super(originalHandle, newType);
 		this.site = originalHandle.site;
 	}
+
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+	@Override
+	boolean addRelatedMHs(List<MethodHandle> relatedMHs) {
+		return false;
+	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 
 	// {{{ JIT support
 
@@ -73,4 +84,3 @@ class DynamicInvokerHandle extends MethodHandle {
 		c.compareStructuralParameter(left.site, this.site);
 	}
 }
-

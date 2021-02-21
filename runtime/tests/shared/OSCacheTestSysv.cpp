@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -152,7 +152,7 @@ cleanup:
 	
 	return rc;
 }
-#if defined(J9SHR_CACHELET_SUPPORT) || defined (J9VM_GC_REALTIME)
+#if defined(J9VM_GC_REALTIME)
 	/* rtjavm7 does not seem to like testing with 10 processes. Without doing a
 	 * terrible amount of investigation lowering this to 3 appears to fix the problem
 	 */
@@ -529,7 +529,7 @@ SH_OSCacheTestSysv::testGetAllCacheStatistics(J9JavaVM* vm)
 
 		tmposc = new(tmposc) SH_OSCachesysv(PORTLIB, vm, testDir, cacheName[i], piconfig, 1, J9SH_OSCACHE_CREATE, 1, 0, 0, &versionData, NULL);
 		if(tmposc->getError() < 0) {
-			j9tty_printf(PORTLIB, "testGetAllCacheStatistics: clean up old caches : failed to create create cache %zu (getError() =%zd)\n", i, tmposc->getError());
+			j9tty_printf(PORTLIB, "testGetAllCacheStatistics: clean up old caches : failed to create cache %zu (getError() =%zd)\n", i, tmposc->getError());
 			goto loop_cleanup;
 		}
 
@@ -559,7 +559,7 @@ SH_OSCacheTestSysv::testGetAllCacheStatistics(J9JavaVM* vm)
 		/* J9SH_BASEDIR will be appended to cacheDirName. Caches are created in "/tmp/javasharedresources". */
 		osc[i] = new(osc[i]) SH_OSCachesysv(PORTLIB, vm, testDir, cacheName[i], piconfig, 1, J9SH_OSCACHE_CREATE, 1, 0, 0, &versionData, NULL);
 		if(osc[i]->getError() < 0) {
-			j9tty_printf(PORTLIB, "testGetAllCacheStatistics: failed to create create cache %zu (getError() =%zd)\n", i, osc[i]->getError());
+			j9tty_printf(PORTLIB, "testGetAllCacheStatistics: failed to create cache %zu (getError() =%zd)\n", i, osc[i]->getError());
 			goto cleanup;
 		}
 	}
@@ -690,7 +690,7 @@ SH_OSCacheTestSysv::testMutex(J9PortLibrary *portLibrary, J9JavaVM *vm, struct j
 
 /**
  * This test launches a child OSCache, which exits whilst holding the write lock. The
- * master then attempts to acquire the write lock. It should succeed, because JVMs are
+ * parent then attempts to acquire the write lock. It should succeed, because JVMs are
  * supposed to release the write lock if they crash.
  */
 #define OSCACHETEST_MUTEX_HANG_NAME "testMutexHang"

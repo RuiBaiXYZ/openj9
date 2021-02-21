@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -24,6 +24,8 @@
 #define J9_PRIVATELINKAGE_INCL
 
 #include "codegen/Linkage.hpp"
+#include "env/jittypes.h"
+#include "compile/CompilationTypes.hpp"
 #include "infra/Assert.hpp"
 
 namespace TR { class CodeGenerator; }
@@ -85,6 +87,11 @@ public:
       inline uint16_t getReservedWord() { return (_word & ReservedMask) >> 16; }
       inline void setReservedWord(uint16_t w) { _word |= ((w << 16) & ReservedMask); }
 
+      inline TR_ReturnInfo getReturnInfo() { return (TR_ReturnInfo)(_word & ReturnInfoMask); }
+      inline void setReturnInfo(TR_ReturnInfo w) { _word |= (w & ReturnInfoMask); }
+
+      inline uint32_t getWord() { return _word; }
+
       int32_t getJitEntryOffset()
          {
 #if defined(TR_TARGET_X86) && defined(TR_TARGET_32BIT)
@@ -119,6 +126,17 @@ public:
       LinkageInfo() {};
       };
 
+   /**
+    * @brief J9 private linkage override of OMR function
+    */
+   virtual intptr_t entryPointFromCompiledMethod();
+
+   /**
+    * @brief J9 private linkage override of OMR function
+    */
+   virtual intptr_t entryPointFromInterpretedMethod();
+
+   virtual void mapIncomingParms(TR::ResolvedMethodSymbol *method);
    };
 
 }

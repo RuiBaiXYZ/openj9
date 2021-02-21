@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2018 IBM Corp. and others
+ * Copyright (c) 2018, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,7 +26,6 @@
 HTTP = 'https://'
 OMR_REPO = 'github.com/eclipse/openj9-omr.git'
 OPENJ9_REPO = 'github.com/eclipse/openj9.git'
-
 
 def clone_branch_push(REPO, TAG_NAME, TAG_ANNOTATION, TAG_POINT, POINT_TYPE) {
     timeout(time: 3, unit: 'HOURS') {
@@ -55,7 +54,7 @@ def clone_branch_push(REPO, TAG_NAME, TAG_ANNOTATION, TAG_POINT, POINT_TYPE) {
             sh "git tag -a '${TAG_NAME}' -m '${TAG_ANNOTATION}' ${POINT_TYPE_PREFIX}${TAG_POINT}"
             sh "git show ${TAG_NAME}"
 
-            withCredentials([usernamePassword(credentialsId: 'b6987280-6402-458f-bdd6-7affc2e360d4', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+            withCredentials([usernamePassword(credentialsId: 'github-bot', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
                 sh "git push ${HTTP}${USERNAME}:${PASSWORD}@${REPO} 'refs/tags/${TAG_NAME}'"
             }
             cleanWs()

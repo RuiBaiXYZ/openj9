@@ -34,6 +34,10 @@
 #define J9AccAbstract 0x400
 #define J9AccAnnotation 0x2000
 #define J9AccBridge 0x40
+
+#define J9AccClassIsValueBased 0x40
+#define J9AccClassHiddenOptionNestmate 0x80
+#define J9AccClassHiddenOptionStrong 0x100
 #define J9AccClassAnnnotionRefersDoubleSlotEntry 0x80000
 #define J9AccClassAnonClass 0x800
 #define J9AccClassArray 0x10000
@@ -54,6 +58,7 @@
 #define J9AccClassHasVerifyData 0x800000
 #define J9AccClassHotSwappedOut 0x4000000
 #define J9AccClassInnerClass 0x4000
+#define J9AccClassHidden 0x8000
 #define J9AccClassNeedsStaticConstantInit 0x10000
 #define J9AccClassIntermediateDataIsClassfile 0x20000
 #define J9AccClassInternalPrimitiveType 0x20000
@@ -117,6 +122,7 @@
 #define J9AccVarArgs 0x80
 #define J9AccVolatile 0x40
 #define J9AccRecord 0x400
+#define J9AccSealed 0x200
 #define J9StaticFieldRefBaseType 0x1
 #define J9StaticFieldRefDouble 0x2
 #define J9StaticFieldRefVolatile 0x4

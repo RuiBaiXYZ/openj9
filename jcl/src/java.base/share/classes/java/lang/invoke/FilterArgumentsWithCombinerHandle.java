@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Java12]*/
+/*[INCLUDE-IF (JAVA_SPEC_VERSION >= 12) & !OPENJDK_METHODHANDLES]*/
 /*******************************************************************************
- * Copyright (c) 2018, 2019 IBM Corp. and others
+ * Copyright (c) 2018, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -21,6 +21,10 @@
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 package java.lang.invoke;
+
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+import java.util.List;
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 
 /* 
  * Pseudocode example:
@@ -65,6 +69,15 @@ final class FilterArgumentsWithCombinerHandle extends MethodHandle {
     MethodHandle cloneWithNewType(MethodType newType) {
         return new FilterArgumentsWithCombinerHandle(this, newType);
     }
+
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+    @Override
+	boolean addRelatedMHs(List<MethodHandle> relatedMHs) {
+		relatedMHs.add(next);
+		relatedMHs.add(combiner);
+		return true;
+	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 
     private static Object[] infoAffectingThunks(MethodType combinerType, int filterPosition, int...argumentIndices) {
         MethodType thunkableType = ThunkKey.computeThunkableType(combinerType);

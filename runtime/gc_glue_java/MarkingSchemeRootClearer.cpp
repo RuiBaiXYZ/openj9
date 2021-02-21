@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -29,7 +29,6 @@
 #include "CollectorLanguageInterfaceImpl.hpp"
 #endif /* defined(J9VM_GC_FINALIZATION) */
 #include "ConfigurationDelegate.hpp"
-#include "Dispatcher.hpp"
 #include "EnvironmentBase.hpp"
 #include "FinalizableObjectBuffer.hpp"
 #include "FinalizableReferenceBuffer.hpp"
@@ -42,6 +41,7 @@
 #include "MarkingSchemeRootClearer.hpp"
 #include "ModronAssertions.h"
 #include "OwnableSynchronizerObjectBuffer.hpp"
+#include "ParallelDispatcher.hpp"
 #include "ReferenceObjectBuffer.hpp"
 #include "ReferenceStats.hpp"
 #include "RootScanner.hpp"
@@ -307,8 +307,11 @@ void
 MM_MarkingSchemeRootClearer::doMonitorReference(J9ObjectMonitor *objectMonitor, GC_HashTableIterator *monitorReferenceIterator)
 {
 	J9ThreadAbstractMonitor * monitor = (J9ThreadAbstractMonitor*)objectMonitor->monitor;
+	_env->getGCEnvironment()->_markJavaStats._monitorReferenceCandidates += 1;
+
 	if(!_markingScheme->isMarked((omrobjectptr_t )monitor->userData)) {
 		monitorReferenceIterator->removeSlot();
+		_env->getGCEnvironment()->_markJavaStats._monitorReferenceCleared += 1;
 		/* We must call objectMonitorDestroy (as opposed to omrthread_monitor_destroy) when the
 		 * monitor is not internal to the GC */
 		static_cast<J9JavaVM*>(_omrVM->_language_vm)->internalVMFunctions->objectMonitorDestroy(static_cast<J9JavaVM*>(_omrVM->_language_vm), (J9VMThread *)_env->getLanguageVMThread(), (omrthread_monitor_t)monitor);

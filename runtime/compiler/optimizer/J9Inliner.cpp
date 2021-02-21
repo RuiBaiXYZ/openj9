@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -56,13 +56,13 @@ extern int32_t          *InlinedSizes;       // Defined in Inliner.cpp
 
 
 //duplicated as long as there are two versions of findInlineTargets
-static uintptrj_t *failMCS(char *reason, TR_CallSite *callSite, TR_InlinerBase* inliner)
+static uintptr_t *failMCS(char *reason, TR_CallSite *callSite, TR_InlinerBase* inliner)
    {
    debugTrace(inliner->tracer(),"  Fail isMutableCallSiteTargetInvokeExact(%p): %s", callSite, reason);
    return NULL;
    }
 
-static uintptrj_t *isMutableCallSiteTargetInvokeExact(TR_CallSite *callSite, TR_InlinerBase *inliner)
+static uintptr_t *isMutableCallSiteTargetInvokeExact(TR_CallSite *callSite, TR_InlinerBase *inliner)
    {
    // Looking for either mcs.target.invokeExact(...) or mcs.getTarget().invokeExact(...)
    // on some known/fixed MutableCallSite object mcs.
@@ -118,13 +118,13 @@ static uintptrj_t *isMutableCallSiteTargetInvokeExact(TR_CallSite *callSite, TR_
 
    if (mcsNode->getSymbolReference()->hasKnownObjectIndex())
       {
-      uintptrj_t *result = mcsNode->getSymbolReference()->getKnownObjectReferenceLocation(inliner->comp());
+      uintptr_t *result = mcsNode->getSymbolReference()->getKnownObjectReferenceLocation(inliner->comp());
       heuristicTrace(inliner->tracer(), "  Success: isMutableCallSiteTargetInvokeExact(%p)=%p (obj%d)", callSite, result, mcsNode->getSymbolReference()->getKnownObjectIndex());
       return result;
       }
    else if (mcsNode->getSymbol()->isFixedObjectRef())
       {
-      uintptrj_t *result = (uintptrj_t*)mcsNode->getSymbol()->castToStaticSymbol()->getStaticAddress();
+      uintptr_t *result = (uintptr_t*)mcsNode->getSymbol()->castToStaticSymbol()->getStaticAddress();
       heuristicTrace(inliner->tracer(),"  Success: isMutableCallSiteTargetInvokeExact(%p)=%p (fixed object reference)", callSite, result);
       return result;
       }
@@ -451,10 +451,24 @@ bool TR_InlinerBase::inlineCallTarget(TR_CallStack *callStack, TR_CallTarget *ca
 
    // Last chance to improve our prex info
    //
-   calltarget->_prexArgInfo = TR_PrexArgInfo::enhance(calltarget->_prexArgInfo, argInfo, comp());
-   argInfo = getUtil()->computePrexInfo(calltarget);
+   if (!calltarget->_prexArgInfo)
+      calltarget->_prexArgInfo = getUtil()->computePrexInfo(calltarget);
 
-   if (!comp()->incInlineDepth(calltarget->_calleeSymbol, calltarget->_myCallSite->_callNode->getByteCodeInfo(), calltarget->_myCallSite->_callNode->getSymbolReference()->getCPIndex(), calltarget->_myCallSite->_callNode->getSymbolReference(), !calltarget->_myCallSite->_isIndirectCall, argInfo))
+   argInfo = TR_PrexArgInfo::enhance(calltarget->_prexArgInfo, argInfo, comp());
+   calltarget->_prexArgInfo = argInfo;
+   bool tracePrex = comp()->trace(OMR::inlining) || comp()->trace(OMR::invariantArgumentPreexistence);
+   if (tracePrex && argInfo)
+      {
+      traceMsg(comp(), "Final prex argInfo:\n");
+      argInfo->dumpTrace();
+      }
+
+   if (!comp()->incInlineDepth(calltarget->_calleeSymbol,
+                               calltarget->_myCallSite->_callNode,
+                               !calltarget->_myCallSite->_isIndirectCall,
+                               calltarget->_guard,
+                               calltarget->_receiverClass,
+                               argInfo))
 		{
 		return false;
 		}
@@ -552,6 +566,36 @@ bool TR_J9VirtualCallSite::findCallSiteTarget(TR_CallStack *callStack, TR_Inline
 
    tryToRefineReceiverClassBasedOnResolvedTypeArgInfo(inliner);
 
+   // Refine receiver class based on CP class
+   // When we have an invokevirtual on an abstract method defined in an interface class,
+   // the call site's class will be more concrete than class of method.
+   // This happens when an abstract class implements an interface class without providing
+   // implementation for the given method, and the call site is refering to the method of
+   // the abstract class, the cp entry of the method ref will be resolved to j9method of
+   // the interface class. However, the class ref from cp will be resolved to the abstract
+   // class, which is more concrete
+   //
+   if (_cpIndex != -1 && _receiverClass && TR::Compiler->cls.isInterfaceClass(comp(), _receiverClass))
+      {
+      TR_ResolvedMethod* owningMethod = _initialCalleeMethod->owningMethod();
+      int32_t classRefCPIndex = owningMethod->classCPIndexOfMethod(_cpIndex);
+      TR_OpaqueClassBlock* callSiteClass = owningMethod->getClassFromConstantPool(comp(), classRefCPIndex);
+      if (callSiteClass &&
+          callSiteClass != _receiverClass &&
+          fe()->isInstanceOf(callSiteClass, _receiverClass, true, true, false) == TR_yes)
+         {
+         if (comp()->trace(OMR::inlining))
+            {
+            char* oldClassSig = TR::Compiler->cls.classSignature(comp(), _receiverClass, comp()->trMemory());
+            char* callSiteClassSig = TR::Compiler->cls.classSignature(comp(), callSiteClass, comp()->trMemory());
+            traceMsg(comp(), "Receiver type %p sig %s is class of an interface method for invokevirtual, improve it to call site receiver type %p sig %s\n", _receiverClass, oldClassSig, callSiteClass, callSiteClassSig);
+            }
+
+         // Update receiver class
+         _receiverClass = callSiteClass;
+         }
+      }
+
    if (addTargetIfMethodIsNotOverriden(inliner) ||
       addTargetIfMethodIsNotOverridenInReceiversHierarchy(inliner) ||
       findCallSiteForAbstractClass(inliner) ||
@@ -610,8 +654,6 @@ bool TR_J9InterfaceCallSite::findCallSiteTarget (TR_CallStack *callStack, TR_Inl
       //And try other techniques
       _ecsPrexArgInfo->set(0, NULL);
       }
-
-   //inliner->tracer()->dumpPrexArgInfo(_ecsPrexArgInfo);
 
    if (!_receiverClass)
       {
@@ -697,10 +739,10 @@ bool TR_J9MutableCallSite::findCallSiteTarget (TR_CallStack *callStack, TR_Inlin
          auto stream = TR::CompilationInfo::getStream();
          stream->write(JITServer::MessageType::KnownObjectTable_mutableCallSiteEpoch, _mcsReferenceLocation, knotEnabled);
 
-         auto recv = stream->read<uintptrj_t, TR::KnownObjectTable::Index, uintptrj_t*>();
-         uintptrj_t mcsObject = std::get<0>(recv);
+         auto recv = stream->read<uintptr_t, TR::KnownObjectTable::Index, uintptr_t*>();
+         uintptr_t mcsObject = std::get<0>(recv);
          TR::KnownObjectTable::Index knotIndex = std::get<1>(recv);
-         uintptrj_t *objectPointerReference = std::get<2>(recv);
+         uintptr_t *objectPointerReference = std::get<2>(recv);
 
          if (mcsObject && knot && (knotIndex != TR::KnownObjectTable::UNKNOWN))
             {
@@ -717,13 +759,13 @@ bool TR_J9MutableCallSite::findCallSiteTarget (TR_CallStack *callStack, TR_Inlin
          {
          TR::VMAccessCriticalSection mutableCallSiteEpoch(comp()->fej9());
          vgs->_mutableCallSiteEpoch = TR::KnownObjectTable::UNKNOWN;
-         uintptrj_t mcsObject = comp()->fej9()->getStaticReferenceFieldAtAddress((uintptrj_t)_mcsReferenceLocation);
+         uintptr_t mcsObject = comp()->fej9()->getStaticReferenceFieldAtAddress((uintptr_t)_mcsReferenceLocation);
          if (mcsObject && knot)
             {
             TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp()->fej9());
-            uintptrj_t currentEpoch = fej9->getVolatileReferenceField(mcsObject, "epoch", "Ljava/lang/invoke/MethodHandle;");
+            uintptr_t currentEpoch = fej9->getVolatileReferenceField(mcsObject, "epoch", "Ljava/lang/invoke/MethodHandle;");
             if (currentEpoch)
-               vgs->_mutableCallSiteEpoch = knot->getIndex(currentEpoch);
+               vgs->_mutableCallSiteEpoch = knot->getOrCreateIndex(currentEpoch);
             }
          else
             {

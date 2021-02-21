@@ -35,6 +35,9 @@
 #include "bcnames.h"
 
 #include "BuildResult.hpp"
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+#include "VMHelpers.hpp"
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 
 /*
  * It is not guaranteed that slot1 value for constantpool index=0 entry will be zero. 
@@ -76,8 +79,8 @@ public:
 
 	struct LocalVariableInfo
 	{
-		J9CfrAttributeLocalVariableTable *localVariableTable;
-		J9CfrAttributeLocalVariableTypeTable *localVariableTypeTable;
+		J9CfrAttributeLocalVariableTable *localVariableTableAttribute;
+		J9CfrAttributeLocalVariableTypeTable *localVariableTypeTableAttribute;
 	};
 
 	struct BytecodeFixupEntry
@@ -365,7 +368,7 @@ class LocalVariablesIterator
 			_index(0),
 			_count(count),
 			_localVariablesInfo(localVariablesInfo),
-			_localVariableTable(NULL)
+			_localVariableTable(NULL) // TODO why do we need this?
 		{
 			findNextValidEntry();
 		}
@@ -390,7 +393,7 @@ class LocalVariablesIterator
 		void findNextValidEntry()
 		{
 			/*
-			 * _localVariableTable is a cached pointer to _localVariablesInfo[_index].localVariableTable->localVariableTable.
+			 * _localVariableTable is a cached pointer to _localVariablesInfo[_index].localVariableTableAttribute->localVariableTable.
 			 * The LocalVariableInfo array is indexed by the "local variable index" (a.k.a. slot number).
 			 * An entry is valid if:
 			 * 	- there is a localVariableTable for the current slot (_index) and
@@ -400,21 +403,21 @@ class LocalVariablesIterator
 			 * getter methods above.
 			 */
 			if ((NULL == _localVariableTable) /* Is the cached pointer invalid? */
-					|| (_localVariableTableIndex >= _localVariablesInfo[_index].localVariableTable->localVariableTableLength) /* Have we walked off the end of the current localVariableTable? */
+					|| (_localVariableTableIndex >= _localVariablesInfo[_index].localVariableTableAttribute->localVariableTableLength) /* Have we walked off the end of the current localVariableTable? */
 					|| (_index != _localVariableTable[_localVariableTableIndex].index)) { /* Is the _index different from the current entry's index? */
 				_localVariableTable = NULL;
 				while ((NULL == _localVariableTable) && isNotDone()) { /* Keep looking until a valid entry is found or we run out of entries */
-					if ((NULL == _localVariablesInfo[_index].localVariableTable)
-							|| (_localVariableTableIndex >= _localVariablesInfo[_index].localVariableTable->localVariableTableLength)) {
+					if ((NULL == _localVariablesInfo[_index].localVariableTableAttribute)
+							|| (_localVariableTableIndex >= _localVariablesInfo[_index].localVariableTableAttribute->localVariableTableLength)) {
 						/* If there is no localVariableTable or we've exhausted the entries for the current slot, advance to the next slot */
 						++_index;
 						_localVariableTableIndex = 0;
-					} else if (_index != _localVariablesInfo[_index].localVariableTable->localVariableTable[_localVariableTableIndex].index) {
+					} else if (_index != _localVariablesInfo[_index].localVariableTableAttribute->localVariableTable[_localVariableTableIndex].index) {
 						/* If the current entry doesn't match the slot number, advance to the next entry */
 						++_localVariableTableIndex;
 					} else {
 						/* A valid entry has been found. Cache the localVariableTable pointer and exit the loop. */
-						_localVariableTable = _localVariablesInfo[_index].localVariableTable->localVariableTable;
+						_localVariableTable = _localVariablesInfo[_index].localVariableTableAttribute->localVariableTable;
 					}
 				}
 			}
@@ -842,7 +845,7 @@ class RecordComponentIterator
 		}
 	}
 
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 	void nestMembersDo(ConstantPoolIndexVisitor *visitor)
 	{
 		if (NULL != _nestMembers) {
@@ -853,7 +856,7 @@ class RecordComponentIterator
 			}
 		}
 	}
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 	/*
 	 * Iterate over the bootstrap methods and their arguments.
@@ -899,10 +902,10 @@ class RecordComponentIterator
 	U_16 getDoubleScalarStaticCount() const { return _doubleScalarStaticCount; }
 	U_16 getMemberAccessFlags() const { return _memberAccessFlags; }
 	U_16 getInnerClassCount() const { return _innerClassCount; }
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 	U_16 getNestMembersCount() const { return _nestMembersCount; }
 	U_16 getNestHostNameIndex() const { return _nestHost; }
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 	U_16 getMajorVersion() const { return _classFile->majorVersion; }
 	U_16 getMinorVersion() const { return _classFile->minorVersion; }
 	U_32 getMaxBranchCount() const { return _maxBranchCount; }
@@ -973,6 +976,19 @@ class RecordComponentIterator
 	bool needsStaticConstantInit() const { return _needsStaticConstantInit; }
 	bool isRecord() const { return _isRecord; }
 	U_16 getRecordComponentCount() const { return _recordComponentCount; }
+	bool isSealed() const { return _isSealed; }
+	U_16 getPermittedSubclassesClassCount() const { return _isSealed ? _permittedSubclassesAttribute->numberOfClasses : 0; }
+	bool isValueBased() const { return _isClassValueBased; }
+
+	U_16 getPermittedSubclassesClassNameAtIndex(U_16 index) const {
+		U_16 result = 0;
+		if (_isSealed) {
+			U_16 classCpIndex = _permittedSubclassesAttribute->classes[index];
+			result = _classFile->constantPool[classCpIndex].slot1;
+		}
+		return result;
+	}
+
 
 	U_8 constantDynamicType(U_16 cpIndex) const
 	{
@@ -1001,6 +1017,7 @@ private:
 		JAVA8_CONTENDED_ANNOTATION,
 		CONTENDED_ANNOTATION,
 		UNMODIFIABLE_ANNOTATION,
+		VALUEBASED_ANNOTATION,
 		KNOWN_ANNOTATION_COUNT
 	};
 
@@ -1025,10 +1042,10 @@ private:
 	U_16 _doubleScalarStaticCount;
 	U_16 _memberAccessFlags;
 	U_16 _innerClassCount;
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 	U_16 _nestMembersCount;
 	U_16 _nestHost;
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 	U_32 _maxBranchCount;
 	U_16 _outerClassNameIndex;
 	U_16 _simpleNameIndex;
@@ -1050,6 +1067,8 @@ private:
 	bool _isInnerClass;
 	bool _needsStaticConstantInit;
 	bool _isRecord;
+	bool _isSealed;
+	bool _isClassValueBased;
 
 	FieldInfo *_fieldsInfo;
 	MethodInfo *_methodsInfo;
@@ -1063,13 +1082,15 @@ private:
 	J9CfrAttributeRuntimeVisibleTypeAnnotations *_typeAnnotationsAttribute;
 	J9CfrAttributeInnerClasses *_innerClasses;
 	J9CfrAttributeBootstrapMethods *_bootstrapMethodsAttribute;
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+	J9CfrAttributePermittedSubclasses *_permittedSubclassesAttribute;
+#if JAVA_SPEC_VERSION >= 11
 	J9CfrAttributeNestMembers *_nestMembers;
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 	void walkHeader();
 	void walkFields();
 	void walkAttributes();
+	void checkHiddenClass();
 	void walkInterfaces();
 	void walkMethods();
 	void walkRecordComponents(J9CfrAttributeRecord *attrib);

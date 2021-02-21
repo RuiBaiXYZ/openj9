@@ -183,7 +183,7 @@ ifeq ($(HOST_ARCH),z)
 endif
 
 ifeq ($(HOST_ARCH),arm)
-    CX_DEFINES+=ARMGNU ARMGNUEABI FIXUP_UNALIGNED HARDHAT
+    CX_DEFINES+=ARMGNU ARMGNUEABI FIXUP_UNALIGNED HARDHAT __STDC_LIMIT_MACROS
     CX_FLAGS+=-fPIC -mfloat-abi=hard -mfpu=vfp -march=armv6 -marm
 endif
 
@@ -226,7 +226,7 @@ S_DEFINES+=$(HOST_DEFINES) $(TARGET_DEFINES)
 S_DEFINES_DEBUG+=DEBUG
 
 S_FLAGS+=--noexecstack
-S_FLAGS_DEBUG+=--gstabs
+S_FLAGS_DEBUG+=--gstabs+ -g
 
 ifeq ($(HOST_ARCH),p)
     S_FLAGS+=-maltivec
@@ -454,6 +454,11 @@ ifeq ($(HOST_ARCH),x)
             SOLINK_FLAGS+=-static-libgcc -static-libstdc++
         endif
     endif
+
+    ifeq ($(OS),osx)
+        SOLINK_FLAGS+=-install_name @rpath/lib$(PRODUCT_NAME).dylib
+        SOLINK_FLAGS+=-compatibility_version 1.0.0 -current_version 1.0.0
+    endif
 endif
 
 ifeq ($(HOST_ARCH),p)
@@ -519,14 +524,6 @@ endif
 SOLINK_FLAGS+=$(SOLINK_FLAGS_EXTRA)
 
 ifneq ($(J9VM_OPT_JITSERVER),)
-    #
-    # Setup protobuf
-    #
-    PROTO_CMD?=protoc
-
-    SOLINK_SLINK_STATIC=-l:libprotobuf.a
-    CXX_DEFINES+=GOOGLE_PROTOBUF_NO_RTTI
-
     ifneq ($(OPENSSL_CFLAGS),)
         C_FLAGS+=$(OPENSSL_CFLAGS)
         CXX_FLAGS+=$(OPENSSL_CFLAGS)

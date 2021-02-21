@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2015, 2019 IBM Corp. and others
+ * Copyright (c) 2015, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -826,7 +826,7 @@ generateJ9RtvExceptionDetails(J9BytecodeVerificationData* verifyData, U_8* initM
 	if ('[' == methodInfo.signature.bytes[methodInfo.signature.length - 2]) {
 		returnType = ';';
 	} else {
-		returnType = methodInfo.signature.bytes[methodInfo.signature.length - 1];;
+		returnType = methodInfo.signature.bytes[methodInfo.signature.length - 1];
 	}
 
 	bcName = sunJavaBCNames[convertToOracleOpcodeString(methodInfo.code[errorPC], returnType)];
@@ -939,6 +939,12 @@ generateJ9RtvExceptionDetails(J9BytecodeVerificationData* verifyData, U_8* initM
 		break;
 	case BCV_ERR_UNEXPECTED_EOF:
 		printMessage(&msgBuf, "Unexpected EOF is detected in the class file.");
+		break;
+	case BCV_ERR_BYTECODE_ERROR:
+		printMessage(&msgBuf, "Error exists in the bytecode.");
+		break;
+	case BCV_ERR_NEW_OJBECT_MISMATCH:
+		printMessage(&msgBuf, "The arity (0x%x) of the new object is greater than zero", verifyData->errorTempData);
 		break;
 	default:
 		Assert_VRB_ShouldNeverHappen();

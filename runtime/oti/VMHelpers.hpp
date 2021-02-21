@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -22,6 +22,16 @@
 
 #if !defined(VMHELPERS_HPP_)
 #define VMHELPERS_HPP_
+
+#include "j9cfg.h"
+
+#if defined(OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES)
+#if OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES
+#define VM_VMHelpers VM_VMHelpersCompressed
+#else /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+#define VM_VMHelpers VM_VMHelpersFull
+#endif /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+#endif /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
 
 #include "j9.h"
 #include "j9protos.h"
@@ -160,11 +170,19 @@ typedef enum {
 	J9_BCLOOP_SEND_TARGET_INL_CLASSLOADER_LOADLIBRARYWITHPATH,
 	J9_BCLOOP_SEND_TARGET_INL_THREAD_ISINTERRUPTEDIMPL,
 	J9_BCLOOP_SEND_TARGET_INL_CLASSLOADER_INITIALIZEANONCLASSLOADER,
+	J9_BCLOOP_SEND_TARGET_INL_REFLECTION_GETCLASSACCESSFLAGS,
 	J9_BCLOOP_SEND_TARGET_VARHANDLE,
 	J9_BCLOOP_SEND_TARGET_INL_THREAD_ON_SPIN_WAIT,
 	J9_BCLOOP_SEND_TARGET_OUT_OF_LINE_INL,
 	J9_BCLOOP_SEND_TARGET_CLASS_ARRAY_TYPE_IMPL,
-	J9_BCLOOP_SEND_TARGET_CLASS_IS_RECORD,
+	J9_BCLOOP_SEND_TARGET_CLASS_IS_RECORD_IMPL,
+	J9_BCLOOP_SEND_TARGET_CLASS_IS_SEALED,
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+	J9_BCLOOP_SEND_TARGET_METHODHANDLE_INVOKEBASIC,
+	J9_BCLOOP_SEND_TARGET_METHODHANDLE_LINKTOSTATICSPECIAL,
+	J9_BCLOOP_SEND_TARGET_METHODHANDLE_LINKTOVIRTUAL,
+	J9_BCLOOP_SEND_TARGET_METHODHANDLE_LINKTOINTERFACE,
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 } VM_SendTarget;
 
 typedef enum {
@@ -320,7 +338,7 @@ public:
 
 	/**
 	 * @brief Return whether an exception is pending or not
-	 * 
+	 *
 	 * @param currentThread the J9VMThread to check
 	 * @return true if an exception is pending, otherwise false.
 	 */
@@ -618,12 +636,17 @@ done:
 	 *
 	 * @param currentThread[in] the current J9VMThread
 	 * @param exception[in] the Throwable instance
+	 * @param reportException[in] (default true) if true, set the exception report bit, else clear it
 	 */
 	static VMINLINE void
-	setExceptionPending(J9VMThread *currentThread, j9object_t exception)
+	setExceptionPending(J9VMThread *currentThread, j9object_t exception, bool reportException = true)
 	{
 		currentThread->currentException = exception;
-		currentThread->privateFlags |= J9_PRIVATE_FLAGS_REPORT_EXCEPTION_THROW;
+		if (reportException) {
+			currentThread->privateFlags |= J9_PRIVATE_FLAGS_REPORT_EXCEPTION_THROW;
+		} else {
+			currentThread->privateFlags &= ~(UDATA)J9_PRIVATE_FLAGS_REPORT_EXCEPTION_THROW;
+		}
 	}
 
 	/**
@@ -753,20 +776,45 @@ done:
 	{
 		j9object_t instance = NULL;
 
-#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-		if (J9_IS_J9CLASS_FLATTENED(arrayClass)) {
-			instance = objectAllocate->inlineAllocateIndexableValueTypeObject(currentThread, arrayClass, size, initializeSlots, memoryBarrier, sizeCheck);
-		} else
-#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
-		{
-			instance = objectAllocate->inlineAllocateIndexableObject(currentThread, arrayClass, size, initializeSlots, memoryBarrier, sizeCheck);
-		}
+		instance = inlineAllocateIndexableObject(currentThread, objectAllocate, arrayClass, size, initializeSlots, memoryBarrier, sizeCheck);
 
 		if (NULL == instance) {
 			instance = currentThread->javaVM->memoryManagerFunctions->J9AllocateIndexableObject(currentThread, arrayClass, size, J9_GC_ALLOCATE_OBJECT_NON_INSTRUMENTABLE);
 			if (J9_UNEXPECTED(NULL == instance)) {
 				setHeapOutOfMemoryError(currentThread);
 			}
+		}
+		return instance;
+	}
+
+	/**
+	 *
+	 * Perform a non-instrumentable allocation of an indexable flattened or unflattened class.
+	 *
+	 * Unflattened array classes that contain the J9ClassContainsUnflattenedFlattenables flag will return NULL
+	 *
+	 * @param currentThread[in] the current J9VMThread
+	 * @param objectAllocate[in] instance of MM_ObjectAllocationAPI created on the current thread
+	 * @param arrayClass[in] the indexable J9Class to instantiate
+	 * @param size[in] the desired size of the array
+	 * @param initializeSlots[in] whether or not to initialize the slots (default true)
+	 * @param memoryBarrier[in] whether or not to issue a write barrier (default true)
+	 * @param sizeCheck[in] whether or not to perform the maximum size check (default true)
+	 *
+	 * @returns the new object, or NULL if allocation failed
+	 */
+	static VMINLINE j9object_t
+	inlineAllocateIndexableObject(J9VMThread *currentThread, MM_ObjectAllocationAPI *objectAllocate, J9Class *arrayClass, U_32 size, bool initializeSlots = true, bool memoryBarrier = true, bool sizeCheck = true)
+	{
+		j9object_t instance = NULL;
+
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+		if (J9_IS_J9CLASS_FLATTENED(arrayClass)) {
+			instance = objectAllocate->inlineAllocateIndexableValueTypeObject(currentThread, arrayClass, size, initializeSlots, memoryBarrier, sizeCheck);
+		} else if (J9_ARE_NO_BITS_SET(arrayClass->classFlags, J9ClassContainsUnflattenedFlattenables))
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
+		{
+			instance = objectAllocate->inlineAllocateIndexableObject(currentThread, arrayClass, size, initializeSlots, memoryBarrier, sizeCheck);
 		}
 		return instance;
 	}
@@ -1024,170 +1072,6 @@ done:
 	}
 
 	/**
-	 * Computes the hash value for an input string using the hash algorithm defined by the java/lang/String.hashCode()I
-	 * method.
-	 *
-	 * @param data points to raw UTF8 bytes, all of which are within the ASCII subset ord. [0, 127]
-	 * @param length the number of bytes to hash
-	 *
-	 * @return hash code for the UTF8 string
-	 */
-	static VMINLINE UDATA
-	computeHashForASCII(const U_8 *data, UDATA length)
-	{
-		UDATA hash = 0;
-		for (UDATA i = 0; i < length; ++i) {
-			hash = (hash << 5) - hash + data[i];
-		}
-		return hash;
-	}
-	
-	/**
-	 * Determines whether the UTF8 string is an ASCII string.
-	 *
-	 * @param data[in] points to raw UTF8 bytes
-	 * @param length[in] the number of bytes representing characters in data
-	 *
-	 * @return true if all of the characters in the UTF8 input string are ASCII; false otherwise
-	 */
-	static VMINLINE bool
-	isUTF8ASCII(const U_8 *data, UDATA length)
-	{
-		bool isASCII = true;
-
-		for (UDATA i = 0; i < length; ++i) {
-			if (data[i] > 0x7F) {
-				isASCII = false;
-				break;
-			}
-		}
-
-		return isASCII;
-	}
-
-	/**
-	 * Copies a UTF8 string into a backing array containing UTF16 characters at a specific index.
-	 *
-	 * @param vmThread[in] the current J9VMThread
-	 * @param data[in] points to raw UTF8 bytes, some of which may be multi-byte UTF8 encoded Unicode characters
-	 * @param length[in] the number of bytes representing characters in data
-	 * @param stringFlags[in] string flags corresponding to data
-	 * @param backingArray[in] the backing character array to copy the UTF8 string into
-	 * @param startIndex the start index of backingArray at which to begin the copy
-    *
-    * @implNote copyUTF8ToBackingArrayAsUTF16 and copyUTF8ToBackingArrayAsASCII must be kept in sync.
-	 */
-	static VMINLINE void
-	copyUTF8ToBackingArrayAsUTF16(J9VMThread * vmThread, U_8 * data, UDATA length, UDATA stringFlags, j9object_t backingArray, UDATA startIndex)
-	{
-		UDATA originalLength = length;
-
-		if (J9_ARE_ALL_BITS_SET(stringFlags, J9_STR_ASCII)) {
-			if (J9_ARE_ANY_BITS_SET(stringFlags, J9_STR_XLAT)) {
-				for (UDATA i = startIndex; i < length; ++i) {
-					U_8 c = data[i];
-					J9JAVAARRAYOFCHAR_STORE(vmThread, backingArray, i, c != '/' ? c : '.');
-				}
-			} else {
-				for (UDATA i = startIndex; i < length; ++i) {
-					J9JAVAARRAYOFCHAR_STORE(vmThread, backingArray, i, data[i]);
-				}
-			}
-		} else {
-			UDATA writeIndex = startIndex;
-			while (length > 0) {
-				U_16 unicode = 0;
-				UDATA consumed = decodeUTF8Char(data, &unicode);
-				if (J9_ARE_ANY_BITS_SET(stringFlags, J9_STR_XLAT)) {
-					if ((U_16)'/' == unicode) {
-						unicode = (U_16)'.';
-					}
-				}
-				J9JAVAARRAYOFCHAR_STORE(vmThread, backingArray, writeIndex, unicode);
-				writeIndex += 1;
-				data += consumed;
-				length -= consumed;
-			}
-		}
-
-		/* Anonymous classes have the following name format [className]/[ROMADDRESS], so we have to to fix up the name
-		 * because the previous loops have converted '/' to '.' already.
-		 */
-		if (J9_ARE_ALL_BITS_SET(stringFlags, J9_STR_ANON_CLASS_NAME)) {
-			for (IDATA i = (IDATA) originalLength - 1; i >= 0; --i) {
-				if ((U_16)'.' == J9JAVAARRAYOFCHAR_LOAD(vmThread, backingArray, i)) {
-					J9JAVAARRAYOFCHAR_STORE(vmThread, backingArray, i, (U_16)'/');
-					break;
-				}
-			}
-		}
-	}
-
-	/**
-	 * Copies a UTF8 string into into a backing array containing ASCII characters at a specific index.
-	 *
-	 * @param vmThread[in] the current J9VMThread
-	 * @param data[in] points to raw UTF8 bytes, all of which are within the ASCII subset ord. [0, 127]
-	 * @param length[in] the number of bytes representing characters in data
-	 * @param stringFlags[in] string flags corresponding to data
-	 * @param backingArray[in] the backing character array to copy the UTF8 string into
-	 * @param startIndex the start index of charArray at which to begin the copy
-    *
-    * @implNote copyUTF8ToBackingArrayAsUTF16 and copyUTF8ToBackingArrayAsASCII must be kept in sync.
-	 */
-	static VMINLINE void
-	copyUTF8ToBackingArrayAsASCII(J9VMThread *vmThread, U_8 *data, UDATA length, UDATA stringFlags, j9object_t backingArray, UDATA startIndex)
-	{
-		if (J9_ARE_ANY_BITS_SET(stringFlags, J9_STR_XLAT)) {
-			for (UDATA i = startIndex; i < length; ++i) {
-				U_8 c = data[i];
-				J9JAVAARRAYOFBYTE_STORE(vmThread, backingArray, i, c != '/' ? c : '.');
-			}
-		} else {
-			for (UDATA i = startIndex; i < length; ++i) {
-				J9JAVAARRAYOFBYTE_STORE(vmThread, backingArray, i, data[i]);
-			}
-		}
-
-		/* Anonymous classes have the following name format [className]/[ROMADDRESS], so we have to to fix up the name
-		 * because the previous loops have converted '/' to '.' already.
-		 */
-		if (J9_ARE_ALL_BITS_SET(stringFlags, J9_STR_ANON_CLASS_NAME)) {
-			for (IDATA i = (IDATA)length - 1; i >= 0; --i) {
-				if ((U_8)'.' == J9JAVAARRAYOFBYTE_LOAD(vmThread, backingArray, i)) {
-					J9JAVAARRAYOFBYTE_STORE(vmThread, backingArray, i, (U_8)'/');
-					break;
-				}
-			}
-		}
-	}
-
-	/**
-	 * Determine the unicode length of a UTF8 string
-	 *
-	 * @param data[in] points to raw UTF8 bytes
-	 * @param length[in] the number of bytes representing characters in data
-	 *
-	 * @return the length of the UTF8 string in unicode characters
-	 */
-	static UDATA
-	getUTF8UnicodeLength(U_8 *data, UDATA length)
-	{
-		UDATA unicodeLength = 0;
-
-		while (length != 0) {
-			U_16 unicode = 0;
-			UDATA consumed = decodeUTF8CharN(data, &unicode, length);
-
-			data += consumed;
-			length -= consumed;
-			++unicodeLength;
-		}
-
-		return unicodeLength;
-	}
-
-	/**
 	 * Determine the JIT to JIT start address by skipping over the interpreter
 	 * pre-prologue at the interpreter to JIT start address.
 	 *
@@ -1248,6 +1132,42 @@ done:
 	}
 
 	/**
+	 * Determine if a resolved RAM instance field ref is fully resolved
+	 * for put (put resolved and not a final field).
+	 *
+	 * @param flags[in] field from the ref
+	 * @param method[in] currently running J9Method
+	 * @param ramConstantPool[in] constantPool of method
+	 *
+	 * @returns true if fully put resolved, false if not
+	 */
+	static VMINLINE bool
+	resolvedInstanceFieldRefIsPutResolved(UDATA flags, J9Method *method, J9ConstantPool *ramConstantPool)
+	{
+		bool resolved = true;
+		UDATA const resolvedBit = J9FieldFlagPutResolved;
+		UDATA const finalBit = J9AccFinal;
+		UDATA const testBits = resolvedBit | finalBit;
+		UDATA const bits = flags & testBits;
+		/* Put resolved for a non-final field means fully resolved */
+		if (J9_UNEXPECTED(resolvedBit != bits)) {
+			/* If not put resolved for a final field, resolve is necessary */
+			if (J9_UNEXPECTED(testBits != bits)) {
+				resolved = false;
+			} else {
+				/* Final field - ensure the running method is allowed to store */
+				if (J9_UNEXPECTED(!J9ROMMETHOD_ALLOW_FINAL_FIELD_WRITES(J9_ROM_METHOD_FROM_RAM_METHOD(method), 0))) {
+					if (J9_UNEXPECTED(ramClassChecksFinalStores(ramConstantPool->ramClass))) {
+						/* Store not allowed - run the resolve code to throw the exception */
+						resolved = false;
+					}
+				}
+			}
+		}
+		return resolved;
+	}
+
+	/**
 	 * Determine if a RAM static field ref is resolved.
 	 *
 	 * @param flagsAndClass[in] field from the ref
@@ -1268,6 +1188,42 @@ done:
 		 * the StaticFieldRefDouble bit check to succeed when it shouldn't.
 		 */
 		return ((UDATA)-1 != valueOffset) && (flagsAndClass > 0);
+	}
+
+	/**
+	 * Determine if a resolved RAM static field ref is fully resolved
+	 * for put (put resolved and not a final field).
+	 *
+	 * @param flagsAndClass[in] field from the ref
+	 * @param method[in] currently running J9Method
+	 * @param ramConstantPool[in] constantPool of method
+	 *
+	 * @returns true if fully put resolved, false if not
+	 */
+	static VMINLINE bool
+	resolvedStaticFieldRefIsPutResolved(UDATA flagsAndClass, J9Method *method, J9ConstantPool *ramConstantPool)
+	{
+		bool resolved = true;
+		UDATA const resolvedBit = (UDATA)J9StaticFieldRefPutResolved << (8 * sizeof(UDATA) - J9_REQUIRED_CLASS_SHIFT);
+		UDATA const finalBit = (UDATA)J9StaticFieldRefFinal << (8 * sizeof(UDATA) - J9_REQUIRED_CLASS_SHIFT);
+		UDATA const testBits = resolvedBit | finalBit;
+		UDATA const bits = flagsAndClass & testBits;
+		/* Put resolved for a non-final field means fully resolved */
+		if (J9_UNEXPECTED(resolvedBit != bits)) {
+			/* If not put resolved for a final field, resolve is necessary */
+			if (J9_UNEXPECTED(testBits != bits)) {
+				resolved = false;
+			} else {
+				/* Final field - ensure the running method is allowed to store */
+				if (J9_UNEXPECTED(!J9ROMMETHOD_ALLOW_FINAL_FIELD_WRITES(J9_ROM_METHOD_FROM_RAM_METHOD(method), J9AccStatic))) {
+					if (J9_UNEXPECTED(ramClassChecksFinalStores(ramConstantPool->ramClass))) {
+						/* Store not allowed - run the resolve code to throw the exception */
+						resolved = false;
+					}
+				}
+			}
+		}
+		return resolved;
 	}
 
 	/**
@@ -1361,16 +1317,20 @@ done:
 	static VMINLINE bool
 	threadIsInterruptedImpl(J9VMThread *currentThread, j9object_t threadObject)
 	{
+		J9VMThread *targetThread = J9VMJAVALANGTHREAD_THREADREF(currentThread, threadObject);
 		bool result = false;
 		/* If the thread is alive, ask the OS thread.  Otherwise, answer false. */
-		if (J9VMJAVALANGTHREAD_STARTED(currentThread, threadObject)) {
-			J9VMThread *targetThread = J9VMJAVALANGTHREAD_THREADREF(currentThread, threadObject);
-			if (NULL != targetThread) {
-				if (omrthread_interrupted(targetThread->osThread)) {
-					result = true;
-				}
+		if (J9VMJAVALANGTHREAD_STARTED(currentThread, threadObject) && (NULL != targetThread)) {
+			if (omrthread_interrupted(targetThread->osThread)) {
+				result = true;
 			}
 		}
+#if JAVA_SPEC_VERSION >= 14
+		else {
+			result = J9VMJAVALANGTHREAD_DEADINTERRUPT(currentThread, threadObject);
+		}
+#endif /* JAVA_SPEC_VERSION >= 14 */
+
 		return result;
 	}
 
@@ -1396,7 +1356,7 @@ done:
 
 		return (jobject)ref;
 	}
-	
+
 	static VMINLINE U_32
 	lookupVarHandleMethodTypeCacheIndex(J9ROMClass *romClass, UDATA cpIndex)
 	{
@@ -1433,12 +1393,12 @@ done:
 	doMethodTypesMatchIgnoringLastArgument(J9VMThread *currentThread, j9object_t shorterMT, j9object_t longerMT)
 	{
 		bool matched = false;
-		j9object_t shorterMTReturnType = J9VMJAVALANGINVOKEMETHODTYPE_RETURNTYPE(currentThread, shorterMT);
-		j9object_t longerMTReturnType = J9VMJAVALANGINVOKEMETHODTYPE_RETURNTYPE(currentThread, longerMT);
+		j9object_t shorterMTReturnType = J9VMJAVALANGINVOKEMETHODTYPE_RTYPE(currentThread, shorterMT);
+		j9object_t longerMTReturnType = J9VMJAVALANGINVOKEMETHODTYPE_RTYPE(currentThread, longerMT);
 
 		if (shorterMTReturnType == longerMTReturnType) {
-			j9object_t shorterMTArguments = J9VMJAVALANGINVOKEMETHODTYPE_ARGUMENTS(currentThread, shorterMT);
-			j9object_t longerMTArguments = J9VMJAVALANGINVOKEMETHODTYPE_ARGUMENTS(currentThread, longerMT);
+			j9object_t shorterMTArguments = J9VMJAVALANGINVOKEMETHODTYPE_PTYPES(currentThread, shorterMT);
+			j9object_t longerMTArguments = J9VMJAVALANGINVOKEMETHODTYPE_PTYPES(currentThread, longerMT);
 			I_32 longerMTArgumentsLength = (I_32)J9INDEXABLEOBJECT_SIZE(currentThread, longerMTArguments);
 
 			if ((longerMTArgumentsLength - 1) == (I_32)J9INDEXABLEOBJECT_SIZE(currentThread, shorterMTArguments)) {
@@ -1471,7 +1431,7 @@ exit:
 				|| (method == vm->jliMethodHandleInvokeWithArgs)
 				|| (method == vm->jliMethodHandleInvokeWithArgsList)
 				|| (vm->srMethodAccessor
-						&& VM_VMHelpers::isSameOrSuperclass(
+						&& isSameOrSuperclass(
 								J9VM_J9CLASS_FROM_JCLASS(currentThread,
 										vm->srMethodAccessor), currentClass)));
 	}
@@ -1488,7 +1448,9 @@ exit:
 	{
 		bool isHidden = false;
 		J9Class* currentClass = J9_CLASS_FROM_METHOD(method);
-		if (J9_ARE_ANY_BITS_SET(currentClass->classFlags, J9ClassIsAnonymous)) {
+		if (J9_ARE_ANY_BITS_SET(currentClass->classFlags, J9ClassIsAnonymous)
+			|| J9ROMCLASS_IS_HIDDEN(currentClass->romClass)
+		) {
 			/* lambda helper method */
 			isHidden = true;
 		} else {
@@ -1656,6 +1618,163 @@ exit:
 			}
 		}
 		return method;
+	}
+
+	static VMINLINE bool
+	objectArrayStoreAllowed(J9VMThread const *currentThread, j9object_t array, j9object_t storeValue)
+	{
+		bool rc = true;
+		if (NULL != storeValue) {
+			J9Class *valueClass = J9OBJECT_CLAZZ(currentThread, storeValue);
+			J9Class *componentType = ((J9ArrayClass*)J9OBJECT_CLAZZ(currentThread, array))->componentType;
+			/* quick check -- is this a store of a C into a C[]? */
+			if (valueClass != componentType) {
+				/* quick check -- is this a store of a C into a java.lang.Object[]? */
+				if (0 != J9CLASS_DEPTH(componentType)) {
+					rc = inlineCheckCast(valueClass, componentType);
+				}
+			}
+		}
+		return rc;
+	}
+
+	/**
+	 * Determine if the method name corresponds to a VarHandle method with polymorphic
+	 * signature.
+	 *
+	 * @param methodNameData the bytes of the method name
+	 * @param methodNameLength the length of the method name
+	 *
+	 * @return true for a VarHandle method with polymorphic signature. Otherwise,
+	 * return false.
+	 */
+	static VMINLINE bool
+	isPolymorphicVarHandleMethod(const U_8 *methodNameData, U_32 methodNameLength)
+	{
+		bool result = false;
+
+		switch (methodNameLength) {
+		case 3:
+			if ((0 == memcmp(methodNameData, "get", methodNameLength))
+			|| (0 == memcmp(methodNameData, "set", methodNameLength))
+			) {
+				result = true;
+			}
+			break;
+		case 9:
+			if ((0 == memcmp(methodNameData, "getOpaque", methodNameLength))
+			|| (0 == memcmp(methodNameData, "setOpaque", methodNameLength))
+			|| (0 == memcmp(methodNameData, "getAndSet", methodNameLength))
+			|| (0 == memcmp(methodNameData, "getAndAdd", methodNameLength))
+			) {
+				result = true;
+			}
+			break;
+		case 10:
+			if ((0 == memcmp(methodNameData, "getAcquire", methodNameLength))
+			|| (0 == memcmp(methodNameData, "setRelease", methodNameLength))
+			) {
+				result = true;
+			}
+			break;
+		case 11:
+			if ((0 == memcmp(methodNameData, "getVolatile", methodNameLength))
+			|| (0 == memcmp(methodNameData, "setVolatile", methodNameLength))
+			) {
+				result = true;
+			}
+			break;
+		case 13:
+			if (0 == memcmp(methodNameData, "compareAndSet", methodNameLength)) {
+				result = true;
+			}
+			break;
+		case 15:
+			if (0 == memcmp(methodNameData, "getAndBitwiseOr", methodNameLength)) {
+				result = true;
+			}
+			break;
+		case 16:
+			if ((0 == memcmp(methodNameData, "getAndSetAcquire", methodNameLength))
+			|| (0 == memcmp(methodNameData, "getAndSetRelease", methodNameLength))
+			|| (0 == memcmp(methodNameData, "getAndAddAcquire", methodNameLength))
+			|| (0 == memcmp(methodNameData, "getAndAddRelease", methodNameLength))
+			|| (0 == memcmp(methodNameData, "getAndBitwiseAnd", methodNameLength))
+			|| (0 == memcmp(methodNameData, "getAndBitwiseXor", methodNameLength))
+			) {
+				result = true;
+			}
+			break;
+		case 17:
+			if (0 == memcmp(methodNameData, "weakCompareAndSet", methodNameLength)) {
+				result = true;
+			}
+			break;
+		case 18:
+			if (0 == memcmp(methodNameData, "compareAndExchange", methodNameLength)) {
+				result = true;
+			}
+			break;
+		case 22:
+			if ((0 == memcmp(methodNameData, "getAndBitwiseOrAcquire", methodNameLength))
+			|| (0 == memcmp(methodNameData, "getAndBitwiseOrRelease", methodNameLength))
+			|| (0 == memcmp(methodNameData, "weakCompareAndSetPlain", methodNameLength))
+			) {
+				result = true;
+			}
+			break;
+		case 23:
+			if ((0 == memcmp(methodNameData, "getAndBitwiseAndAcquire", methodNameLength))
+			|| (0 == memcmp(methodNameData, "getAndBitwiseAndRelease", methodNameLength))
+			|| (0 == memcmp(methodNameData, "getAndBitwiseXorAcquire", methodNameLength))
+			|| (0 == memcmp(methodNameData, "getAndBitwiseXorRelease", methodNameLength))
+			) {
+				result = true;
+			}
+			break;
+		case 24:
+			if ((0 == memcmp(methodNameData, "weakCompareAndSetAcquire", methodNameLength))
+			|| (0 == memcmp(methodNameData, "weakCompareAndSetRelease", methodNameLength))
+			) {
+				result = true;
+			}
+			break;
+		case 25:
+			if ((0 == memcmp(methodNameData, "compareAndExchangeAcquire", methodNameLength))
+			|| (0 == memcmp(methodNameData, "compareAndExchangeRelease", methodNameLength))
+			) {
+				result = true;
+			}
+			break;
+		default:
+			break;
+		}
+
+		return result;
+	}
+
+	/**
+	 * Determine if the method is from a LambdaForm generated class.
+	 *
+	 * A LamddaForm generated method/class will have LambdaFrom.class as its hostclass
+	 * and is either a hidden class or anonymous class.
+	 *
+	 * @param currentThread the VM thread
+	 * @param method the method to be checked
+	 * @return true if the method is generated by LambdaForm class. Otherwise, return false.
+	 */
+	static VMINLINE bool
+	isLambdaFormGeneratedMethod(J9VMThread const *currentThread, J9Method *method)
+	{
+		bool result = false;
+		J9Class *methodClass = J9_CLASS_FROM_METHOD(method);
+		if (J9_ARE_ANY_BITS_SET(methodClass->classFlags, J9ClassIsAnonymous) || J9ROMCLASS_IS_HIDDEN(methodClass->romClass)) {
+			J9Class *lambdaFormClass = J9VMJAVALANGINVOKELAMBDAFORM_OR_NULL(currentThread->javaVM);
+			if (methodClass->hostClass == lambdaFormClass) {
+				result = true;
+			}
+		}
+		return result;
 	}
 };
 

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -21,12 +21,59 @@
 ################################################################################
 
 omr_add_tracegen(j9vm.tdf)
-add_library(j9vm SHARED
+
+if(OMR_TOOLCONFIG STREQUAL "msvc")
+	# bypass omr provided warning flag handling, because we don't want
+	# the warning flags to get passed to clang.
+	# Note: the updated variables are scoped to this directory
+	set(OMR_ENHANCED_WARNINGS OFF)
+	set(OMR_WARNINGS_AS_ERRORS OFF)
+	set(OMR_BASE_WARNING_FLAGS)
+	omr_append_flags(CMAKE_C_FLAGS ${OMR_ENHANCED_WARNING_FLAG} ${OMR_WARNING_AS_ERROR_FLAG})
+	omr_append_flags(CMAKE_CXX_FLAGS ${OMR_ENHANCED_WARNING_FLAG} ${OMR_WARNING_AS_ERROR_FLAG})
+endif()
+
+set(interp_flags_to_remove) # list of flags removed when compiling the interpreter
+set(interp_new_flags) # flags to be added when compiling the interpreter
+
+# Note: the uma makefiles also specify this for pLinux, however it appears we no longer
+# support building the interpreter with xlc on linux
+if(OMR_ARCH_POWER AND OMR_OS_AIX)
+	if(OMR_TOOLCONFIG STREQUAL "xlc")
+		list(APPEND interp_flags_to_remove "-O3" "-g")
+		list(APPEND interp_new_flags "-O2" "-qdebug=lincomm:ptranl:tfbagg")
+		# Note: the following code is specified in the UMA builds, however,
+		# it isn't currently reachable, so it is block commneted out ( #[[ ]] )
+		#[[
+		if(OMR_OS_LINUX)
+			# TODO -qpic=large -> -qpic
+			# however at the moment all plinux builds with xlc use -qpic anyway
+			list(APPEND interp_new_flags "-qmaxmem=-1")
+		endif()
+		]]
+	endif()
+endif()
+
+if(interp_flags_to_remove)
+	# Keep track of which flags we have actually removed from CMAKE_CXX_FLAGS,
+	# so that later we don't try re-adding flags that never existed
+	set(removed_flags)
+	foreach(flag IN LISTS interp_flags_to_remove)
+		set(old_cxx_flags ${CMAKE_CXX_FLAGS})
+		omr_remove_flags(CMAKE_CXX_FLAGS "${flag}")
+		if(NOT old_cxx_flags STREQUAL CMAKE_CXX_FLAGS)
+			list(APPEND removed_flags "${flag}")
+		endif()
+	endforeach()
+
+	set(interp_flags_to_remove ${removed_flags})
+endif()
+
+set(main_sources
 	annsup.c
 	AsyncMessageHandler.cpp
 	bchelper.c
 	bindnatv.cpp
-	BytecodeInterpreter.cpp
 	callin.cpp
 	classallocation.c
 	ClassInitialization.cpp
@@ -34,12 +81,12 @@ add_library(j9vm SHARED
 	classseg.c
 	classsupport.c
 	createramclass.cpp
-	DebugBytecodeInterpreter.cpp
 	description.c
 	dllsup.c
 	drophelp.c
 	exceptiondescribe.c
 	exceptionsupport.c
+	extendedMessageNPE.cpp
 	FastJNI_com_ibm_oti_vm_VM.cpp
 	FastJNI.cpp
 	FastJNI_java_lang_Class.cpp
@@ -82,7 +129,6 @@ add_library(j9vm SHARED
 	logsupport.c
 	lookuphelper.c
 	lookupmethod.c
-	MHInterpreter.cpp
 	ModularityHashTables.c
 	monhelpers.c
 	montable.c
@@ -108,7 +154,7 @@ add_library(j9vm SHARED
 	threadhelp.cpp
 	threadpark.c
 	throwexception.c
-	valueTypeHelpers.cpp
+	ValueTypeHelpers.cpp
 	visible.c
 	VMAccess.cpp
 	vmbootlib.c
@@ -124,7 +170,62 @@ add_library(j9vm SHARED
 
 	${CMAKE_CURRENT_BINARY_DIR}/ut_j9vm.c
 )
+set(interpreter_sources
+	BytecodeInterpreterCompressed.cpp
+	BytecodeInterpreterFull.cpp
+	DebugBytecodeInterpreterCompressed.cpp
+	DebugBytecodeInterpreterFull.cpp
+	MHInterpreterCompressed.cpp
+	MHInterpreterFull.cpp
+)
 
+j9vm_add_library(j9vm SHARED
+	OUTPUT_NAME j9vm${J9VM_VERSION_SUFFIX}
+	${main_sources}
+	${interpreter_sources}
+)
+
+if(interp_flags_to_remove)
+	# Since we removed the flags from CMAKE_CXX_FLAGS, we need to add them back
+	# to everything except the compiler
+	set(cpp_sources)
+	foreach(srcfile IN LISTS main_sources)
+		get_filename_component(extension "${srcfile}" EXT)
+		if(extension STREQUAL ".cpp")
+			list(APPEND cpp_sources "${srcfile}")
+		endif()
+	endforeach()
+
+	# COMPILE_FLAGS property expects a string, not a list
+	omr_stringify(flags_str ${interp_flags_to_remove})
+	set_property(SOURCE ${cpp_sources} APPEND_STRING PROPERTY COMPILE_FLAGS " ${flags_str}")
+endif()
+
+if(interp_new_flags)
+	# COMPILE_FLAGS property expects a string, not a list
+	omr_stringify(flags_str ${interp_new_flags})
+	set_property(SOURCE ${interpreter_sources} APPEND_STRING PROPERTY COMPILE_FLAGS " ${flags_str}")
+endif()
+
+
+if(OMR_OS_WINDOWS AND (OMR_TOOLCONFIG STREQUAL "msvc"))
+	# JIT helper methods require us to disable buffer security checks on Windows
+	# See https://github.com/eclipse/openj9/pull/1494 for rationale
+	set_property(
+		SOURCE
+			cnathelp.cpp
+			SharedService.c
+		APPEND PROPERTY COMPILE_FLAGS "/GS-"
+	)
+
+	# Use J9VM_CXX compiler (aka clang) to build the interpreter
+	enable_language(J9VM_CXX)
+	set_source_files_properties(
+		${interpreter_sources}
+		PROPERTIES
+		LANGUAGE J9VM_CXX
+	)
+endif()
 
 if(OMR_ARCH_X86)
 	j9vm_gen_asm(xcinterp.m4)
@@ -189,6 +290,22 @@ elseif(OMR_ARCH_S390)
 	else()
 		message(SEND_ERROR "Unsupported platform")
 	endif()
+elseif(OMR_ARCH_ARM)
+	j9vm_gen_asm(armcinterp.m4)
+	target_sources(j9vm PRIVATE armcinterp.s)
+	if(OMR_OS_LINUX)
+		target_sources(j9vm PRIVATE xr32/unsafeHelper.s)
+	else()
+		message(SEND_ERROR "Unsupported OS")
+	endif()
+elseif(OMR_ARCH_AARCH64)
+	j9vm_gen_asm(arm64cinterp.m4)
+	target_sources(j9vm PRIVATE arm64cinterp.s)
+	if(OMR_OS_LINUX)
+		target_sources(j9vm PRIVATE xr64/unsafeHelper.s)
+	else()
+		message(SEND_ERROR "Unsupported OS")
+	endif()
 else()
 	message(SEND_ERROR "Unsupported platform")
 endif()
@@ -213,7 +330,6 @@ target_link_libraries(j9vm
 		j9hashtable
 		j9pool
 		j9stackmap
-		j9trc
 		j9hookable
 		j9prt
 		j9bcv

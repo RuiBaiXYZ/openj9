@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -75,9 +75,10 @@ static I_32 dumpMethodDebugInfo (J9PortLibrary *portLib, J9ROMClass *romClass, J
 static I_32 dumpNative ( J9PortLibrary *portLib, J9ROMMethod * romMethod, U_32 flags);
 static I_32 dumpGenericSignature (J9PortLibrary *portLib, J9ROMClass *romClass, U_32 flags);
 static I_32 dumpEnclosingMethod (J9PortLibrary *portLib, J9ROMClass *romClass, U_32 flags);
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+static I_32 dumpPermittedSubclasses(J9PortLibrary *portLib, J9ROMClass *romClass);
+#if JAVA_SPEC_VERSION >= 11
 static I_32 dumpNest (J9PortLibrary *portLib, J9ROMClass *romClass, U_32 flags);
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 static I_32 dumpSimpleName (J9PortLibrary *portLib, J9ROMClass *romClass, U_32 flags);
 static I_32 dumpUTF ( J9UTF8 *utfString, J9PortLibrary *portLib, U_32 flags);
 static I_32 dumpSourceDebugExtension (J9PortLibrary *portLib, J9ROMClass *romClass, U_32 flags);
@@ -128,7 +129,7 @@ IDATA j9bcutil_dumpRomClass( J9ROMClass *romClass, J9PortLibrary *portLib, J9Tra
 	/* dump the enclosing method */
 	dumpEnclosingMethod(portLib, romClass, flags);
 
-	j9tty_printf( PORTLIB,  "Oracle Access Flags (0x%X): ", romClass->modifiers);
+	j9tty_printf( PORTLIB,  "Basic Access Flags (0x%X): ", romClass->modifiers);
 	printModifiers(PORTLIB, romClass->modifiers, ONLY_SPEC_MODIFIERS, MODIFIERSOURCE_CLASS);
 	j9tty_printf( PORTLIB,  "\n");
 	j9tty_printf( PORTLIB,  "J9 Access Flags (0x%X): ", romClass->extraModifiers);
@@ -180,10 +181,14 @@ IDATA j9bcutil_dumpRomClass( J9ROMClass *romClass, J9PortLibrary *portLib, J9Tra
 		}
 	}
 
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+	if (J9ROMCLASS_IS_SEALED(romClass)) {
+		dumpPermittedSubclasses(portLib, romClass);
+	}
+
+#if JAVA_SPEC_VERSION >= 11
 	/* dump the nest members or nest host, if defined */
 	dumpNest(portLib, romClass, flags);
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 	j9tty_printf( PORTLIB, "Fields (%i):\n", romClass->romFieldCount);
 	currentField = romFieldsStartDo(romClass, &state);
@@ -823,7 +828,23 @@ dumpEnclosingMethod(J9PortLibrary *portLib, J9ROMClass *romClass, U_32 flags)
 	return BCT_ERR_NO_ERROR;
 }
 
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+static I_32
+dumpPermittedSubclasses(J9PortLibrary *portLib, J9ROMClass *romClass)
+{
+	PORT_ACCESS_FROM_PORT(portLib);
+
+	U_32 *permittedSubclassesCountPtr = getNumberOfPermittedSubclassesPtr(romClass);
+	U_16 i = 0;
+
+	j9tty_printf(PORTLIB, "Permitted subclasses (%i):\n", *permittedSubclassesCountPtr);
+	for (; i < *permittedSubclassesCountPtr; i++) {
+		J9UTF8 *permittedSubclassNameUtf8 = permittedSubclassesNameAtIndex(permittedSubclassesCountPtr, i);
+		j9tty_printf(PORTLIB, "  %.*s\n", J9UTF8_LENGTH(permittedSubclassNameUtf8), J9UTF8_DATA(permittedSubclassNameUtf8));
+	}
+	return BCT_ERR_NO_ERROR;
+}
+
+#if JAVA_SPEC_VERSION >= 11
 static I_32
 dumpNest(J9PortLibrary *portLib, J9ROMClass *romClass, U_32 flags)
 {
@@ -848,7 +869,7 @@ dumpNest(J9PortLibrary *portLib, J9ROMClass *romClass, U_32 flags)
 	}
 	return BCT_ERR_NO_ERROR;
 }
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 static I_32
 dumpSimpleName(J9PortLibrary *portLib, J9ROMClass *romClass, U_32 flags)
@@ -1323,6 +1344,18 @@ j9_printClassExtraModifiers(J9PortLibrary *portLib, U_32 modifiers)
 	{
 		j9tty_printf(PORTLIB, "(unmodifiable)");
 		modifiers &= ~J9AccClassIsUnmodifiable;
+		if(modifiers) j9tty_printf(PORTLIB, " ");
+	}
+
+	if(modifiers & J9AccRecord) {
+		j9tty_printf(PORTLIB, "(record)");
+		modifiers &= ~J9AccRecord;
+		if(modifiers) j9tty_printf(PORTLIB, " ");
+	}
+
+	if(modifiers & J9AccSealed) {
+		j9tty_printf(PORTLIB, "(sealed)");
+		modifiers &= ~J9AccSealed;
 		if(modifiers) j9tty_printf(PORTLIB, " ");
 	}
 }

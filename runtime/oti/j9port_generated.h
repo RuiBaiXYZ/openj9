@@ -385,7 +385,7 @@ typedef struct J9PortLibrary {
 	/** see @ref j9gs.c::j9gs_isEnabled "j9gs_isEnabled"*/
 	int32_t ( *gs_isEnabled)(struct J9PortLibrary *portLibrary, struct J9GSParameters *gsParams, void** baseAddress, uint64_t* perBitSectionSize, uint64_t* bitMask);
 #endif /* OMR_GC_CONCURRENT_SCAVENGER */
-	/** see @ref j9j9portcontrol.c::j9port_control "j9port_control"*/
+	/** see @ref j9portcontrol.c::j9port_control "j9port_control"*/
 	int32_t (*port_control)(struct J9PortLibrary *portLibrary, const char *key, uintptr_t value) ;
 } J9PortLibrary;
 
@@ -648,7 +648,7 @@ extern J9_CFUNC int32_t j9port_isCompatible(struct J9PortLibraryVersion *expecte
 #define j9sig_map_os_signal_to_portlib_signal(param1) OMRPORT_FROM_J9PORT(privatePortLibrary)->sig_map_os_signal_to_portlib_signal((OMRPortLibrary*)privatePortLibrary,param1)
 #define j9sig_map_portlib_signal_to_os_signal(param1) OMRPORT_FROM_J9PORT(privatePortLibrary)->sig_map_portlib_signal_to_os_signal((OMRPortLibrary*)privatePortLibrary,param1)
 #define j9sig_register_os_handler(param1,param2,param3) OMRPORT_FROM_J9PORT(privatePortLibrary)->sig_register_os_handler((OMRPortLibrary*)privatePortLibrary,param1,(void *)param2,param3)
-#define j9sig_is_master_signal_handler(param1) OMRPORT_FROM_J9PORT(privatePortLibrary)->sig_is_master_signal_handler((OMRPortLibrary*)privatePortLibrary,(void *)param1)
+#define j9sig_is_main_signal_handler(param1) OMRPORT_FROM_J9PORT(privatePortLibrary)->sig_is_main_signal_handler((OMRPortLibrary*)privatePortLibrary,(void *)param1)
 #define j9sig_is_signal_ignored(param1,param2) OMRPORT_FROM_J9PORT(privatePortLibrary)->sig_is_signal_ignored((OMRPortLibrary*)privatePortLibrary,param1,param2)
 #define j9sig_info(param1,param2,param3,param4,param5) OMRPORT_FROM_J9PORT(privatePortLibrary)->sig_info(OMRPORT_FROM_J9PORT(privatePortLibrary),param1,param2,param3,param4,param5)
 #define j9sig_info_count(param1,param2) OMRPORT_FROM_J9PORT(privatePortLibrary)->sig_info_count(OMRPORT_FROM_J9PORT(privatePortLibrary),param1,param2)

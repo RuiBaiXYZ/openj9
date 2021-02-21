@@ -46,7 +46,7 @@ TR::X86RecompilationSnippet::X86RecompilationSnippet(TR::LabelSymbol    *lab,
                                                          TR::CodeGenerator *cg)
    : TR::Snippet(cg, node, lab, true)
    {
-   setDestination(cg->symRefTab()->findOrCreateRuntimeHelper(cg->comp()->target().is64Bit()? TR_AMD64countingRecompileMethod : TR_IA32countingRecompileMethod, false, false, false));
+   setDestination(cg->symRefTab()->findOrCreateRuntimeHelper(cg->comp()->target().is64Bit()? TR_AMD64countingRecompileMethod : TR_IA32countingRecompileMethod));
    }
 
 uint32_t TR::X86RecompilationSnippet::getLength(int32_t estimatedSnippetStart)
@@ -91,7 +91,7 @@ uint8_t *TR::X86RecompilationSnippet::emitSnippetBody()
    uint8_t *buffer = cg()->getBinaryBufferCursor();
    getSnippetLabel()->setCodeLocation(buffer);
 
-   intptrj_t helperAddress = (intptrj_t)_destination->getMethodAddress();
+   intptr_t helperAddress = (intptr_t)_destination->getMethodAddress();
    *buffer++ = 0xe8; // CallImm4
    if (NEEDS_TRAMPOLINE(helperAddress, buffer+4, cg()))
       {

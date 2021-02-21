@@ -60,12 +60,6 @@ extern "C" {
 </#if>
 </#list>
 
-#undef J9VM_OPT_VALHALLA_VALUE_TYPES
-
-#if JAVA_SPEC_VERSION >= 11
-#define J9VM_OPT_VALHALLA_NESTMATES
-#endif
-
 #if defined(J9VM_ENV_DATA64)
 #define J9VM_OPT_MULTI_LAYER_SHARED_CLASS_CACHE
 #endif

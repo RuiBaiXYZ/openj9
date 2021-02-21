@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -61,31 +61,39 @@ void replaceFirstTwoBytesWithData(void *startPC, int32_t startPCToData);
 
 
 #if defined(TR_HOST_POWER)
-
 #define  OFFSET_REVERT_INTP_PRESERVED_FSD                (-4)
-#define  OFFSET_REVERT_INTP_FIXED_PORTION                (-12-2*sizeof(intptrj_t))
+#define  OFFSET_REVERT_INTP_FIXED_PORTION                (-12-2*sizeof(intptr_t))
 
-#define  OFFSET_SAMPLING_PREPROLOGUE_FROM_STARTPC        (-(16+sizeof(intptrj_t)))
-#define  OFFSET_SAMPLING_BRANCH_FROM_STARTPC             (-(12+sizeof(intptrj_t)))
-#define  OFFSET_SAMPLING_METHODINFO_FROM_STARTPC         (-(8+sizeof(intptrj_t)))
+#define  OFFSET_SAMPLING_PREPROLOGUE_FROM_STARTPC        (-(16+sizeof(intptr_t)))
+#define  OFFSET_SAMPLING_BRANCH_FROM_STARTPC             (-(12+sizeof(intptr_t)))
+#define  OFFSET_SAMPLING_METHODINFO_FROM_STARTPC         (-(8+sizeof(intptr_t)))
 #define  OFFSET_SAMPLING_PRESERVED_FROM_STARTPC          (-8)
+#endif
 
+#if defined(TR_HOST_ARM)
+#define  OFFSET_REVERT_INTP_FIXED_PORTION                (-12-2*sizeof(intptr_t))
+#define  OFFSET_SAMPLING_PREPROLOGUE_FROM_STARTPC        (-(16+sizeof(intptr_t)))
+#define  OFFSET_SAMPLING_BRANCH_FROM_STARTPC             (-(12+sizeof(intptr_t)))
+#define  OFFSET_METHODINFO_FROM_STARTPC                  (-(8+sizeof(intptr_t)))
+#define  OFFSET_SAMPLING_PRESERVED_FROM_STARTPC          (-8)
+#define  START_PC_TO_METHOD_INFO_ADDRESS                  -8 // offset from startpc to jitted body info
+#define  OFFSET_COUNTING_BRANCH_FROM_JITENTRY             36
+#endif
+
+#if defined(TR_HOST_ARM64)
+#define  OFFSET_REVERT_INTP_FIXED_PORTION                (-12-2*sizeof(intptr_t)) // See generateSwitchToInterpreterPrePrologue()
+#define  OFFSET_SAMPLING_PREPROLOGUE_FROM_STARTPC        (-(16+sizeof(intptr_t)))
+#define  OFFSET_SAMPLING_BRANCH_FROM_STARTPC             (-(12+sizeof(intptr_t)))
+#define  OFFSET_SAMPLING_METHODINFO_FROM_STARTPC         (-(8+sizeof(intptr_t)))
+#define  OFFSET_SAMPLING_PRESERVED_FROM_STARTPC          (-8)
+#define  OFFSET_COUNTING_BRANCH_FROM_JITENTRY            (9*ARM64_INSTRUCTION_LENGTH)
+#endif
+
+#if defined(TR_HOST_POWER) || defined(TR_HOST_ARM64)
 inline uint32_t getJitEntryOffset(J9::PrivateLinkage::LinkageInfo *linkageInfo)
    {
    return linkageInfo->getReservedWord() & 0x0ffff;
    }
-#endif
-
-
-
-#if defined(TR_HOST_ARM)
-#define  OFFSET_REVERT_INTP_FIXED_PORTION                (-12-2*sizeof(intptrj_t))
-#define  OFFSET_SAMPLING_PREPROLOGUE_FROM_STARTPC        (-(16+sizeof(intptrj_t)))
-#define  OFFSET_SAMPLING_BRANCH_FROM_STARTPC             (-(12+sizeof(intptrj_t)))
-#define  OFFSET_METHODINFO_FROM_STARTPC                  (-(8+sizeof(intptrj_t)))
-#define  OFFSET_SAMPLING_PRESERVED_FROM_STARTPC          (-8)
-#define  START_PC_TO_METHOD_INFO_ADDRESS                  -8 // offset from startpc to jitted body info
-#define  OFFSET_COUNTING_BRANCH_FROM_JITENTRY             36
 #endif
 
 /* Functions used by AOT runtime to fixup recompilation info for AOT */
@@ -144,9 +152,10 @@ typedef enum
 *     2.0    Java7
 *     2.1    Java7
 *     3.0    Java 8
+*     4.0    Java 8+ with OSR
 */
 
-#define TR_AOTMethodHeader_MajorVersion   3
+#define TR_AOTMethodHeader_MajorVersion   4
 #define TR_AOTMethodHeader_MinorVersion   0
 
 typedef struct TR_AOTMethodHeader {
@@ -155,12 +164,18 @@ typedef struct TR_AOTMethodHeader {
    uint32_t  offsetToRelocationDataItems;
    uint32_t  offsetToExceptionTable;
    uint32_t  offsetToPersistentInfo;
+   uint32_t  flags;
    uintptr_t compileMethodCodeStartPC;
    uintptr_t compileMethodCodeSize;
    uintptr_t compileMethodDataStartPC;
    uintptr_t compileMethodDataSize;
    uintptr_t unused;
-   uint32_t flags;
+   struct
+      {
+      uintptr_t _frameSizeInBytes;
+      uintptr_t _scratchBufferSizeInBytes;
+      uintptr_t _stackFrameSizeInBytes;
+      } _osrBufferInfo;
    } TR_AOTMethodHeader;
 
 
@@ -173,6 +188,8 @@ typedef struct TR_AOTMethodHeader {
 #define TR_AOTMethodHeader_UsesSymbolValidationManager               0x00000020
 #define TR_AOTMethodHeader_TMDisabled                                0x00000040
 #define TR_AOTMethodHeader_CompressedMethodInCache                   0x00000080
+#define TR_AOTMethodHeader_IsNotCapableOfExceptionHook               0x00000100
+#define TR_AOTMethodHeader_UsesOSR                                   0x00000200
 
 
 

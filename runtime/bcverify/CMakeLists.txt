@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2019 IBM Corp. and others
+# Copyright (c) 2017, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -22,9 +22,10 @@
 
 #TODO specify -O3 for zos
 
+set(OMR_ENHANCED_WARNINGS OFF)
 add_tracegen(j9bcverify.tdf)
 
-add_library(j9bcv STATIC
+j9vm_add_library(j9bcv STATIC
 	bcverify.c
 	classrelationships.c
 	clconstraints.c
@@ -53,3 +54,9 @@ target_link_libraries(j9bcv
 		j9stackmap
 		j9shrcommon
 )
+
+# special handling bcverify.c to deal with ppcle64-specific crash when compiling with gcc 7.5
+if(OMR_ARCH_POWER AND OMR_ENV_LITTLE_ENDIAN AND OMR_ENV_DATA64 AND OMR_OS_LINUX AND (OMR_TOOLCONFIG STREQUAL "gnu"))
+	set_source_files_properties(bcverify.c PROPERTIES COMPILE_FLAGS -O2)
+endif()
+

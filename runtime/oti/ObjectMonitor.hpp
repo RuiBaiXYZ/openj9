@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,10 +23,21 @@
 #if !defined(OBJECTMONITOR_HPP_)
 #define OBJECTMONITOR_HPP_
 
+#include "j9cfg.h"
+
+#if defined(OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES)
+#if OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES
+#define VM_ObjectMonitor VM_ObjectMonitorCompressed
+#else /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+#define VM_ObjectMonitor VM_ObjectMonitorFull
+#endif /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+#endif /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+
 #include "j9.h"
 #include "j9accessbarrier.h"
 #include "j9consts.h"
 #include "j9modron.h"
+#include "j9vmnls.h"
 #include "monhelp.h"
 #include "stackwalk.h"
 #include "vm_api.h"
@@ -60,7 +71,7 @@ public:
 	 * @param currentThread[in] the current J9VMThread
 	 * @param object[in] the object from which to fetch the monitor
 	 * 
-	 * @return the the lockEA or NULL if the monitorTableAt returns NULL. 
+	 * @return the lockEA or NULL if the monitorTableAt returns NULL.
 	 * 		if lockEA is NULL then the current thread did not own the monitor
 	 */
 	static VMINLINE j9objectmonitor_t *
@@ -249,7 +260,7 @@ done:
 		}
 
 		if (lock == compareAndSwapLockword(currentThread, lockEA, lock, mine, readBeforeCAS)) {
-			VM_AtomicSupport::monitorEnterBarrier();
+			VM_AtomicSupport::readBarrier();
 			locked = true;
 		}
 		return locked;
@@ -267,7 +278,11 @@ done:
 	inlineFastObjectMonitorEnter(J9VMThread *currentThread, j9object_t object)
 	{
 		bool locked = false;
-		if (LN_HAS_LOCKWORD(currentThread, object)) {
+		if (LN_HAS_LOCKWORD(currentThread, object)
+#if JAVA_SPEC_VERSION >= 16
+		&& J9_CLASS_ALLOWS_LOCKING(J9OBJECT_CLAZZ(currentThread, object))
+#endif /* JAVA_SPEC_VERSION >= 16 */
+		) {
 			locked = inlineFastInitAndEnterMonitor(currentThread, J9OBJECT_MONITOR_EA(currentThread, object));
 		}
 		return locked;
@@ -305,13 +320,13 @@ done:
 	 *
 	 * @returns	the possibly-updated object pointer on success, or an error code
 	 */
-	static VMINLINE IDATA
+	static VMINLINE UDATA
 	enterObjectMonitor(J9VMThread *currentThread, j9object_t object)
 	{
-		IDATA rc = (IDATA)object;
+		UDATA rc = (UDATA)object;
 		if (!inlineFastObjectMonitorEnter(currentThread, object)) {
 			rc = J9_VM_FUNCTION(currentThread, objectMonitorEnterNonBlocking)(currentThread, object);
-			if (1 == rc) {
+			if (J9_OBJECT_MONITOR_BLOCKING == rc) {
 				rc = J9_VM_FUNCTION(currentThread, objectMonitorEnterBlocking)(currentThread);
 			}
 		}

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -39,13 +39,14 @@ static uint8_t *flushArgumentsToStack(uint8_t *buffer, TR::Node *callNode, int32
    {
    uint32_t        intArgNum=0, floatArgNum=0, offset;
    TR::Machine *machine = cg->machine();
-   const TR::ARMLinkageProperties &linkage = cg->getLinkage(callNode->getSymbol()->castToMethodSymbol()->getLinkageConvention())->getProperties();
+   TR::Linkage* linkage = cg->getLinkage(callNode->getSymbol()->castToMethodSymbol()->getLinkageConvention());
+   const TR::ARMLinkageProperties &linkageProperties = linkage->getProperties();
    int32_t argStart = callNode->getFirstArgumentIndex();
 
-   if (linkage.getRightToLeft())
-      offset = linkage.getOffsetToFirstParm();
+   if (linkageProperties.getRightToLeft())
+      offset = linkage->getOffsetToFirstParm();
    else
-      offset = argSize+linkage.getOffsetToFirstParm();
+      offset = argSize+linkage->getOffsetToFirstParm();
 
    for (int i=argStart; i<callNode->getNumChildren();i++)
       {
@@ -59,58 +60,58 @@ static uint8_t *flushArgumentsToStack(uint8_t *buffer, TR::Node *callNode, int32
 #if (defined(__VFP_FP__) && !defined(__SOFTFP__))
          case TR::Float:
 #endif
-            if (!linkage.getRightToLeft())
+            if (!linkageProperties.getRightToLeft())
                offset -= 4;
-            if (intArgNum < linkage.getNumIntArgRegs())
+            if (intArgNum < linkageProperties.getNumIntArgRegs())
                {
-               buffer = storeArgumentItem(ARMOp_str, buffer, machine->getRealRegister(linkage.getIntegerArgumentRegister(intArgNum)), offset, cg);
+               buffer = storeArgumentItem(ARMOp_str, buffer, machine->getRealRegister(linkageProperties.getIntegerArgumentRegister(intArgNum)), offset, cg);
                }
             intArgNum++;
-            if (linkage.getRightToLeft())
+            if (linkageProperties.getRightToLeft())
                offset += 4;
             break;
          case TR::Int64:
 #if (defined(__VFP_FP__) && !defined(__SOFTFP__))
          case TR::Double:
 #endif
-            if (!linkage.getRightToLeft())
+            if (!linkageProperties.getRightToLeft())
                offset -= 8;
-            if (intArgNum < linkage.getNumIntArgRegs())
+            if (intArgNum < linkageProperties.getNumIntArgRegs())
                {
-               buffer = storeArgumentItem(ARMOp_str, buffer, machine->getRealRegister(linkage.getIntegerArgumentRegister(intArgNum)), offset, cg);
-               if (intArgNum < linkage.getNumIntArgRegs()-1)
+               buffer = storeArgumentItem(ARMOp_str, buffer, machine->getRealRegister(linkageProperties.getIntegerArgumentRegister(intArgNum)), offset, cg);
+               if (intArgNum < linkageProperties.getNumIntArgRegs()-1)
            	  {
-           	  buffer = storeArgumentItem(ARMOp_str, buffer, machine->getRealRegister(linkage.getIntegerArgumentRegister(intArgNum+1)), offset+4, cg);
+           	  buffer = storeArgumentItem(ARMOp_str, buffer, machine->getRealRegister(linkageProperties.getIntegerArgumentRegister(intArgNum+1)), offset+4, cg);
            	  }
                }
             intArgNum += 2;
-            if (linkage.getRightToLeft())
+            if (linkageProperties.getRightToLeft())
                offset += 8;
             break;
 #if !defined(__VFP_FP__) || defined(__SOFTFP__)
          case TR::Float:
             /* TODO
-               if (!linkage.getRightToLeft())
+               if (!linkageProperties.getRightToLeft())
                offset -= 4;
-               if (floatArgNum < linkage.getNumFloatArgRegs())
+               if (floatArgNum < linkageProperties.getNumFloatArgRegs())
                {
-               buffer = storeArgumentItem(ARMOp_stfs, buffer, machine->getRealRegister(linkage.getFloatArgumentRegister(floatArgNum)), offset, cg);
+               buffer = storeArgumentItem(ARMOp_stfs, buffer, machine->getRealRegister(linkageProperties.getFloatArgumentRegister(floatArgNum)), offset, cg);
                }
                floatArgNum++;
-               if (linkage.getRightToLeft())
+               if (linkageProperties.getRightToLeft())
                offset += 4;
             */
             break;
          case TR::Double:
             /* TODO
-               if (!linkage.getRightToLeft())
+               if (!linkageProperties.getRightToLeft())
                offset -= 8;
-               if (floatArgNum < linkage.getNumFloatArgRegs())
+               if (floatArgNum < linkageProperties.getNumFloatArgRegs())
                {
-               buffer = storeArgumentItem(ARMOp_stfd, buffer, machine->getRealRegister(linkage.getFloatArgumentRegister(floatArgNum)), offset, cg);
+               buffer = storeArgumentItem(ARMOp_stfd, buffer, machine->getRealRegister(linkageProperties.getFloatArgumentRegister(floatArgNum)), offset, cg);
                }
                floatArgNum++;
-               if (linkage.getRightToLeft())
+               if (linkageProperties.getRightToLeft())
                offset += 8;
             */
             break;
@@ -261,7 +262,7 @@ uint8_t *TR::ARMCallSnippet::emitSnippetBody()
    // Flush in-register arguments back to the stack for interpreter
    cursor = flushArgumentsToStack(cursor, callNode, getSizeOfArguments(), cg());
 
-   glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(getHelper(), false, false, false);
+   glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(getHelper());
 
    // bl glueRef
    *(int32_t *)cursor = encodeHelperBranchAndLink(glueRef, cursor, callNode, cg());
@@ -394,7 +395,7 @@ uint8_t *TR::ARMVirtualUnresolvedSnippet::emitSnippetBody()
    {
    uint8_t            *cursor = cg()->getBinaryBufferCursor();
    TR::SymbolReference *methodSymRef = getNode()->getSymbolReference();
-   TR::SymbolReference *glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_ARMvirtualUnresolvedHelper, false, false, false);
+   TR::SymbolReference *glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_ARMvirtualUnresolvedHelper);
 
    TR::Compilation* comp = cg()->comp();
 
@@ -438,7 +439,7 @@ uint8_t *TR::ARMInterfaceCallSnippet::emitSnippetBody()
    {
    uint8_t            *cursor = cg()->getBinaryBufferCursor();
    TR::SymbolReference *methodSymRef = getNode()->getSymbolReference();
-   TR::SymbolReference *glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_ARMinterfaceCallHelper, false, false, false);
+   TR::SymbolReference *glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_ARMinterfaceCallHelper);
 
    getSnippetLabel()->setCodeLocation(cursor);
 
@@ -542,7 +543,7 @@ uint8_t *TR::ARMCallSnippet::generateVIThunk(TR::Node *callNode, int32_t argSize
                   cg->getDebug()->getName(dataType));
       }
 
-   dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(helper, false, false, false)->getMethodAddress();
+   dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(helper)->getMethodAddress();
 
    buffer = flushArgumentsToStack(buffer, callNode, argSize, cg);
 
@@ -605,7 +606,7 @@ TR_J2IThunk *TR::ARMCallSnippet::generateInvokeExactJ2IThunk(TR::Node *callNode,
                   cg->getDebug()->getName(dataType));
       }
 
-   dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(helper, false, false, false)->getMethodAddress();
+   dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(helper)->getMethodAddress();
 
    buffer = flushArgumentsToStack(buffer, callNode, argSize, cg);
 

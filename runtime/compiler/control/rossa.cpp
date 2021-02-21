@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -51,6 +51,7 @@
 #include "codegen/PrivateLinkage.hpp"
 #include "control/CompilationRuntime.hpp"
 #include "control/CompilationThread.hpp"
+#include "control/JitDump.hpp"
 #include "control/Recompilation.hpp"
 #include "control/RecompilationInfo.hpp"
 #include "runtime/ArtifactManager.hpp"
@@ -60,7 +61,7 @@
 #include "runtime/codertinit.hpp"
 #include "runtime/IProfiler.hpp"
 #include "runtime/HWProfiler.hpp"
-#include "runtime/LMGuardedStorage.hpp"
+#include "runtime/RelocationRuntime.hpp"
 #include "env/PersistentInfo.hpp"
 #include "env/ClassLoaderTable.hpp"
 #include "env/J2IThunk.hpp"
@@ -68,6 +69,7 @@
 #include "env/CompilerEnv.hpp"
 #include "env/jittypes.h"
 #include "env/ClassTableCriticalSection.hpp"
+#include "env/VerboseLog.hpp"
 
 #include "ilgen/IlGeneratorMethodDetails_inlines.hpp"
 
@@ -76,7 +78,6 @@
 #include "z/runtime/ZHWProfiler.hpp"
 #elif defined(TR_HOST_POWER)
 #include "p/runtime/PPCHWProfiler.hpp"
-#include "p/runtime/PPCLMGuardedStorage.hpp"
 #endif
 
 #include "control/rossa.h"
@@ -119,17 +120,9 @@
 
 extern "C" int32_t encodeCount(int32_t count);
 
-#if defined(TR_HOST_POWER)
-extern TR_Processor portLibCall_getProcessorType();
-#endif
-
 extern "C" {
 struct J9RASdumpContext;
 }
-
-#ifdef J9VM_RAS_DUMP_AGENTS
-extern "C" intptr_t dumpJitInfo(J9VMThread * currentThread, char *label, J9RASdumpContext *context);
-#endif
 
 #if defined(TR_TARGET_X86) && defined(TR_HOST_32BIT)
 extern TR_X86CPUIDBuffer *queryX86TargetCPUID(void * javaVM);
@@ -209,14 +202,22 @@ char *compilationErrorNames[]={
    "compilationSymbolValidationManagerFailure", //50
    "compilationAOTNoSupportForAOTFailure", //51
    "compilationAOTValidateTMFailure", //52
+   "compilationILGenUnsupportedValueTypeOperationFailure", //53
+   "compilationAOTRelocationRecordGenerationFailure", //54
+   "compilationAotPatchedCPConstant", //55
+   "compilationAotHasInvokeSpecialInterface", //56
+   "compilationAotValidateExceptionHookFailure", //57
+   "compilationAotBlockFrequencyReloFailure", //58
+   "compilationAotRecompQueuedFlagReloFailure", //59
+   "compilationAOTValidateOSRFailure", //60
 #if defined(J9VM_OPT_JITSERVER)
-   "compilationStreamFailure", //53
-   "compilationStreamLostMessage", // 54
-   "compilationStreamMessageTypeMismatch", // 55
-   "compilationStreamVersionIncompatible", // 56
-   "compilationStreamInterrupted", // 57
+   "compilationStreamFailure", //compilationFirstJITServerFailure=61
+   "compilationStreamLostMessage", // compilationFirstJITServerFailure+1
+   "compilationStreamMessageTypeMismatch", //compilationFirstJITServerFailure+2
+   "compilationStreamVersionIncompatible", //compilationFirstJITServerFailure+3
+   "compilationStreamInterrupted", //compilationFirstJITServerFailure+4
 #endif /* defined(J9VM_OPT_JITSERVER) */
-   "compilationMaxError"
+   "compilationMaxError",
 };
 
 int32_t aggressiveOption = 0;
@@ -281,20 +282,22 @@ j9jit_testarossa_err(
       J9::PrivateLinkage::LinkageInfo *linkageInfo = J9::PrivateLinkage::LinkageInfo::get(oldStartPC);
       TR_PersistentJittedBodyInfo* jbi = TR::Recompilation::getJittedBodyInfoFromPC(oldStartPC);
 
-      if (jbi)
+      if (!jbi)
          {
-         TR_PersistentMethodInfo *pmi = jbi->getMethodInfo();
-
-         if (pmi && pmi->hasBeenReplaced()) // HCR
-            {
-            // Obsolete method bodies are invalid.
-            //
-            TR::Recompilation::fixUpMethodCode(oldStartPC);
-            jbi->setIsInvalidated();
-            }
+         return 0;
          }
 
-      if (jbi && jbi->getIsInvalidated())
+      TR_PersistentMethodInfo *pmi = jbi->getMethodInfo();
+
+      if (pmi && pmi->hasBeenReplaced()) // HCR
+         {
+         // Obsolete method bodies are invalid.
+         //
+         TR::Recompilation::fixUpMethodCode(oldStartPC);
+         jbi->setIsInvalidated();
+         }
+
+      if (jbi->getIsInvalidated())
          {
          event._eventType = TR_MethodEvent::MethodBodyInvalidated;
          async = TR_no;
@@ -318,7 +321,7 @@ j9jit_testarossa_err(
          // If PersistentJittedBody contains the profile Info and has BlockFrequencyInfo, it will set the
          // isQueuedForRecompilation field which can be used by the jitted code at runtime to skip the profiling
          // code if it has made request to recompile this method.
-         if (jbi && jbi->getProfileInfo() != NULL && jbi->getProfileInfo()->getBlockFrequencyInfo() != NULL)
+         if (jbi->getProfileInfo() != NULL && jbi->getProfileInfo()->getBlockFrequencyInfo() != NULL)
             jbi->getProfileInfo()->getBlockFrequencyInfo()->setIsQueuedForRecompilation();
 
          event._eventType = TR_MethodEvent::OtherRecompilationTrigger;
@@ -634,9 +637,22 @@ freeJITConfig(J9JITConfig * jitConfig)
 extern "C" void
 jitExclusiveVMShutdownPending(J9VMThread * vmThread)
    {
-   #ifndef SMALL_APPTHREAD
-      getCompilationInfo(vmThread->javaVM->jitConfig)->stopCompilationThreads();
-   #endif
+#ifndef SMALL_APPTHREAD
+   J9JavaVM *javaVM = vmThread->javaVM;
+#if defined(J9VM_OPT_JITSERVER)
+   TR::CompilationInfo * compInfo = getCompilationInfo(javaVM->jitConfig);
+   if (compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER)
+      {
+      TR_Listener *listener = ((TR_JitPrivateConfig*)(javaVM->jitConfig->privateConfig))->listener;
+      if (listener)
+         {
+         listener->stop();
+         }
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
+   getCompilationInfo(javaVM->jitConfig)->stopCompilationThreads();
+#endif
    }
 
 // Code cache callbacks to be used by the VM
@@ -1195,6 +1211,17 @@ onLoadInternal(
 #endif
 #endif
 
+
+#if defined(J9VM_OPT_JITSERVER)
+   if (javaVM->internalVMFunctions->isJITServerEnabled(javaVM))
+      {
+      // Use smaller caches on the server because
+      // just one method's data is going to be stored there at a time
+      jitConfig->codeCacheKB = 1024;
+      jitConfig->dataCacheKB = 1024;
+      }
+#endif
+
    if (fe->isAOT_DEPRECATED_DO_NOT_USE())
       {
       jitConfig->codeCacheTotalKB = 128 * 1024; // default limit on amount of code that can be generated (128MB)
@@ -1297,14 +1324,22 @@ onLoadInternal(
    // Now that the options have been processed we can initialize the RuntimeAssumptionTables
    // If we cannot allocate various runtime assumption hash tables, fail the JVM
 
+   fe->initializeSystemProperties();
+
    // Allocate trampolines for z/OS 64-bit
 #if defined(J9ZOS390)
    if (TR::Options::getCmdLineOptions()->getOption(TR_EnableRMODE64) && !isQuickstart)
       numCodeCachesToCreateAtStartup = 4;
 #endif
 
-   if (!persistentMemory->getPersistentInfo()->getRuntimeAssumptionTable()->init())
-      return -1;
+
+#if defined(J9VM_OPT_JITSERVER)
+   if (persistentMemory->getPersistentInfo()->getRemoteCompilationMode() != JITServer::SERVER)
+#endif
+      {
+      if (!persistentMemory->getPersistentInfo()->getRuntimeAssumptionTable()->init())
+         return -1;
+      }
 
    TR_PersistentClassLoaderTable *loaderTable = new (PERSISTENT_NEW) TR_PersistentClassLoaderTable(persistentMemory);
    if (loaderTable == NULL)
@@ -1448,8 +1483,6 @@ onLoadInternal(
 
    jitConfig->thunkLookUpNameAndSig = &j9ThunkLookupNameAndSig;
 
-   fe->initializeSystemProperties();
-
    TR::CompilationInfo * compInfo = TR::CompilationInfo::get();
 
    // Now that we have all options (and before starting the compilation thread) we
@@ -1476,7 +1509,7 @@ onLoadInternal(
 #ifdef TR_TARGET_S390
    // Need to let VM know that we will be using a machines vector facility (so it can save/restore preserved regs),
    // early in JIT startup to prevent subtle FP bugs
-   if (TR::Compiler->target.cpu.getSupportsVectorFacility() && !TR::Options::getCmdLineOptions()->getOption(TR_DisableSIMD))
+   if (TR::Compiler->target.cpu.supportsFeature(OMR_FEATURE_S390_VECTOR_FACILITY) && !TR::Options::getCmdLineOptions()->getOption(TR_DisableSIMD))
       {
       javaVM->extendedRuntimeFlags |= J9_EXTENDED_RUNTIME_USE_VECTOR_REGISTERS;
       }
@@ -1591,13 +1624,12 @@ onLoadInternal(
    if (TR::Options::_hwProfilerEnabled == TR_yes)
       {
 #if defined(TR_HOST_S390) && defined(BUILD_Z_RUNTIME_INSTRUMENTATION)
-      if (TR::Compiler->target.cpu.getSupportsRuntimeInstrumentationFacility())
+      if (TR::Compiler->target.cpu.supportsFeature(OMR_FEATURE_S390_RI))
          ((TR_JitPrivateConfig*)(jitConfig->privateConfig))->hwProfiler = TR_ZHWProfiler::allocate(jitConfig);
 #elif defined(TR_HOST_POWER)
 #if !defined(J9OS_I5)
 /* We disable it on current releases. May enable in future. */
-      TR_Processor processor = portLibCall_getProcessorType();
-      ((TR_JitPrivateConfig*)(jitConfig->privateConfig))->hwProfiler = processor >= TR_PPCp8 ? TR_PPCHWProfiler::allocate(jitConfig) : NULL;
+      ((TR_JitPrivateConfig*)(jitConfig->privateConfig))->hwProfiler = TR::Compiler->target.cpu.isAtLeast(OMR_PROCESSOR_PPC_P8) ? TR_PPCHWProfiler::allocate(jitConfig) : NULL;
 #else
       ((TR_JitPrivateConfig*)(jitConfig->privateConfig))->hwProfiler = NULL;
 #endif /* !defined(J9OS_I5) */
@@ -1629,24 +1661,26 @@ onLoadInternal(
          persistentMemory->getPersistentInfo()->setRuntimeInstrumentationRecompilationEnabled(true);
       }
 
-   TR_PersistentCHTable *chtable;
 #if defined(J9VM_OPT_JITSERVER)
-   if (persistentMemory->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER)
-      {
-      chtable = new (PERSISTENT_NEW) JITServerPersistentCHTable(persistentMemory);
-      }
-   else if (persistentMemory->getPersistentInfo()->getRemoteCompilationMode() == JITServer::CLIENT)
-      {
-      chtable = new (PERSISTENT_NEW) JITClientPersistentCHTable(persistentMemory);
-      }
-   else
+   // server-side CH table is initialized per-client
+   if (persistentMemory->getPersistentInfo()->getRemoteCompilationMode() != JITServer::SERVER)
 #endif
       {
-      chtable = new (PERSISTENT_NEW) TR_PersistentCHTable(persistentMemory);
+      TR_PersistentCHTable *chtable;
+#if defined(J9VM_OPT_JITSERVER)
+      if (persistentMemory->getPersistentInfo()->getRemoteCompilationMode() == JITServer::CLIENT)
+         {
+         chtable = new (PERSISTENT_NEW) JITClientPersistentCHTable(persistentMemory);
+         }
+      else
+#endif
+         {
+         chtable = new (PERSISTENT_NEW) TR_PersistentCHTable(persistentMemory);
+         }
+      if (chtable == NULL)
+         return -1;
+      persistentMemory->getPersistentInfo()->setPersistentCHTable(chtable);
       }
-   if (chtable == NULL)
-      return -1;
-   persistentMemory->getPersistentInfo()->setPersistentCHTable(chtable);
 
 #if defined(J9VM_OPT_JITSERVER)
    if (JITServer::CommunicationStream::useSSL())
@@ -1657,7 +1691,7 @@ onLoadInternal(
 
    if (compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER)
       {
-      JITServer::CommunicationStream::initVersion();
+      JITServer::CommunicationStream::initConfigurationFlags();
 
       // Allocate the hashtable that holds information about clients
       compInfo->setClientSessionHT(ClientSessionHT::allocate());
@@ -1689,13 +1723,17 @@ onLoadInternal(
       compInfo->setUnloadedClassesTempList(new (PERSISTENT_NEW) PersistentVector<TR_OpaqueClassBlock*>(
          PersistentVector<TR_OpaqueClassBlock*>::allocator_type(TR::Compiler->persistentAllocator())));
 
+      compInfo->setIllegalFinalFieldModificationList(new (PERSISTENT_NEW) PersistentVector<TR_OpaqueClassBlock*>(
+         PersistentVector<TR_OpaqueClassBlock*>::allocator_type(TR::Compiler->persistentAllocator())));
+
       compInfo->setNewlyExtendedClasses(new (PERSISTENT_NEW) PersistentUnorderedMap<TR_OpaqueClassBlock*, uint8_t>(
          PersistentUnorderedMap<TR_OpaqueClassBlock*, uint8_t>::allocator_type(TR::Compiler->persistentAllocator())));
+
       // Try to initialize SSL
       if (JITServer::ClientStream::static_init(compInfo->getPersistentInfo()) != 0)
          return -1;
 
-      JITServer::CommunicationStream::initVersion();
+      JITServer::CommunicationStream::initConfigurationFlags();
       }
 #endif // J9VM_OPT_JITSERVER
 
@@ -1711,31 +1749,17 @@ onLoadInternal(
 #endif
 
 #if defined(TR_HOST_ARM64)
-   // DLT support is not available in AArch64 yet.
-   // OpenJ9 issue #5917 tracks the work to enable.
-   //
-   TR::Options::getCmdLineOptions()->setOption(TR_DisableDynamicLoopTransfer);
-
    // ArrayCopy transformations are not available in AArch64 yet.
    // OpenJ9 issue #6438 tracks the work to enable.
    //
    TR::Options::getCmdLineOptions()->setOption(TR_DisableArrayCopyOpts);
 #endif
 
-#if defined(TR_HOST_POWER)
-#if !defined(J9OS_I5_V6R1) && !defined(J9OS_I5_V7R2) /* We may support it since i 7.3. */
-      TR_Processor processor = portLibCall_getProcessorType();
-      bool enableLMGS = false; //processor > TR_PPCp8; // maybe additional conditions
-      bool ebbSetupDone = persistentMemory->getPersistentInfo()->isRuntimeInstrumentationEnabled();
-      ((TR_JitPrivateConfig*)(jitConfig->privateConfig))->lmGuardedStorage = enableLMGS ? TR_PPCLMGuardedStorage::allocate(jitConfig, ebbSetupDone) : NULL;
-#else
-      ((TR_JitPrivateConfig*)(jitConfig->privateConfig))->lmGuardedStorage = NULL;
-#endif /* !defined(J9OS_I5_V6R1) && !defined(J9OS_I5_V7R2) */
+#ifdef J9VM_RAS_DUMP_AGENTS
+   jitConfig->runJitdump = runJitdump;
 #endif
 
-#ifdef J9VM_RAS_DUMP_AGENTS
-   jitConfig->dumpJitInfo = dumpJitInfo;
-#endif
+   jitConfig->printAOTHeaderProcessorFeatures = printAOTHeaderProcessorFeatures;
 
    if (!TR::Compiler->target.cpu.isI386())
       {
@@ -1824,6 +1848,12 @@ aboutToBootstrap(J9JavaVM * javaVM, J9JITConfig * jitConfig)
       return -1;
       }
 
+   if (!TR::Options::getCmdLineOptions()->allowRecompilation() || !TR::Options::getAOTCmdLineOptions()->allowRecompilation())
+      {
+      TR::Options::getCmdLineOptions()->setOption(TR_DisableCHOpts);
+      TR::Options::getAOTCmdLineOptions()->setOption(TR_DisableCHOpts);
+      }
+
    // Get local var names if available (ie. classfile was compiled with -g).
    // We just check getDebug() for lack of a reliable way to check whether there are any methods being logged.
    //
@@ -1836,6 +1866,7 @@ aboutToBootstrap(J9JavaVM * javaVM, J9JITConfig * jitConfig)
 
    J9VMThread *curThread = javaVM->internalVMFunctions->currentVMThread(javaVM);
    TR_J9VMBase *vm = TR_J9VMBase::get(jitConfig, curThread);
+   TR::CompilationInfo * compInfo = TR::CompilationInfo::get(jitConfig);
 
    /* Initialize helpers */
    codert_init_helpers_and_targets(jitConfig, TR::Compiler->target.isSMP());
@@ -1843,10 +1874,14 @@ aboutToBootstrap(J9JavaVM * javaVM, J9JITConfig * jitConfig)
    if (vm->isAOT_DEPRECATED_DO_NOT_USE() || (jitConfig->runtimeFlags & J9JIT_TOSS_CODE))
       return 0;
 
-   /* jit specific helpers */
-   initializeJitRuntimeHelperTable(TR::Compiler->target.isSMP());
 
-   TR::CompilationInfo * compInfo = TR::CompilationInfo::get(jitConfig);
+#if defined(J9VM_OPT_JITSERVER)
+   if (compInfo->getPersistentInfo()->getRemoteCompilationMode() != JITServer::SERVER)
+#endif
+      {
+      /* jit specific helpers */
+      initializeJitRuntimeHelperTable(TR::Compiler->target.isSMP());
+      }
 
 #if defined(TR_TARGET_POWER)
    if (TR::Compiler->target.cpu.isPower())
@@ -1902,6 +1937,11 @@ aboutToBootstrap(J9JavaVM * javaVM, J9JITConfig * jitConfig)
                TR_J9SharedCache::setSharedCacheDisabledReason(TR_J9SharedCache::AOT_DISABLED);
                }
             }
+         else
+            {
+            TR::Compiler->relocatableTarget.cpu = TR::CPU::customize(compInfo->reloRuntime()->getProcessorDescriptionFromSCC(fe, curThread));
+            jitConfig->relocatableTargetProcessor = TR::Compiler->relocatableTarget.cpu.getProcessorDescription();
+            }
          }
 
       if (TR::Options::getAOTCmdLineOptions()->getOption(TR_NoStoreAOT))
@@ -1932,11 +1972,11 @@ aboutToBootstrap(J9JavaVM * javaVM, J9JITConfig * jitConfig)
 #endif
 
    #if defined(TR_TARGET_S390)
-      uintptrj_t * tocBase = (uintptrj_t *)jitConfig->pseudoTOC;
+      uintptr_t * tocBase = (uintptr_t *)jitConfig->pseudoTOC;
 
       // Initialize the helper function table (0 to TR_S390numRuntimeHelpers-2)
       for (int32_t idx=1; idx<TR_S390numRuntimeHelpers; idx++)
-         tocBase[idx-1] = (uintptrj_t)runtimeHelperValue((TR_RuntimeHelper)idx);
+         tocBase[idx-1] = (uintptr_t)runtimeHelperValue((TR_RuntimeHelper)idx);
    #endif
 
    TR::CodeCacheManager::instance()->lateInitialization();
@@ -1959,7 +1999,7 @@ aboutToBootstrap(J9JavaVM * javaVM, J9JITConfig * jitConfig)
 
    UT_MODULE_LOADED(J9_UTINTERFACE_FROM_VM(javaVM));
    Trc_JIT_VMInitStages_Event1(curThread);
-
+   Trc_JIT_portableSharedCache_enabled_or_disabled(curThread, J9_ARE_ANY_BITS_SET(javaVM->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_PORTABLE_SHARED_CACHE) ? 1 : 0);
    return 0;
    }
 
@@ -2219,7 +2259,7 @@ static UDATA forEachIterator(J9VMThread *vmThread, J9StackWalkState *walkState)
 
    compInfo->acquireCompMonitor(vmThread);
 
-   intptrj_t count = TR::CompilationInfo::getJ9MethodExtra(j9method) >> 1;
+   intptr_t count = TR::CompilationInfo::getJ9MethodExtra(j9method) >> 1;
 
    if (!(romMethod->modifiers & J9AccNative) && // Never change the extra field of a native method
        !(walkState->jitInfo) &&                 // If the frame has jit metadata, it was already compiled

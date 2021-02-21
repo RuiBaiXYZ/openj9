@@ -1,8 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
-package java.lang;
-
 /*******************************************************************************
- * Copyright (c) 1998, 2019 IBM Corp. and others
+ * Copyright (c) 1998, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -22,18 +20,19 @@ package java.lang;
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
+package java.lang;
 
 import java.util.Map;
 import java.security.AccessControlContext;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import sun.security.util.SecurityConstants;
-/*[IF Java11]
+/*[IF JAVA_SPEC_VERSION >= 11]
 import jdk.internal.misc.TerminatingThreadLocal;
 import jdk.internal.reflect.CallerSensitive;
-/*[ELSE]*/
+/*[ELSE] JAVA_SPEC_VERSION >= 11 */
 import sun.reflect.CallerSensitive;
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 
 /**
  *	A Thread is a unit of concurrent execution in Java. It has its own call stack
@@ -80,6 +79,14 @@ public class Thread implements Runnable {
 	// Instance variables
 	private long threadRef;									// Used by the VM
 	long stackSize = 0;
+	/*[IF JAVA_SPEC_VERSION >= 14]*/
+	/* deadInterrupt tracks the thread interrupt state when threadRef has no reference (ie thread is not alive). 
+	 * Note that this value need not be updated while the thread is running since the interrupt state will be 
+	 * tracked by the vm during that time. Because of this the value should not be used over calling
+	 * isInterrupted() or interrupted().
+	 */
+	private volatile boolean deadInterrupt;
+	/*[ENDIF] JAVA_SPEC_VERSION >= 14 */
 	private volatile boolean started;				// If !isAlive(), tells if Thread died already or hasn't even started
 	private String name;						// The Thread's name
 	private int priority = NORM_PRIORITY;			// The Thread's current priority
@@ -121,11 +128,6 @@ public class Thread implements Runnable {
 	int threadLocalRandomProbe;
 	int threadLocalRandomSecondarySeed;
 
-	/*[IF Java13 & !Java14]*/
-	/* The flag to indicate if this thread is suspended. */
-	private volatile boolean isSuspended;
-	/*[ENDIF] Java 13 & !Java14 */
-
 /**
  * 	Constructs a new Thread with no runnable object and a newly generated name.
  * The new Thread will belong to the same ThreadGroup as the Thread calling
@@ -154,7 +156,9 @@ private Thread(String vmName, Object vmThreadGroup, int vmPriority, boolean vmIs
 	super();
 
 	String threadName = (vmName == null) ? newName() : vmName;
+	/*[IF JAVA_SPEC_VERSION < 15]*/
 	setNameImpl(threadRef, threadName);
+	/*[ENDIF] JAVA_SPEC_VERSION < 15 */
 	name = threadName;
 	
 	isDaemon = vmIsDaemon;
@@ -168,6 +172,10 @@ private Thread(String vmName, Object vmThreadGroup, int vmPriority, boolean vmIs
 		booting = true;
 		/*[PR CMVC 71192] Initialize the "main" thread group without calling checkAccess() */
 		mainGroup = new ThreadGroup(systemThreadGroup);
+	} else {
+		/*[IF JAVA_SPEC_VERSION >= 15]*/
+		setNameImpl(threadRef, threadName);
+		/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 	}
 	threadGroup = vmThreadGroup == null ? mainGroup : (ThreadGroup)vmThreadGroup;
 	
@@ -178,6 +186,16 @@ private Thread(String vmName, Object vmThreadGroup, int vmPriority, boolean vmIs
  	
 	/*[PR 100718] Initialize System.in after the main thread */
 	if (booting) {
+		/*[IF JAVA_SPEC_VERSION >= 15]*/
+		/* JDK15+ native method binding uses java.lang.ClassLoader.findNative():bootstrapClassLoader.nativelibs.find(entryName)
+		 * to lookup native address when not found within systemClassLoader native libraries.
+		 * This requires bootstrapClassLoader is initialized via initialize(booting, threadGroup, null, null, true) above before 
+		 * invoking a native method not present within systemClassLoader native libraries such as following setNameImpl modified
+		 * via JVMTI agent SetNativeMethodPrefix (https://github.com/eclipse/openj9/issues/11181).
+		 * After bootstrapClassLoader initialization, setNameImpl can be invoked before initialize() to set thread name earlier.
+		 */
+		setNameImpl(threadRef, threadName);
+		/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 		System.completeInitialization();
 	}
 }
@@ -532,39 +550,23 @@ public final void checkAccess() {
  *
  * @return		Number of stack frames
  * 
-/*[IF Java14]
+/*[IF JAVA_SPEC_VERSION >= 14]
  * @exception	UnsupportedOperationException
-/*[ELSE] Java14 
-/*[IF Java13]
- * @exception	IllegalThreadStateException
- *					if this thread has not been suspended.
-/*[ENDIF] Java13
-/*[ENDIF] Java14 
+/*[ENDIF] JAVA_SPEC_VERSION >= 14
  *
  * @deprecated	The semantics of this method are poorly defined and it uses the deprecated suspend() method.
  */
-/*[IF Java11]*/
+/*[IF JAVA_SPEC_VERSION >= 11]*/
 @Deprecated(forRemoval=true, since="1.2")
-/*[ELSE] Java11 */
+/*[ELSE] JAVA_SPEC_VERSION >= 11 */
 @Deprecated
-/*[ENDIF] Java11 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 public int countStackFrames() {
-/*[IF Java14]*/
+/*[IF JAVA_SPEC_VERSION >= 14]*/
 	throw new UnsupportedOperationException();
-/*[ELSE] Java14 */
-/*[IF Java13]*/
-	if (isAlive()) {
-		if (isSuspended) {
-			return 0;
-		}
-		throw new IllegalThreadStateException();
-	} else {
-/*[ENDIF] Java13 */
-		return 0;
-/*[IF Java13]*/
-	}
-/*[ENDIF] Java13 */
-/*[ENDIF] Java14 */
+/*[ELSE] JAVA_SPEC_VERSION >= 14 */
+	return 0;
+/*[ENDIF] JAVA_SPEC_VERSION >= 14 */
 }
 
 /**
@@ -575,7 +577,7 @@ public int countStackFrames() {
  */
 public static native Thread currentThread();
 
-/*[IF !Java11]*/
+/*[IF JAVA_SPEC_VERSION < 11]*/
 /**
  * 	Destroys the receiver without any monitor cleanup. Not implemented.
  * 
@@ -590,8 +592,7 @@ public void destroy() {
 	/*[PR 121318] Should throw NoSuchMethodError */
 	throw new NoSuchMethodError();
 }
-/*[ENDIF]*/
-
+/*[ENDIF] JAVA_SPEC_VERSION < 11 */
 
 /**
  * 	Prints a text representation of the stack for this Thread.
@@ -677,6 +678,10 @@ public final ThreadGroup getThreadGroup() {
 
 /**
  * Posts an interrupt request to the receiver
+ * 
+/*[IF JAVA_SPEC_VERSION >= 14]
+ * From Java 14, the interrupt state for threads that are not alive is tracked.
+/*[ENDIF] JAVA_SPEC_VERSION >= 14
  *
  * @exception	SecurityException
  *					if <code>group.checkAccess()</code> fails with a SecurityException
@@ -721,6 +726,10 @@ public static native boolean interrupted();
 
 /**
  * Posts an interrupt request to the receiver
+ * 
+/*[IF JAVA_SPEC_VERSION >= 14]
+ * From Java 14, the interrupt state for threads that are not alive is tracked.
+/*[ENDIF] JAVA_SPEC_VERSION >= 14
  *
  * @see			Thread#interrupted
  * @see			Thread#isInterrupted 
@@ -910,23 +919,20 @@ private synchronized static String newName() {
  *
  * @deprecated	Used with deprecated method Thread.suspend().
  */
-/*[IF Java11]*/
-/*[IF Java14]*/
+/*[IF JAVA_SPEC_VERSION >= 11]*/
+/*[IF JAVA_SPEC_VERSION >= 14]*/
 @Deprecated(forRemoval=true, since="1.2")
-/*[ELSE] Java14 */
+/*[ELSE] JAVA_SPEC_VERSION >= 14 */
 @Deprecated(forRemoval=false, since="1.2")
-/*[ENDIF] Java14 */
-/*[ELSE] Java11 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 14 */
+/*[ELSE] JAVA_SPEC_VERSION >= 11 */
 @Deprecated
-/*[ENDIF] Java11 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 public final void resume() {
 	checkAccess();
 	synchronized(lock) {
 		resumeImpl();
 	}
-/*[IF Java13 & !Java14]*/
-	isSuspended = false;
-/*[ENDIF] Java13 & !Java14 */
 }
 
 /**
@@ -1172,7 +1178,7 @@ public final void stop() {
 	}
 }
 
-/*[IF !Java11]*/
+/*[IF JAVA_SPEC_VERSION < 11]*/
 /**
  * Throws UnsupportedOperationException.
  *
@@ -1187,8 +1193,8 @@ public final void stop() {
 /*[ENDIF]*/
 public final void stop(Throwable throwable) {
 	throw new UnsupportedOperationException();
- }
-/*[ENDIF]*/
+}
+/*[ENDIF] JAVA_SPEC_VERSION < 11 */
 
 private final synchronized void stopWithThrowable(Throwable throwable) {
 	checkAccess();
@@ -1238,15 +1244,15 @@ private native void stopImpl(Throwable throwable);
  *
  * @deprecated May cause deadlocks.
  */
-/*[IF Java11]*/
-/*[IF Java14]*/
+/*[IF JAVA_SPEC_VERSION >= 11]*/
+/*[IF JAVA_SPEC_VERSION >= 14]*/
 @Deprecated(forRemoval=true, since="1.2")
-/*[ELSE] Java14 */
+/*[ELSE] JAVA_SPEC_VERSION >= 14 */
 @Deprecated(forRemoval=false, since="1.2")
-/*[ENDIF] Java14 */
-/*[ELSE] Java11 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 14 */
+/*[ELSE] JAVA_SPEC_VERSION >= 11 */
 @Deprecated
-/*[ENDIF] Java11 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 public final void suspend() { 
 	checkAccess();
 	/*[PR 106321]*/
@@ -1256,9 +1262,6 @@ public final void suspend() {
 			suspendImpl();
 		}
 	}
-/*[IF Java13 & !Java14]*/
-	isSuspended = true;
-/*[ENDIF] Java13 & !Java14 */
 }
 
 /**
@@ -1303,16 +1306,16 @@ public static native void yield();
  */
 public static native boolean holdsLock(Object object);
 
-/*[IF Java11]*/
+/*[IF JAVA_SPEC_VERSION >= 11]*/
 static
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 void blockedOn(sun.nio.ch.Interruptible interruptible) {
 	Thread currentThread;
-	/*[IF Java11]*/
+	/*[IF JAVA_SPEC_VERSION >= 11]*/
 	currentThread = currentThread();
-	/*[ELSE]
+	/*[ELSE] JAVA_SPEC_VERSION >= 11
 	currentThread = this;
-	/*[ENDIF]*/
+	/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 	synchronized(currentThread.lock) {
 		currentThread.blockOn = interruptible;
 	}
@@ -1525,11 +1528,16 @@ void uncaughtException(Throwable e) {
  * @see J9VMInternals#threadCleanup()
  */
 void cleanup() {
-/*[IF Java11]*/
+/*[IF JAVA_SPEC_VERSION >= 14]*/
+	/* Refresh deadInterrupt value so it is accurate when thread reference is removed. */	
+	deadInterrupt = interrupted();
+/*[ENDIF] JAVA_SPEC_VERSION >= 14 */
+
+/*[IF JAVA_SPEC_VERSION >= 11]*/
 	if (threadLocals != null && TerminatingThreadLocal.REGISTRY.isPresent()) {
 		TerminatingThreadLocal.threadTerminated();
 	}
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 
 	/*[PR 97317]*/
 	group = null;

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -58,8 +58,6 @@ class JNILinkage : public PrivateLinkage
    int32_t computeMemoryArgSize(TR::Node *callNode, int32_t first, int32_t last, bool passThread = true);
    int32_t buildArgs(TR::Node *callNode, TR::RegisterDependencyConditions *deps, bool passThread = true, bool passReceiver = true);
    TR::Register *buildVolatileAndReturnDependencies(TR::Node *callNode, TR::RegisterDependencyConditions *deps, bool omitDedicatedFrameRegister);
-   void switchToMachineCStack(TR::Node *callNode);
-   void switchToJavaStack(TR::Node *callNode);
    void cleanupReturnValue(TR::Node *callNode, TR::Register *linkageReturnReg, TR::Register *targetReg);
 
    TR::Register *buildDirectDispatch(TR::Node *callNode, bool spillFPRegs);
@@ -68,7 +66,7 @@ class JNILinkage : public PrivateLinkage
    void buildJNIMergeLabelDependencies(TR::Node *callNode, bool killNonVolatileGPRs = true);
    void buildOutgoingJNIArgsAndDependencies(TR::Node *callNode, bool passThread = true, bool passReceiver = true, bool killNonVolatileGPRs = true);
    TR::Register *processJNIReferenceArg(TR::Node *child);
-   TR::Instruction *generateMethodDispatch(TR::Node *callNode, bool isJNIGCPoint = true, uintptrj_t targetAddress = 0);
+   TR::Instruction *generateMethodDispatch(TR::Node *callNode, bool isJNIGCPoint = true, uintptr_t targetAddress = 0);
    void releaseVMAccess(TR::Node *callNode);
    void acquireVMAccess(TR::Node *callNode);
 #ifdef J9VM_INTERP_ATOMIC_FREE_JNI

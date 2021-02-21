@@ -20,7 +20,10 @@
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
 
-add_library(j9ddr_misc SHARED
+set(OMR_ENHANCED_WARNINGS OFF)
+
+j9vm_add_library(j9ddr_misc SHARED
+	OUTPUT_NAME j9ddr_misc${J9VM_VERSION_SUFFIX}
 	algorithm_versions.c
 	gcddr.cpp
 	jitflagsddr.c
@@ -45,9 +48,15 @@ target_include_directories(j9ddr_misc
 
 # remove all optimization options so needed debugging information is not suppressed
 omr_remove_flags(CMAKE_CXX_FLAGS -O -O1 -O2 -O3 /Ox)
+omr_remove_flags(CMAKE_C_FLAGS -O -O1 -O2 -O3 /Ox)
 
-if((OMR_TOOLCONFIG STREQUAL "gnu") AND (NOT CMAKE_CXX_COMPILER_ID MATCHES Clang))
-	target_compile_options(j9ddr_misc PRIVATE -femit-class-debug-always)
+if(OMR_TOOLCONFIG STREQUAL "gnu")
+	# defining _FORTIFY_SOURCE is invalid when optimizations are disabled
+	omr_remove_flags(CMAKE_C_FLAGS ${OMR_STRNCPY_FORTIFY_OPTIONS})
+	omr_remove_flags(CMAKE_CXX_FLAGS ${OMR_STRNCPY_FORTIFY_OPTIONS})
+	if(NOT CMAKE_CXX_COMPILER_ID MATCHES Clang)
+		target_compile_options(j9ddr_misc PRIVATE -femit-class-debug-always)
+	endif()
 endif()
 
 

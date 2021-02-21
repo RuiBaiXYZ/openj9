@@ -49,10 +49,21 @@
 
 extern void TEMPORARY_initJ9X86TreeEvaluatorTable(TR::CodeGenerator *cg);
 
-J9::X86::CodeGenerator::CodeGenerator() :
-      J9::CodeGenerator(),
-      _stackFramePaddingSizeInBytes(0)
+J9::X86::CodeGenerator::CodeGenerator(TR::Compilation *comp) :
+      J9::CodeGenerator(comp),
+   _stackFramePaddingSizeInBytes(0)
    {
+   /**
+    * Do not add CodeGenerator initialization logic here.
+    * Use the \c initialize() method instead.
+    */
+   }
+
+void
+J9::X86::CodeGenerator::initialize()
+   {
+   self()->J9::CodeGenerator::initialize();
+
    TR::CodeGenerator *cg = self();
    TR::Compilation *comp = cg->comp();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg->fe());
@@ -85,19 +96,23 @@ J9::X86::CodeGenerator::CodeGenerator() :
    cg->setSupportsPartialInlineOfMethodHooks();
    cg->setSupportsInliningOfTypeCoersionMethods();
    cg->setSupportsNewInstanceImplOpt();
-   if (cg->getX86ProcessorInfo().supportsSSE4_1() &&
+
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) == cg->getX86ProcessorInfo().supportsSSE4_1(), "supportsSSE4_1() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSSE3) == cg->getX86ProcessorInfo().supportsSSSE3(), "supportsSSSE3() failed\n");
+
+   if (comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) &&
        !comp->getOption(TR_DisableSIMDStringCaseConv) &&
        !TR::Compiler->om.canGenerateArraylets())
       cg->setSupportsInlineStringCaseConversion();
 
-   if (cg->getX86ProcessorInfo().supportsSSSE3() &&
+   if (comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSSE3) &&
        !comp->getOption(TR_DisableFastStringIndexOf) &&
        !TR::Compiler->om.canGenerateArraylets())
       {
       cg->setSupportsInlineStringIndexOf();
       }
 
-   if (cg->getX86ProcessorInfo().supportsSSE4_1() &&
+   if (comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) &&
        !comp->getOption(TR_DisableSIMDStringHashCode) &&
        !TR::Compiler->om.canGenerateArraylets())
       {
@@ -166,10 +181,9 @@ J9::X86::CodeGenerator::CodeGenerator() :
          returnInfo = TR_DoubleXMMReturn;
          break;
       }
-    comp->setReturnInfo(returnInfo);
 
+   comp->setReturnInfo(returnInfo);
    }
-
 
 TR::Recompilation *
 J9::X86::CodeGenerator::allocateRecompilationInfo()
@@ -219,7 +233,7 @@ J9::X86::CodeGenerator::beginInstructionSelection()
    else if (methodSymbol->isJNI())
       {
 
-      intptrj_t methodAddress = (intptrj_t)methodSymbol->getResolvedMethod()->startAddressForJNIMethod(comp);
+      intptr_t methodAddress = (intptr_t)methodSymbol->getResolvedMethod()->startAddressForJNIMethod(comp);
 
       if (comp->target().is64Bit())
          new (self()->trHeapMemory()) TR::AMD64Imm64Instruction ((TR::Instruction *)NULL, DQImm64, methodAddress, self());
@@ -301,7 +315,7 @@ J9::X86::CodeGenerator::generateSwitchToInterpreterPrePrologue(
    TR::Compilation *comp = self()->comp();
    TR::Register *ediRegister = self()->allocateRegister();
    TR::ResolvedMethodSymbol *methodSymbol = comp->getJittedMethodSymbol();
-   intptrj_t feMethod = (intptrj_t)methodSymbol->getResolvedMethod()->resolvedMethodAddress();
+   intptr_t feMethod = (intptr_t)methodSymbol->getResolvedMethod()->resolvedMethodAddress();
    TR::LabelSymbol *startLabel = NULL;
 
    if (comp->target().is32Bit())
@@ -321,7 +335,7 @@ J9::X86::CodeGenerator::generateSwitchToInterpreterPrePrologue(
    deps->addPreCondition(ediRegister, TR::RealRegister::edi, self());
 
    TR::SymbolReference *helperSymRef =
-      self()->symRefTab()->findOrCreateRuntimeHelper(TR_j2iTransition, false, false, false);
+      self()->symRefTab()->findOrCreateRuntimeHelper(TR_j2iTransition);
 
    if (comp->target().is64Bit())
       {
@@ -337,7 +351,7 @@ J9::X86::CodeGenerator::generateSwitchToInterpreterPrePrologue(
          comp->getStaticHCRPICSites()->push_front(prev);
       }
 
-   prev = new (self()->trHeapMemory()) TR::X86ImmSymInstruction(prev, JMP4, (uintptrj_t)helperSymRef->getMethodAddress(), helperSymRef, deps, self());
+   prev = new (self()->trHeapMemory()) TR::X86ImmSymInstruction(prev, JMP4, (uintptr_t)helperSymRef->getMethodAddress(), helperSymRef, deps, self());
    self()->stopUsingRegister(ediRegister);
 
    if (comp->target().is64Bit())
@@ -357,14 +371,6 @@ J9::X86::CodeGenerator::generateSwitchToInterpreterPrePrologue(
    return prev;
    }
 
-
-bool
-J9::X86::CodeGenerator::allowGuardMerging()
-   {
-   return self()->fej9()->supportsGuardMerging();
-   }
-
-
 bool
 J9::X86::CodeGenerator::nopsAlsoProcessedByRelocations()
    {
@@ -375,7 +381,7 @@ J9::X86::CodeGenerator::nopsAlsoProcessedByRelocations()
 bool
 J9::X86::CodeGenerator::enableAESInHardwareTransformations()
    {
-   if (TR::CodeGenerator::getX86ProcessorInfo().supportsAESNI() && !self()->comp()->getOption(TR_DisableAESInHardware) && !self()->comp()->getCurrentMethod()->isJNINative())
+   if (self()->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_AESNI) && !self()->comp()->getOption(TR_DisableAESInHardware) && !self()->comp()->getCurrentMethod()->isJNINative())
       return true;
    else
       return false;
@@ -398,6 +404,13 @@ J9::X86::CodeGenerator::supportsInliningOfIsAssignableFrom()
    {
    static const bool disableInliningOfIsAssignableFrom = feGetEnv("TR_disableInlineIsAssignableFrom") != NULL;
    return !disableInliningOfIsAssignableFrom;
+   }
+
+bool
+J9::X86::CodeGenerator::canEmitBreakOnDFSet()
+   {
+   static const bool enableBreakOnDFSet = feGetEnv("TR_enableBreakOnDFSet") != NULL;
+   return enableBreakOnDFSet;
    }
 
 void

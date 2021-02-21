@@ -84,7 +84,7 @@ J9::CodeGenerator::createStackAtlas()
    ListIterator<TR::ParameterSymbol> parameterIterator(&methodSymbol->getParameterList());
    TR::ParameterSymbol *parmCursor;
 
-   intptrj_t stackSlotSize = TR::Compiler->om.sizeofReferenceAddress();
+   intptr_t stackSlotSize = TR::Compiler->om.sizeofReferenceAddress();
    int32_t sizeOfParameterAreaInBytes = methodSymbol->getNumParameterSlots() * stackSlotSize;
    int32_t firstMappedParmOffsetInBytes;
    int32_t parmOffsetInBytes;
@@ -300,7 +300,7 @@ J9::CodeGenerator::createStackAtlas()
             // the same GC index.
             //
             TR_IGNode * igNode;
-            if (igNode = self()->getLocalsIG()->getIGNodeForEntity(localCursor))
+            if ((igNode = self()->getLocalsIG()->getIGNodeForEntity(localCursor)) != NULL)
                {
                IGNodeColour colour = igNode->getColour();
 
@@ -350,7 +350,7 @@ J9::CodeGenerator::createStackAtlas()
             // the same GC index.
             //
             TR_IGNode * igNode;
-            if (igNode = self()->getLocalsIG()->getIGNodeForEntity(localCursor))
+            if ((igNode = self()->getLocalsIG()->getIGNodeForEntity(localCursor)) != NULL)
                {
                IGNodeColour colour = igNode->getColour();
 
@@ -378,7 +378,7 @@ J9::CodeGenerator::createStackAtlas()
             localObjectsFound = true;
             int32_t localObjectAlignment = comp->fej9()->getLocalObjectAlignmentInBytes();
             if (localObjectAlignment > stackSlotSize &&
-                (comp->target().cpu.isX86() || comp->target().cpu.isPower() || comp->target().cpu.isZ()))
+                self()->supportsStackAllocations())
                {
                // We only get here in compressedrefs mode
                int32_t gcMapIndexAlignment = localObjectAlignment / stackSlotSize;

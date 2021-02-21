@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -351,7 +351,11 @@ int32_t TR::MonitorElimination::perform()
 
    if (trace())
       {
-      traceMsg(comp(), "Starting Monitor Elimination for %s\n", comp()->signature());
+      traceMsg(
+         comp(),
+         "Starting Monitor Elimination for %s\n"
+         "Warning: limiting lastOptSubIndex in Monitor Elimination may leave monitors in an unbalanced state.\n",
+         comp()->signature());
       comp()->dumpMethodTrees("Trees before Monitor Elimination");
       }
 
@@ -426,7 +430,6 @@ int32_t TR::MonitorElimination::perform()
          traceMsg(comp(),"findRedundantMonitors returned true.  About to remove Redundant Monitors\n");
       removeRedundantMonitors();
 
-#ifndef PUBLIC_BUILD
       /* enable TLE by default on supported HW for now */
       if(!comp()->getOption(TR_DisableTLE) && comp()->cg()->getSupportsTLE())
          {
@@ -442,8 +445,6 @@ int32_t TR::MonitorElimination::perform()
                   transformMonitorsIntoTMRegions();
             }
          }
-#endif
-
       }
    else
       {
@@ -1055,8 +1056,6 @@ void TR::MonitorElimination::addOSRGuard(TR::TreeTop *guard)
       monitor->getOSRGuards().add(guard);
       }
    }
-
-#ifndef PUBLIC_BUILD
 
 // returns true if  we find at least one monitor who is a candidate for TM
 bool TR::MonitorElimination::evaluateMonitorsForTMCandidates()
@@ -1700,7 +1699,6 @@ void TR::MonitorElimination::transformMonitorsIntoTMRegions()
 
    }
 
-#endif
 
 bool TR::MonitorElimination::killsReadMonitorProperty(TR::Node *node)
    {
@@ -4526,7 +4524,7 @@ void TR::MonitorElimination::addCatchBlocks()
                }
 
             firstTime = false;
-            cfg->addExceptionEdge(block, catchBlock);
+            cfg->addExceptionEdgeUnchecked(block, catchBlock);
             if (trace())
                traceMsg(comp(), "Added edge from block_%d to catch block_%d\n", block->getNumber(), catchBlock->getNumber());
 

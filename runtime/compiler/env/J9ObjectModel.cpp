@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -100,12 +100,58 @@ J9::ObjectModel::initialize()
    }
 
 
+bool
+J9::ObjectModel::areValueTypesEnabled()
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      auto *vmInfo = TR::compInfoPT->getClientData()->getOrCacheVMInfo(stream);
+      return J9_ARE_ALL_BITS_SET(vmInfo->_extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_VALHALLA);
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
+   J9JavaVM * javaVM = TR::Compiler->javaVM;
+   return javaVM->internalVMFunctions->areValueTypesEnabled(javaVM);
+   }
+
+
+bool
+J9::ObjectModel::areValueBasedMonitorChecksEnabled()
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      auto *vmInfo = TR::compInfoPT->getClientData()->getOrCacheVMInfo(stream);
+	   return J9_ARE_ANY_BITS_SET(vmInfo->_extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_VALUE_BASED_EXCEPTION | J9_EXTENDED_RUNTIME2_VALUE_BASED_WARNING);
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
+   J9JavaVM * javaVM = TR::Compiler->javaVM;
+   return javaVM->internalVMFunctions->areValueBasedMonitorChecksEnabled(javaVM);
+   }
+
+
 int32_t
 J9::ObjectModel::sizeofReferenceField()
    {
    if (compressObjectReferences())
       return sizeof(uint32_t);
-   return sizeof(uintptrj_t);
+   return sizeof(uintptr_t);
+   }
+
+
+bool
+J9::ObjectModel::isHotReferenceFieldRequired()
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      auto *vmInfo = TR::compInfoPT->getClientData()->getOrCacheVMInfo(stream);
+      return vmInfo->_isHotReferenceFieldRequired;
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+   return TR::Compiler->javaVM->memoryManagerFunctions->j9gc_hot_reference_field_required(TR::Compiler->javaVM);
    }
 
 
@@ -237,14 +283,14 @@ J9::ObjectModel::generateCompressedObjectHeaders()
    }
 
 
-uintptrj_t
+uintptr_t
 J9::ObjectModel::contiguousArrayHeaderSizeInBytes()
    {
    return compressObjectReferences() ? sizeof(J9IndexableObjectContiguousCompressed) : sizeof(J9IndexableObjectContiguousFull);
    }
 
 
-uintptrj_t
+uintptr_t
 J9::ObjectModel::discontiguousArrayHeaderSizeInBytes()
    {
    return compressObjectReferences() ? sizeof(J9IndexableObjectDiscontiguousCompressed) : sizeof(J9IndexableObjectDiscontiguousFull);
@@ -333,14 +379,14 @@ J9::ObjectModel::compressedReferenceShift()
    }
 
 
-uintptrj_t
+uintptr_t
 J9::ObjectModel::offsetOfObjectVftField()
    {
    return TMP_OFFSETOF_J9OBJECT_CLAZZ;
    }
 
 
-uintptrj_t
+uintptr_t
 J9::ObjectModel::offsetOfHeaderFlags()
    {
 #if defined(J9VM_INTERP_FLAGS_IN_CLASS_SLOT)
@@ -355,7 +401,7 @@ J9::ObjectModel::offsetOfHeaderFlags()
    }
 
 
-uintptrj_t
+uintptr_t
 J9::ObjectModel::maskOfObjectVftField()
    {
    if (TR::Compiler->om.offsetOfHeaderFlags() != TR::Compiler->om.offsetOfObjectVftField())
@@ -363,10 +409,10 @@ J9::ObjectModel::maskOfObjectVftField()
       // Flags are not in the VFT field, so no need for a mask
       //
       if (TR::Options::getCmdLineOptions()->getOption(TR_DisableMaskVFTPointers))
-         return ~(uintptrj_t)0;
+         return ~(uintptr_t)0;
       }
 
-   return (uintptrj_t)(-J9_REQUIRED_CLASS_ALIGNMENT);
+   return (uintptr_t)(-J9_REQUIRED_CLASS_ALIGNMENT);
    }
 
 
@@ -443,28 +489,46 @@ J9::ObjectModel::objectAlignmentInBytes()
    return (int32_t)result;
    }
 
-uintptrj_t
+uintptr_t
 J9::ObjectModel::offsetOfContiguousArraySizeField()
    {
    return compressObjectReferences() ? offsetof(J9IndexableObjectContiguousCompressed, size) : offsetof(J9IndexableObjectContiguousFull, size);
    }
 
 
-uintptrj_t
+uintptr_t
 J9::ObjectModel::offsetOfDiscontiguousArraySizeField()
    {
    return compressObjectReferences() ? offsetof(J9IndexableObjectDiscontiguousCompressed, size) : offsetof(J9IndexableObjectDiscontiguousFull, size);
    }
 
+#if defined(TR_TARGET_64BIT)
+uintptr_t
+J9::ObjectModel::offsetOfContiguousDataAddrField()
+   {
+   return compressObjectReferences()
+		? offsetof(J9IndexableObjectContiguousCompressed, dataAddr)
+		: offsetof(J9IndexableObjectContiguousFull, dataAddr);
+   }
 
-uintptrj_t
+uintptr_t
+J9::ObjectModel::offsetOfDiscontiguousDataAddrField()
+   {
+   return compressObjectReferences()
+		? offsetof(J9IndexableObjectDiscontiguousCompressed, dataAddr)
+		: offsetof(J9IndexableObjectDiscontiguousFull, dataAddr);
+   }
+#endif /* TR_TARGET_64BIT */
+
+
+uintptr_t
 J9::ObjectModel::objectHeaderSizeInBytes()
    {
    return compressObjectReferences() ? sizeof(J9ObjectCompressed) : sizeof(J9ObjectFull);
    }
 
 
-uintptrj_t
+uintptr_t
 J9::ObjectModel::offsetOfIndexableSizeField()
    {
    return offsetof(J9ROMArrayClass, arrayShape);
@@ -472,7 +536,7 @@ J9::ObjectModel::offsetOfIndexableSizeField()
 
 
 bool
-J9::ObjectModel::isDiscontiguousArray(TR::Compilation* comp, uintptrj_t objectPointer)
+J9::ObjectModel::isDiscontiguousArray(TR::Compilation* comp, uintptr_t objectPointer)
    {
    TR_ASSERT(TR::Compiler->vm.hasAccess(comp), "isDicontiguousArray requires VM access");
    TR_ASSERT(TR::Compiler->cls.isClassArray(comp, TR::Compiler->cls.objectClass(comp, (objectPointer))), "Object is not an array");
@@ -503,8 +567,8 @@ J9::ObjectModel::isDiscontiguousArray(TR::Compilation* comp, uintptrj_t objectPo
  * \return
  *    The address of the element.
  */
-uintptrj_t
-J9::ObjectModel::getAddressOfElement(TR::Compilation* comp, uintptrj_t objectPointer, int64_t offset)
+uintptr_t
+J9::ObjectModel::getAddressOfElement(TR::Compilation* comp, uintptr_t objectPointer, int64_t offset)
    {
    TR_ASSERT(TR::Compiler->vm.hasAccess(comp), "getAddressOfElement requires VM access");
    TR_ASSERT(TR::Compiler->cls.isClassArray(comp, TR::Compiler->cls.objectClass(comp, (objectPointer))), "Object is not an array");
@@ -518,12 +582,12 @@ J9::ObjectModel::getAddressOfElement(TR::Compilation* comp, uintptrj_t objectPoi
    // The following code handles discontiguous array
    //
    // Treat the array as a byte array, so the element size is 1
-   uintptrj_t elementSize = 1;
+   uintptr_t elementSize = 1;
    int64_t elementIndex = offset - TR::Compiler->om.contiguousArrayHeaderSizeInBytes();
 
-   uintptrj_t leafIndex = comp->fej9()->getArrayletLeafIndex(elementIndex, elementSize);
-   uintptrj_t elementIndexInLeaf = comp->fej9()->getLeafElementIndex(elementIndex, elementSize);
-   uintptrj_t dataStart = objectPointer + TR::Compiler->om.discontiguousArrayHeaderSizeInBytes();
+   uintptr_t leafIndex = comp->fej9()->getArrayletLeafIndex(elementIndex, elementSize);
+   uintptr_t elementIndexInLeaf = comp->fej9()->getLeafElementIndex(elementIndex, elementSize);
+   uintptr_t dataStart = objectPointer + TR::Compiler->om.discontiguousArrayHeaderSizeInBytes();
 
    if (comp->useCompressedPointers())
       {
@@ -533,14 +597,14 @@ J9::ObjectModel::getAddressOfElement(TR::Compilation* comp, uintptrj_t objectPoi
       }
    else
       {
-      uintptrj_t *spine = (uintptrj_t*)dataStart;
+      uintptr_t *spine = (uintptr_t*)dataStart;
       dataStart = spine[leafIndex];
       }
 
    return dataStart + elementIndexInLeaf * elementSize;
    }
 
-uintptrj_t
+uintptr_t
 J9::ObjectModel::getArrayElementWidthInBytes(TR::DataType type)
    {
    if (type == TR::Address)
@@ -549,30 +613,30 @@ J9::ObjectModel::getArrayElementWidthInBytes(TR::DataType type)
       return TR::Symbol::convertTypeToSize(type);
    }
 
-uintptrj_t
-J9::ObjectModel::getArrayElementWidthInBytes(TR::Compilation* comp, uintptrj_t objectPointer)
+uintptr_t
+J9::ObjectModel::getArrayElementWidthInBytes(TR::Compilation* comp, uintptr_t objectPointer)
    {
    TR_ASSERT(TR::Compiler->vm.hasAccess(comp), "Must haveAccess in getArrayElementWidthInBytes");
    return TR::Compiler->cls.getArrayElementWidthInBytes(comp, TR::Compiler->cls.objectClass(comp, (objectPointer)));
    }
 
-uintptrj_t
-J9::ObjectModel::getArrayLengthInBytes(TR::Compilation* comp, uintptrj_t objectPointer)
+uintptr_t
+J9::ObjectModel::getArrayLengthInBytes(TR::Compilation* comp, uintptr_t objectPointer)
    {
    TR_ASSERT(TR::Compiler->vm.hasAccess(comp), "Must haveAccess in getArrayLengthInBytes");
-   return (uintptrj_t)TR::Compiler->om.getArrayLengthInElements(comp, objectPointer) * TR::Compiler->om.getArrayElementWidthInBytes(comp, objectPointer);
+   return (uintptr_t)TR::Compiler->om.getArrayLengthInElements(comp, objectPointer) * TR::Compiler->om.getArrayElementWidthInBytes(comp, objectPointer);
    }
 
-intptrj_t
-J9::ObjectModel::getArrayLengthInElements(TR::Compilation* comp, uintptrj_t objectPointer)
+intptr_t
+J9::ObjectModel::getArrayLengthInElements(TR::Compilation* comp, uintptr_t objectPointer)
    {
    return comp->fej9()->getArrayLengthInElements(objectPointer);
    }
 
-uintptrj_t
-J9::ObjectModel::decompressReference(TR::Compilation* comp, uintptrj_t compressedReference)
+uintptr_t
+J9::ObjectModel::decompressReference(TR::Compilation* comp, uintptr_t compressedReference)
    {
-   return (compressedReference << TR::Compiler->om.compressedReferenceShift()) + TR::Compiler->vm.heapBaseAddress();
+   return (compressedReference << TR::Compiler->om.compressedReferenceShift());
    }
 
 bool

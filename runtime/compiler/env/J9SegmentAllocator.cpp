@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,6 +26,7 @@
 #include "control/Options.hpp"
 #include "control/Options_inlines.hpp"
 #include "control/CompilationRuntime.hpp"
+#include "env/VerboseLog.hpp"
 #include "OMR/Bytes.hpp"
 #include "j9.h"
 #undef min
@@ -68,7 +69,7 @@ SegmentAllocator::allocate(const size_t segmentSize, const std::nothrow_t &tag) 
             //
             // We allow a small race condition: it is possible that between the test
             // for available physical memory and setting of the flag below, another
-            // compilation thread has suspended itself and reset the flag. The code 
+            // compilation thread has suspended itself and reset the flag. The code
             // below is going to set the flag again, possibly resulting into two
             // compilation threads being suspended. This is still fine, because, if
             // needed, a new compilation thread will be activated when a compilation
@@ -147,7 +148,7 @@ SegmentAllocator::preventAllocationOfBTLMemory(J9MemorySegment * &segment, J9Jav
    // Special code for zOS. If we allocated BTL memory (first 16MB), then we must
    // release this segment, failing the compilation and forcing to use only one compilation thread
    if (TR::Options::getCmdLineOptions()->getOption(TR_DontAllocateScratchBTL) &&
-      segment && ((uintptrj_t)(segment->heapBase) < (uintptrj_t)(1 << 24)))
+      segment && ((uintptr_t)(segment->heapBase) < (uintptr_t)(1 << 24)))
       {
       // If applicable, reduce the number of compilation threads to 1
       TR::CompilationInfo * compInfo = TR::CompilationInfo::get();

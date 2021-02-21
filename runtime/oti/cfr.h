@@ -27,7 +27,6 @@
 extern "C" {
 #endif
 
-
 #include "j9.h"
 #include "j9port.h"
 
@@ -241,6 +240,7 @@ typedef struct J9CfrAttribute {
 #define CFR_ATTRIBUTE_NestMembers 25
 #define CFR_ATTRIBUTE_NestHost 26
 #define CFR_ATTRIBUTE_Record 27
+#define CFR_ATTRIBUTE_PermittedSubclasses 28
 #define CFR_ATTRIBUTE_StrippedLocalVariableTypeTable  122
 #define CFR_ATTRIBUTE_StrippedSourceDebugExtension  123
 #define CFR_ATTRIBUTE_StrippedInnerClasses  124
@@ -486,7 +486,7 @@ typedef struct J9CfrAttributeSynthetic {
     UDATA romAddress;
 } J9CfrAttributeSynthetic;
 
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 typedef struct J9CfrAttributeNestHost {
 	U_8 tag;
 	U_16 nameIndex;
@@ -503,7 +503,7 @@ typedef struct J9CfrAttributeNestMembers {
 	U_16 numberOfClasses;
 	U_16* classes;
 } J9CfrAttributeNestMembers;
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 typedef struct J9CfrAttributeUnknown {
     U_8 tag;
@@ -521,6 +521,15 @@ typedef struct J9CfrAttributeRecord {
     U_16 numberOfRecordComponents;
     struct J9CfrRecordComponent* recordComponents;
 } J9CfrAttributeRecord;
+
+typedef struct J9CfrAttributePermittedSubclasses {
+    U_8 tag;
+    U_16 nameIndex;
+    U_32 length;
+    UDATA romAddress;
+    U_16 numberOfClasses;
+    U_16* classes;
+} J9CfrAttributePermittedSubclasses;
 
 /* @ddr_namespace: map_to_type=J9CfrConstantPoolInfo */
 
@@ -883,7 +892,7 @@ typedef struct J9CfrClassFile {
 #define CFR_INTERFACE_CLASS_ACCESS_MASK			(CFR_ACC_PUBLIC | CFR_ACC_INTERFACE | CFR_ACC_ABSTRACT | CFR_ACC_SYNTHETIC | CFR_ACC_ANNOTATION)
 #define CFR_FIELD_ACCESS_MASK  					(CFR_ACC_PUBLIC | CFR_ACC_PRIVATE | CFR_ACC_PROTECTED | CFR_ACC_STATIC | CFR_ACC_FINAL | CFR_ACC_VOLATILE | CFR_ACC_TRANSIENT | CFR_ACC_SYNTHETIC | CFR_ACC_ENUM)
 #define CFR_INTERFACE_FIELD_ACCESS_MASK  		(CFR_ACC_PUBLIC | CFR_ACC_STATIC | CFR_ACC_FINAL | CFR_ACC_SYNTHETIC)
-#define CFR_INTERFACE_FIELD_ACCESS_REQUIRED  	(CFR_ACC_PUBLIC | CFR_ACC_STATIC | CFR_ACC_FINAL) 
+#define CFR_INTERFACE_FIELD_ACCESS_REQUIRED  	(CFR_ACC_PUBLIC | CFR_ACC_STATIC | CFR_ACC_FINAL)
 #define CFR_METHOD_ACCESS_MASK  				(CFR_ACC_PUBLIC | CFR_ACC_PRIVATE | CFR_ACC_PROTECTED | CFR_ACC_STATIC | CFR_ACC_FINAL | CFR_ACC_SYNCHRONIZED | CFR_ACC_BRIDGE | CFR_ACC_VARARGS | CFR_ACC_NATIVE | CFR_ACC_STRICT | CFR_ACC_ABSTRACT | CFR_ACC_SYNTHETIC)
 #define CFR_ABSTRACT_METHOD_ACCESS_MASK  		(CFR_ACC_PUBLIC | CFR_ACC_PROTECTED | CFR_ACC_BRIDGE | CFR_ACC_VARARGS | CFR_ACC_ABSTRACT | CFR_ACC_SYNTHETIC)
 #define CFR_INTERFACE_METHOD_ACCESS_MASK  		(CFR_ACC_PUBLIC | CFR_ACC_BRIDGE | CFR_ACC_VARARGS | CFR_ACC_ABSTRACT | CFR_ACC_SYNTHETIC)
@@ -920,13 +929,14 @@ typedef struct J9CfrClassFile {
 #define CFR_DECODE_J9_METHODTYPEREF		24
 #define CFR_J9FLAG_HAS_JSR  		1
 #define CFR_J9FLAG_IS_RECORD        2
+#define CFR_J9FLAG_IS_SEALED        4
 
 #if defined(J9VM_ENV_DATA64)
-#define ROM_ADDRESS_LENGTH 16
-#define ROM_ADDRESS_FORMAT "%016X\0"
+#define ROM_ADDRESS_LENGTH 18
+#define ROM_ADDRESS_FORMAT "0x%016x"
 #else
-#define ROM_ADDRESS_LENGTH 8
-#define ROM_ADDRESS_FORMAT "%08X\0"
+#define ROM_ADDRESS_LENGTH 10
+#define ROM_ADDRESS_FORMAT "0x%08x"
 #endif
 
 #define CFR_METHOD_EXT_HAS_METHOD_TYPE_ANNOTATIONS 0x01
@@ -934,6 +944,9 @@ typedef struct J9CfrClassFile {
 #define CFR_METHOD_EXT_INVALID_CP_ENTRY 0x04
 
 #define ANON_CLASSNAME_CHARACTER_SEPARATOR '/'
+
+#define CFR_FOUND_CHARS_IN_EXTENDED_MUE_FORM 0x1
+#define CFR_FOUND_SEPARATOR_IN_MUE_FORM 0x2
 
 #ifdef __cplusplus
 }

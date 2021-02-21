@@ -1,4 +1,4 @@
-dnl Copyright (c) 2019, 2020 IBM Corp. and others
+dnl Copyright (c) 2019, 2021 IBM Corp. and others
 dnl
 dnl This program and the accompanying materials are made available under
 dnl the terms of the Eclipse Public License 2.0 which accompanies this
@@ -178,9 +178,9 @@ define({NEW_DUAL_MODE_HELPER},{
 	ret x0
 .L_old_slow_$1:
 	RESTORE_C_NONVOLATILE_REGS
+	SWITCH_TO_JAVA_STACK
 .L_done_$1:
 	RESTORE_FPLR
-	SWITCH_TO_JAVA_STACK
 	ldr x0,[J9VMTHREAD,{#}J9TR_VMThread_returnValue]
 	ret
 	END_PROC($1)
@@ -201,9 +201,9 @@ define({NEW_DUAL_MODE_HELPER_NO_RETURN_VALUE},{
 	ret x0
 .L_old_slow_$1:
 	RESTORE_C_NONVOLATILE_REGS
+	SWITCH_TO_JAVA_STACK
 .L_done_$1:
 	RESTORE_FPLR
-	SWITCH_TO_JAVA_STACK
 	ret
 	END_PROC($1)
 })
@@ -284,6 +284,14 @@ SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitReportInstanceFieldWrite,3)
 SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitReportStaticFieldRead,1)
 SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitReportStaticFieldWrite,2)
 FAST_PATH_ONLY_HELPER(jitAcmpHelper,2)
+OLD_DUAL_MODE_HELPER(jitGetFlattenableField,2)
+OLD_DUAL_MODE_HELPER(jitWithFlattenableField,3)
+OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE(jitPutFlattenableField,3)
+OLD_DUAL_MODE_HELPER(jitGetFlattenableStaticField,2)
+OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE(jitPutFlattenableStaticField,3)
+OLD_DUAL_MODE_HELPER(jitLoadFlattenableArrayElement,2)
+OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE(jitStoreFlattenableArrayElement,3)
+SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitResolveFlattenableField,3)
 
 dnl Trap handlers
 
@@ -332,6 +340,7 @@ dnl Exception throw helpers
 
 EXCEPTION_THROW_HELPER(jitThrowCurrentException,0)
 EXCEPTION_THROW_HELPER(jitThrowException,1)
+EXCEPTION_THROW_HELPER(jitThrowUnreportedException,1)
 EXCEPTION_THROW_HELPER(jitThrowAbstractMethodError,0)
 EXCEPTION_THROW_HELPER(jitThrowArithmeticException,0)
 EXCEPTION_THROW_HELPER(jitThrowArrayIndexOutOfBounds,0)
@@ -376,7 +385,6 @@ UNUSED(jitNewObjectNoTenantInit)
 UNUSED(jitPostJNICallOffloadCheck)
 UNUSED(jitPreJNICallOffloadCheck)
 UNUSED(jitFindFieldSignatureClass)
-UNUSED(icallVMprJavaSendInvokeWithArgumentsHelperL)
 UNUSED(j2iInvokeWithArguments)
 
 dnl Switch from the C stack to the java stack and jump via tempSlot
@@ -822,3 +830,26 @@ START_PROC(jitDecompileOnReturnL)
 	CALL_C_WITH_VMTHREAD(c_jitDecompileOnReturn)
 	BRANCH_VIA_VMTHREAD(J9TR_VMThread_tempSlot)
 END_PROC(jitDecompileOnReturnL)
+
+dnl Expects x0 to already contain the vmThread.
+dnl Expects x1 to already contain the address being loaded from.
+START_PROC(jitSoftwareReadBarrier)
+ifdef({OMR_GC_CONCURRENT_SCAVENGER},{
+	SAVE_FPLR
+	SWITCH_TO_C_STACK
+	SAVE_C_VOLATILE_REGS
+
+	ldr x2,[J9VMTHREAD,{#}J9TR_VMThread_javaVM]
+	ldr x2,[x2,{#}J9TR_JavaVM_memoryManagerFunctions]
+	ldr x2,[x2,{#}J9TR_J9MemoryManagerFunctions_J9ReadBarrier]
+	blr x2
+
+	RESTORE_C_VOLATILE_REGS
+	RESTORE_FPLR
+	SWITCH_TO_JAVA_STACK
+	ret
+},{
+dnl jitSoftwareReadBarrier is not supported if OMR_GC_CONCURRENT_SCAVENGER is not set
+	hlt {#}0
+})
+END_PROC(jitSoftwareReadBarrier)

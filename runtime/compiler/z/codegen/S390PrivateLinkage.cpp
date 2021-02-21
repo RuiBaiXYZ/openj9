@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -58,10 +58,10 @@
 ////////////////////////////////////////////////////////////////////////////////
 // J9::Z::PrivateLinkage for J9
 ////////////////////////////////////////////////////////////////////////////////
-J9::Z::PrivateLinkage::PrivateLinkage(TR::CodeGenerator * codeGen,TR_S390LinkageConventions elc, TR_LinkageConventions lc)
+J9::Z::PrivateLinkage::PrivateLinkage(TR::CodeGenerator * codeGen,TR_LinkageConventions lc)
    : J9::PrivateLinkage(codeGen)
    {
-   setExplicitLinkageType(elc);
+   setLinkageType(lc);
 
    // linkage properties
    setProperty(SplitLongParm);
@@ -101,7 +101,7 @@ J9::Z::PrivateLinkage::PrivateLinkage(TR::CodeGenerator * codeGen,TR_S390Linkage
    setLongDoubleReturnRegister4  (TR::RealRegister::FPR4 );
    setLongDoubleReturnRegister6  (TR::RealRegister::FPR6 );
 
-   if(codeGen->comp()->target().cpu.getSupportsArch(TR::CPU::z13) && codeGen->comp()->target().cpu.getSupportsVectorFacility() &&
+   if(comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z13) && comp()->target().cpu.supportsFeature(OMR_FEATURE_S390_VECTOR_FACILITY) &&
      !comp()->getOption(TR_DisableSIMD))
        {
        codeGen->setSupportsVectorRegisters();
@@ -112,11 +112,11 @@ J9::Z::PrivateLinkage::PrivateLinkage(TR::CodeGenerator * codeGen,TR_S390Linkage
       comp()->setOption(TR_DisableSIMD);
       }
 
-   static const bool enableVectorLinkage = codeGen->getSupportsVectorRegisters();
+   const bool enableVectorLinkage = codeGen->getSupportsVectorRegisters();
    if (enableVectorLinkage) setVectorReturnRegister(TR::RealRegister::VRF24);
 
    setStackPointerRegister  (TR::RealRegister::GPR5 );
-   setEntryPointRegister    ((codeGen->comp()->target().isLinux()) ? TR::RealRegister::GPR4 : TR::RealRegister::GPR15);
+   setEntryPointRegister    (comp()->target().isLinux() ? TR::RealRegister::GPR4 : TR::RealRegister::GPR15);
    setReturnAddressRegister (TR::RealRegister::GPR14);
 
    setVTableIndexArgumentRegister (TR::RealRegister::GPR0);
@@ -150,7 +150,7 @@ J9::Z::PrivateLinkage::PrivateLinkage(TR::CodeGenerator * codeGen,TR_S390Linkage
       setNumVectorArgumentRegisters(vecIndex);
       }
 
-   setOffsetToFirstLocal  ((codeGen->comp()->target().is64Bit()) ? -8 : -4);
+   setOffsetToFirstLocal  (comp()->target().is64Bit() ? -8 : -4);
    setOffsetToRegSaveArea (0);
    setOffsetToLongDispSlot(0);
    setOffsetToFirstParm   (0);
@@ -236,7 +236,7 @@ void J9::Z::PrivateLinkage::alignLocalsOffset(uint32_t &stackIndex, uint32_t loc
 
       atlas->setNumberOfSlotsMapped(atlas->getNumberOfSlotsMapped() + ((stackIndexBeforeAlignment - stackIndex) / TR::Compiler->om.sizeofReferenceAddress()));
 
-      if (cg()->getTraceRAOption(TR_TraceRASpillTemps))
+      if (comp()->getOption(TR_TraceRA))
          {
          traceMsg(comp(),"\nAlign stack offset before alignment = %d and after alignment = %d\n", stackIndexBeforeAlignment, stackIndex);
          }
@@ -248,14 +248,6 @@ void J9::Z::PrivateLinkage::alignLocalsOffset(uint32_t &stackIndex, uint32_t loc
 // J9::Z::PrivateLinkage::mapCompactedStack - maps variables onto the stack, sharing
 //     stack slots for automatic variables with non-interfering live ranges.
 ////////////////////////////////////////////////////////////////////////////////
-#ifdef DEBUG
-// track the total size of the stacks of all methods compiled had we not compacted them
-static uint32_t accumOrigSize = 0;
-
-// track the total size of the stacks of all methods compiled with stack compaction
-static uint32_t accumMappedSize = 0;
-#endif
-
 void
 J9::Z::PrivateLinkage::mapCompactedStack(TR::ResolvedMethodSymbol * method)
    {
@@ -440,7 +432,7 @@ J9::Z::PrivateLinkage::mapCompactedStack(TR::ResolvedMethodSymbol * method)
          {
          int32_t newOffset = stackIndex + pointerSize*(localCursor->getGCMapIndex()-firstLocalGCIndex);
 
-         if (cg()->getTraceRAOption(TR_TraceRASpillTemps))
+         if (comp()->getOption(TR_TraceRA))
             traceMsg(comp(), "\nmapCompactedStack: changing %s (GC index %d) offset from %d to %d",
                comp()->getDebug()->getName(localCursor), localCursor->getGCMapIndex(), localCursor->getOffset(), newOffset);
 
@@ -635,13 +627,6 @@ J9::Z::PrivateLinkage::mapCompactedStack(TR::ResolvedMethodSymbol * method)
                   (mappedSize),
                   origSize,
                   origSize - mappedSize,
-                  comp()->signature());
-
-      accumMappedSize += mappedSize;
-      accumOrigSize += origSize;
-
-      diagnostic("\n**** Accumulated totals: mapped size=%d, shared size=%d, original size=%d after %s\n",
-                  accumMappedSize, accumOrigSize-accumMappedSize, accumOrigSize,
                   comp()->signature());
       }
 #endif
@@ -944,7 +929,7 @@ J9::Z::PrivateLinkage::setParameterLinkageRegisterIndex(TR::ResolvedMethodSymbol
                {
                index = numIntArgs;
                }
-            numIntArgs += (self()->cg()->comp()->target().is64Bit() ? 1 : 2);
+            numIntArgs += (comp()->target().is64Bit() ? 1 : 2);
             break;
          case TR::Float:
          case TR::Double:
@@ -957,7 +942,7 @@ J9::Z::PrivateLinkage::setParameterLinkageRegisterIndex(TR::ResolvedMethodSymbol
             break;
          case TR::DecimalLongDouble:
             // On zLinux Long Double is passed in memory using a pointer to buffer
-            if(self()->cg()->comp()->target().isLinux())
+            if(comp()->target().isLinux())
                {
                if(numIntArgs < self()->getNumIntegerArgumentRegisters())
                   index = numIntArgs++;
@@ -1108,7 +1093,7 @@ J9::Z::PrivateLinkage::setupLiteralPoolRegister(TR::Snippet *firstSnippet)
    if (!cg()->isLiteralPoolOnDemandOn() && firstSnippet != NULL)
       {
       // The immediate operand will be patched when the actual address of the literal pool is known
-      if (!cg()->comp()->target().cpu.getSupportsArch(TR::CPU::z10) || cg()->anyLitPoolSnippets())
+      if (cg()->anyLitPoolSnippets())
          {
          return getLitPoolRealRegister()->getRegisterNumber();
          }
@@ -1153,7 +1138,7 @@ J9::Z::PrivateLinkage::createPrologue(TR::Instruction * cursor)
       setStackSizeCheckNeeded(true);
       }
 
-   if (0 && cg()->comp()->target().is64Bit())
+   if (0 && comp()->target().is64Bit())
       {
       argSize = cg()->getLargestOutgoingArgSize() * 2 + getOffsetToFirstParm();
       }
@@ -1289,7 +1274,6 @@ J9::Z::PrivateLinkage::createPrologue(TR::Instruction * cursor)
       }
 
       // End of stack overflow checking code ////////////////////////
-#if !defined(PUBLIC_BUILD)
    static bool bppoutline = (feGetEnv("TR_BPRP_Outline")!=NULL);
 
    if (bppoutline && cg()->_outlineCall._frequency != -1)
@@ -1306,7 +1290,6 @@ J9::Z::PrivateLinkage::createPrologue(TR::Instruction * cursor)
       TR::MemoryReference * tempMR = generateS390MemoryReference(epReg, 0, cg());
       cursor = generateS390BranchPredictionPreloadInstruction(cg(), TR::InstOpCode::BPP, firstNode, cg()->_outlineArrayCall._callLabel, (int8_t) 0xD, tempMR, cursor);
       }
-#endif
 
       if (cg()->getSupportsRuntimeInstrumentation())
          cursor = TR::TreeEvaluator::generateRuntimeInstrumentationOnOffSequence(cg(), TR::InstOpCode::RION, firstNode, cursor, true);
@@ -1437,14 +1420,10 @@ J9::Z::PrivateLinkage::createPrologue(TR::Instruction * cursor)
    // Save or move arguments according to the result of register assignment.
    cursor = (TR::Instruction *) saveArguments(cursor, false);
 
-   if (cg()->comp()->target().cpu.getSupportsArch(TR::CPU::z10))
+   static const bool prefetchStack = feGetEnv("TR_PrefetchStack") != NULL;
+   if (cg()->isPrefetchNextStackCacheLine() && prefetchStack)
       {
-      static const bool prefetchStack = feGetEnv("TR_PrefetchStack") != NULL;
-
-      if (cg()->isPrefetchNextStackCacheLine() && prefetchStack)
-         {
-         cursor = generateRXInstruction(cg(), TR::InstOpCode::PFD, firstNode, 2, generateS390MemoryReference(spReg, -256, cg()), cursor);
-         }
+      cursor = generateRXInstruction(cg(), TR::InstOpCode::PFD, firstNode, 2, generateS390MemoryReference(spReg, -256, cg()), cursor);
       }
 
    // Cold Eyecatcher is used for padding of endPC so that Return Address for exception snippets will never equal the endPC.
@@ -1479,9 +1458,7 @@ J9::Z::PrivateLinkage::createEpilogue(TR::Instruction * cursor)
    TR::RealRegister * epReg = getRealRegister(getEntryPointRegister());
    int32_t blockNumber = -1;
 
-#if !defined(PUBLIC_BUILD)
    bool enableBranchPreload = cg()->supportsBranchPreload();
-#endif
 
    dep = cursor->getNext()->getDependencyConditions();
    offset = getOffsetToRegSaveArea();
@@ -1512,7 +1489,7 @@ J9::Z::PrivateLinkage::createEpilogue(TR::Instruction * cursor)
       if (comp()->getOption(TR_TraceCG))
          traceMsg(comp(), "No RAREG context restore needed in Epilog\n");
       }
-#if !defined(PUBLIC_BUILD)
+
    if (enableBranchPreload && (cursor->getNext() == cg()->_hottestReturn._returnInstr))
       {
       if (cg()->_hottestReturn._frequency > 6 && cg()->_hottestReturn._insertBPPInEpilogue)
@@ -1523,7 +1500,6 @@ J9::Z::PrivateLinkage::createEpilogue(TR::Instruction * cursor)
          cg()->_hottestReturn._insertBPPInEpilogue = false;
          }
       }
-#endif
 
    // Restore GPRs
    firstUsedReg = getFirstRestoredRegister(TR::RealRegister::GPR6, TR::RealRegister::GPR12);
@@ -1577,7 +1553,6 @@ J9::Z::PrivateLinkage::createEpilogue(TR::Instruction * cursor)
       cursor = TR::TreeEvaluator::generateRuntimeInstrumentationOnOffSequence(cg(), TR::InstOpCode::RIOFF, currentNode, cursor, true);
 
 
-#if !defined(PUBLIC_BUILD)
    if (enableBranchPreload)
       {
       if (cursor->getNext() == cg()->_hottestReturn._returnInstr)
@@ -1588,7 +1563,6 @@ J9::Z::PrivateLinkage::createEpilogue(TR::Instruction * cursor)
             }
          }
       }
-#endif
 
    cursor = generateS390RegInstruction(cg(), TR::InstOpCode::BCR, currentNode, getRealRegister(getReturnAddressRegister()), cursor);
    ((TR::S390RegInstruction *)cursor)->setBranchCondition(TR::InstOpCode::COND_BCR);
@@ -1796,7 +1770,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
                      TR_ResolvedMethod * method = chTable->findSingleAbstractImplementer(thisClass, methodSymRef->getOffset(),
                                                                 methodSymRef->getOwningMethod(comp()), comp());
                      if (method &&
-                        ((method->isSameMethod(comp()->getCurrentMethod()) && !comp()->isDLT()) || !method->isInterpreted() || method->isJITInternalNative()))
+                        (comp()->isRecursiveMethodTarget(method) || !method->isInterpreted() || method->isJITInternalNative()))
                         {
                         performGuardedDevirtualization = true;
                         resolvedMethod = method;
@@ -1817,7 +1791,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
                         TR_ResolvedMethod * calleeMethod = methodSymRef->getOwningMethod(comp())->getResolvedVirtualMethod(comp(),
                                                                 refinedThisClass, methodSymRef->getOffset());
                         if (calleeMethod &&
-                           ((calleeMethod->isSameMethod(comp()->getCurrentMethod()) && !comp()->isDLT()) ||
+                           (comp()->isRecursiveMethodTarget(calleeMethod) ||
                            !calleeMethod->isInterpreted() ||
                            calleeMethod->isJITInternalNative()))
                            {
@@ -1865,7 +1839,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
             if (!comp()->compileRelocatableCode())
                valueInfo = static_cast<TR_AddressInfo*>(TR_ValueProfileInfoManager::getProfiledValueInfo(callNode, comp(), AddressInfo));
 
-            uintptrj_t topValue = valueInfo ? valueInfo->getTopValue() : 0;
+            uintptr_t topValue = valueInfo ? valueInfo->getTopValue() : 0;
 
             // Is the topValue valid?
             if( topValue )
@@ -1920,7 +1894,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
 
             if (useProfiledValues)
                {
-               TR::Instruction * unloadableConstInstr = generateRILInstruction(cg(), TR::InstOpCode::LARL, callNode, RegZero, reinterpret_cast<uintptrj_t*>(profiledClass));
+               TR::Instruction * unloadableConstInstr = generateRILInstruction(cg(), TR::InstOpCode::LARL, callNode, RegZero, reinterpret_cast<uintptr_t*>(profiledClass));
                if (fej9->isUnloadAssumptionRequired(profiledClass, comp()->getCurrentMethod()))
                   {
                   comp()->getStaticPICSites()->push_front(unloadableConstInstr);
@@ -1975,41 +1949,34 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
          }
       else
          {
-         cursor =
-            generateRXInstruction(cg(), TR::InstOpCode::getExtendedLoadOpCode(), callNode, RegRA,
-                                   generateS390MemoryReference(classReg, offset, cg()));
+         // It should be impossible to have a offset that can't fit in 20bit given Java method table limitations.
+         // We assert here to insure limitation/assumption remains true. If this fires we need to fix this code
+         // and the _virtualUnresolvedHelper() code to deal with a new worst case scenario for patching.
+         TR_ASSERT_FATAL(offset>MINLONGDISP, "JIT VFT offset does not fit in 20bits");
+         TR_ASSERT_FATAL(offset!=0 || unresolvedSnippet, "Offset is 0 yet unresolvedSnippet is NULL");
+         TR_ASSERT_FATAL(offset<=MAX_IMMEDIATE_VAL, "Offset is larger then MAX_IMMEDIATE_VAL");
+
+         // If unresolved/AOT, this instruction will be patched by _virtualUnresolvedHelper() with the correct offset
+         cursor = generateRXInstruction(cg(), TR::InstOpCode::getExtendedLoadOpCode(), callNode, RegRA,
+                                        generateS390MemoryReference(classReg, offset, cg()));
 
          if (unresolvedSnippet)
             {
             ((TR::S390VirtualUnresolvedSnippet *)unresolvedSnippet)->setPatchVftInstruction(cursor);
             }
 
-         /* A load immediate (LHI/LGHI) instruction MUST be generated here for all virtual calls because
-          *
-          * 1. picbuilder looks for this load immediate (and an LG before it) and patches in the correct offset at
-          * runtime for unresolved virtual calls
-          *
-          * 2. for all virtual calls, resolved or not, this load immediate is used by the VM to find where
-          * the method is in the VFT table when doing J2I transitions. We need this negative offset in a register
-          * because S390 load address instruction used to find VFT table entires can't handle negative offsets.
-          * (VFT table precedes the J9Class in memory; as a result of this, all VFT entries are some negative offsets
-          * away from the J9Class)
-          *
-          *
-          * In fact we should not be using APIs (such as genLoadLongConstant) at all and be explicitly generating
-          * LHI/LGHI instruction. Similar occurrence below.
-          */
-         if (offset >= (-32768))
+         // A load immediate into R0 instruction (LHI/LGFI) MUST be generated here because the "LA" instruction used by
+         // the VM to find VFT table entries can't handle negative displacements. For unresolved/AOT targets we must assume
+         // the worse case (offset can't fit in 16bits). VFT offset 0 means unresolved/AOT, otherwise offset is negative.
+         // Some special cases have positive offsets i.e. java/lang/Object.newInstancePrototype()
+         if (!unresolvedSnippet && offset >= MIN_IMMEDIATE_VAL && offset <= MAX_IMMEDIATE_VAL) // Offset fits in 16bits
             {
             cursor = generateRIInstruction(cg(), TR::InstOpCode::getLoadHalfWordImmOpCode(), callNode, RegZero, offset);
             }
-         else if (cg()->comp()->target().is64Bit())
+         else // if unresolved || offset can't fit in 16bits
             {
-            cursor = genLoadLongConstant(cg(), callNode, (int64_t)offset, RegZero);
-            }
-         else
-            {
-            cursor = generateLoad32BitConstant(cg(), callNode, offset, RegZero, false);
+            // If unresolved/AOT, this instruction will be patched by _virtualUnresolvedHelper() with the correct offset
+            cursor = generateRILInstruction(cg(), TR::InstOpCode::LGFI, callNode, RegZero, static_cast<int32_t>(offset));
             }
          }
 
@@ -2194,7 +2161,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
             //Load return address in RegRA
             cursor = new (trHeapMemory()) TR::S390RILInstruction(TR::InstOpCode::LARL, callNode, RegRA, returnLocationLabel, cursor, cg());
 
-            if (cg()->comp()->target().is64Bit())
+            if (comp()->target().is64Bit())
                cursor = generateRXInstruction(cg(), TR::InstOpCode::LPQ, callNode, classMethodEPPairRegister,
                         generateS390MemoryReference(snippetReg, ifcSnippet->getDataConstantSnippet()->getSingleDynamicSlotOffset(), cg()), cursor);
             else
@@ -2223,7 +2190,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
             }
          else
             {
-            useCLFIandBRCL = false && (cg()->comp()->target().is64Bit() &&  // Support for 64-bit
+            useCLFIandBRCL = false && (comp()->target().is64Bit() &&  // Support for 64-bit
                                    TR::Compiler->om.generateCompressedObjectHeaders() // Classes are <2GB on CompressedRefs only.
                                    );
 
@@ -2285,7 +2252,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
                for(i = 0; i < numInterfaceCallCacheSlots; i++)
                   {
                   TR::InstOpCode::Mnemonic cmpOp = TR::InstOpCode::getCmpLogicalOpCode();
-                  if (cg()->comp()->target().is64Bit() && TR::Compiler->om.generateCompressedObjectHeaders())
+                  if (comp()->target().is64Bit() && TR::Compiler->om.generateCompressedObjectHeaders())
                      cmpOp = TR::InstOpCode::CL;
 
                   //check if cached class matches the receiving object class
@@ -2366,7 +2333,7 @@ J9::Z::PrivateLinkage::buildDirectCall(TR::Node * callNode, TR::SymbolReference 
    TR_ResolvedMethod * fem = (sym == NULL) ? NULL : sym->getResolvedMethod();
    bool myself;
    bool isJitInduceOSR = callSymRef->isOSRInductionHelper();
-   myself = (fem != NULL && fem->isSameMethod(comp()->getCurrentMethod()) && !comp()->isDLT()) ? true : false;
+   myself = comp()->isRecursiveMethodTarget(fem);
 
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp()->fe());
 
@@ -2464,7 +2431,7 @@ J9::Z::PrivateLinkage::callPreJNICallOffloadCheck(TR::Node * callNode)
    TR::CodeGenerator * codeGen = cg();
    TR::LabelSymbol * offloadOffRestartLabel = generateLabelSymbol(codeGen);
    TR::LabelSymbol * offloadOffSnippetLabel = generateLabelSymbol(codeGen);
-   TR::SymbolReference * offloadOffSymRef = codeGen->symRefTab()->findOrCreateRuntimeHelper(TR_S390jitPreJNICallOffloadCheck, false, false, false);
+   TR::SymbolReference * offloadOffSymRef = codeGen->symRefTab()->findOrCreateRuntimeHelper(TR_S390jitPreJNICallOffloadCheck);
 
    TR::Instruction *gcPoint = generateS390BranchInstruction(
       codeGen, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, callNode, offloadOffSnippetLabel);
@@ -2485,7 +2452,7 @@ J9::Z::PrivateLinkage::callPostJNICallOffloadCheck(TR::Node * callNode)
    TR::Instruction *gcPoint = generateS390BranchInstruction(
       codeGen, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, callNode, offloadOnSnippetLabel);
    gcPoint->setNeedsGCMap(0);
-   TR::SymbolReference * offloadOnSymRef = codeGen->symRefTab()->findOrCreateRuntimeHelper(TR_S390jitPostJNICallOffloadCheck, false, false, false);
+   TR::SymbolReference * offloadOnSymRef = codeGen->symRefTab()->findOrCreateRuntimeHelper(TR_S390jitPostJNICallOffloadCheck);
    codeGen->addSnippet(new (trHeapMemory()) TR::S390HelperCallSnippet(codeGen, callNode,
       offloadOnSnippetLabel, offloadOnSymRef, offloadOnRestartLabel));
    generateS390LabelInstruction(codeGen, TR::InstOpCode::LABEL, callNode, offloadOnRestartLabel);
@@ -2512,7 +2479,7 @@ void J9::Z::PrivateLinkage::collapseJNIReferenceFrame(TR::Node * callNode,
       generateS390BranchInstruction(codeGen, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNE, callNode, refPoolSnippetLabel);
    gcPoint->setNeedsGCMap(0);
 
-   TR::SymbolReference * collapseSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_S390collapseJNIReferenceFrame, false, false, false);
+   TR::SymbolReference * collapseSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_S390collapseJNIReferenceFrame);
    codeGen->addSnippet(new (trHeapMemory()) TR::S390HelperCallSnippet(codeGen, callNode,
       refPoolSnippetLabel, collapseSymRef, refPoolRestartLabel));
    generateS390LabelInstruction(cg(), TR::InstOpCode::LABEL, callNode, refPoolRestartLabel);
@@ -2551,7 +2518,7 @@ J9::Z::PrivateLinkage::setupJNICallOutFrame(TR::Node * callNode,
    TR_ResolvedMethod * resolvedMethod = cs->getResolvedMethod();
    TR::Instruction * cursor = NULL;
 
-   int32_t stackAdjust = (-5 * (int32_t)sizeof(intptrj_t));
+   int32_t stackAdjust = (-5 * (int32_t)sizeof(intptr_t));
 
    cursor = generateRXInstruction(codeGen, TR::InstOpCode::LAY, callNode, javaStackPointerRealRegister, generateS390MemoryReference(javaStackPointerRealRegister, stackAdjust, codeGen), cursor);
 
@@ -2559,7 +2526,7 @@ J9::Z::PrivateLinkage::setupJNICallOutFrame(TR::Node * callNode,
 
 
    // set up Java Thread
-   intptrj_t constJNICallOutFrameType = fej9->constJNICallOutFrameType();
+   intptr_t constJNICallOutFrameType = fej9->constJNICallOutFrameType();
    TR_ASSERT( constJNICallOutFrameType < MAX_IMMEDIATE_VAL, "OMR::Z::Linkage::setupJNICallOutFrame constJNICallOutFrameType is too big for MVHI");
 
    TR_ASSERT((fej9->thisThreadGetJavaFrameFlagsOffset() == fej9->thisThreadGetJavaLiteralsOffset() + TR::Compiler->om.sizeofReferenceAddress()) &&
@@ -2581,11 +2548,11 @@ J9::Z::PrivateLinkage::setupJNICallOutFrame(TR::Node * callNode,
 
    // JNI Callout Frame setup
    // 0(sp) : RAM method for the native
-   intptrj_t ramMethod = (uintptrj_t) resolvedMethod->resolvedMethodAddress();
+   intptr_t ramMethod = (uintptr_t) resolvedMethod->resolvedMethodAddress();
    jniCallDataSnippet->setRAMMethod(ramMethod);
 
    // 4[8](sp) : flags
-   intptrj_t flags = fej9->constJNICallOutFrameFlags();
+   intptr_t flags = fej9->constJNICallOutFrameFlags();
    jniCallDataSnippet->setJNICallOutFrameFlags(flags);
 
    // 8[16](sp) : return address (savedCP)
@@ -2628,7 +2595,7 @@ void J9::Z::JNILinkage::releaseVMAccessMask(TR::Node * callNode,
    TR::LabelSymbol * cFlowRegionEnd = generateLabelSymbol(self()->cg());
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(self()->fe());
 
-   intptrj_t aValue = fej9->constReleaseVMAccessMask(); //0xfffffffffffdffdf
+   intptr_t aValue = fej9->constReleaseVMAccessMask(); //0xfffffffffffdffdf
    jniCallDataSnippet->setConstReleaseVMAccessMask(aValue);
 
    generateRXInstruction(self()->cg(), TR::InstOpCode::getLoadOpCode(), callNode, methodAddressReg,
@@ -2697,7 +2664,7 @@ void J9::Z::JNILinkage::releaseVMAccessMask(TR::Node * callNode,
 
 
    self()->cg()->addSnippet(new (self()->trHeapMemory()) TR::S390HelperCallSnippet(self()->cg(), callNode, longReleaseSnippetLabel,
-                              self()->comp()->getSymRefTab()->findOrCreateReleaseVMAccessSymbolRef(self()->comp()->getJittedMethodSymbol()), cFlowRegionEnd));
+                              comp()->getSymRefTab()->findOrCreateReleaseVMAccessSymbolRef(comp()->getJittedMethodSymbol()), cFlowRegionEnd));
    // end of release vm access (spin lock)
    }
 
@@ -2714,7 +2681,7 @@ void J9::Z::JNILinkage::acquireVMAccessMask(TR::Node * callNode, TR::Register * 
    // so that in case of long disp, we will reuse the target reg as a scratch reg
 
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(self()->fe());
-   intptrj_t aValue = fej9->constAcquireVMAccessOutOfLineMask();
+   intptr_t aValue = fej9->constAcquireVMAccessOutOfLineMask();
 
    TR::Instruction * loadInstr = (TR::Instruction *) genLoadAddressConstant(self()->cg(), callNode, aValue, methodAddressReg, NULL, NULL, javaLitPoolVirtualRegister);
    switch (loadInstr->getKind())
@@ -2741,7 +2708,7 @@ void J9::Z::JNILinkage::acquireVMAccessMask(TR::Node * callNode, TR::Register * 
    gcPoint->setNeedsGCMap(0);
 
    self()->cg()->addSnippet(new (self()->trHeapMemory()) TR::S390HelperCallSnippet(self()->cg(), callNode, longAcquireSnippetLabel,
-                              self()->comp()->getSymRefTab()->findOrCreateAcquireVMAccessSymbolRef(self()->comp()->getJittedMethodSymbol()), acquireDoneLabel));
+                              comp()->getSymRefTab()->findOrCreateAcquireVMAccessSymbolRef(comp()->getJittedMethodSymbol()), acquireDoneLabel));
    generateS390LabelInstruction(self()->cg(), TR::InstOpCode::LABEL, callNode, acquireDoneLabel);
    // end of acquire vm accessa
    }
@@ -2778,23 +2745,11 @@ J9::Z::JNILinkage::releaseVMAccessMaskAtomicFree(TR::Node * callNode,
    {
    TR_J9VMBase *fej9 = (TR_J9VMBase *)fe();
    TR::CodeGenerator* cg = self()->cg();
-   TR::Compilation* comp = self()->comp();
 
-   if (cg->comp()->target().cpu.getSupportsArch(TR::CPU::z10))
-      {
-      // Store a 1 into vmthread->inNative
-      generateSILInstruction(cg, TR::InstOpCode::getMoveHalfWordImmOpCode(), callNode,
-                           generateS390MemoryReference(methodMetaDataVirtualRegister, offsetof(J9VMThread, inNative), cg),
-                           1);
-      }
-   else
-      {
-      TR::Register* buffer = cg->allocateRegister();
-      generateRIInstruction(cg, TR::InstOpCode::getLoadHalfWordImmOpCode(), callNode, buffer, 1);
-      generateRXInstruction(cg, TR::InstOpCode::getStoreOpCode(), callNode, buffer,
-                            generateS390MemoryReference(methodMetaDataVirtualRegister, offsetof(J9VMThread, inNative), cg));
-      cg->stopUsingRegister(buffer);
-      }
+   // Store a 1 into vmthread->inNative
+   generateSILInstruction(cg, TR::InstOpCode::getMoveHalfWordImmOpCode(), callNode,
+                        generateS390MemoryReference(methodMetaDataVirtualRegister, offsetof(J9VMThread, inNative), cg),
+                        1);
 
 
 #if !defined(J9VM_INTERP_ATOMIC_FREE_JNI_USES_FLUSH)
@@ -2814,7 +2769,7 @@ J9::Z::JNILinkage::releaseVMAccessMaskAtomicFree(TR::Node * callNode,
 
    cg->addSnippet(new (self()->trHeapMemory()) TR::S390HelperCallSnippet(cg,
                                                                          callNode, longReleaseSnippetLabel,
-                                                                         comp->getSymRefTab()->findOrCreateReleaseVMAccessSymbolRef(comp->getJittedMethodSymbol()),
+                                                                         comp()->getSymRefTab()->findOrCreateReleaseVMAccessSymbolRef(comp()->getJittedMethodSymbol()),
                                                                          longReleaseRestartLabel));
 
    generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, callNode, longReleaseRestartLabel);
@@ -2832,7 +2787,6 @@ J9::Z::JNILinkage::acquireVMAccessMaskAtomicFree(TR::Node * callNode,
    {
    TR_J9VMBase *fej9 = (TR_J9VMBase *)fe();
    TR::CodeGenerator* cg = self()->cg();
-   TR::Compilation* comp = self()->comp();
 
    // Zero vmthread->inNative, which is a UDATA field
    generateSS1Instruction(cg, TR::InstOpCode::XC, callNode, TR::Compiler->om.sizeofReferenceAddress() - 1,
@@ -2856,7 +2810,7 @@ J9::Z::JNILinkage::acquireVMAccessMaskAtomicFree(TR::Node * callNode,
 
    cg->addSnippet(new (self()->trHeapMemory()) TR::S390HelperCallSnippet(cg,
                                                                          callNode, longAcquireSnippetLabel,
-                                                                         comp->getSymRefTab()->findOrCreateAcquireVMAccessSymbolRef(comp->getJittedMethodSymbol()),
+                                                                         comp()->getSymRefTab()->findOrCreateAcquireVMAccessSymbolRef(comp()->getJittedMethodSymbol()),
                                                                          longAcquireRestartLabel));
 
    generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, callNode, longAcquireRestartLabel);
@@ -2879,7 +2833,7 @@ void J9::Z::JNILinkage::checkException(TR::Node * callNode,
    gcPoint->setNeedsGCMap(0);
 
    self()->cg()->addSnippet(new (self()->trHeapMemory()) TR::S390HelperCallSnippet(self()->cg(), callNode, exceptionSnippetLabel,
-      self()->comp()->getSymRefTab()->findOrCreateThrowCurrentExceptionSymbolRef(self()->comp()->getJittedMethodSymbol()), exceptionRestartLabel));
+      comp()->getSymRefTab()->findOrCreateThrowCurrentExceptionSymbolRef(comp()->getJittedMethodSymbol()), exceptionRestartLabel));
    generateS390LabelInstruction(self()->cg(), TR::InstOpCode::LABEL, callNode, exceptionRestartLabel);
    }
 
@@ -2911,10 +2865,10 @@ J9::Z::JNILinkage::processJNIReturnValue(TR::Node * callNode,
       }
    else if ((returnType == TR::Int8) && comp()->getSymRefTab()->isReturnTypeBool(callNode->getSymbolReference()))
       {
-      if (cg->comp()->target().cpu.getSupportsArch(TR::CPU::z13))
+      if (comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z13))
          {
          generateRIInstruction(cg, TR::InstOpCode::getCmpHalfWordImmOpCode(), callNode, javaReturnRegister, 0);
-         generateRIEInstruction(cg, cg->comp()->target().is64Bit() ? TR::InstOpCode::LOCGHI : TR::InstOpCode::LOCHI,
+         generateRIEInstruction(cg, comp()->target().is64Bit() ? TR::InstOpCode::LOCGHI : TR::InstOpCode::LOCHI,
                                 callNode, javaReturnRegister, 1, TR::InstOpCode::COND_BNE);
          }
       else
@@ -2935,8 +2889,8 @@ J9::Z::JNILinkage::processJNIReturnValue(TR::Node * callNode,
 
 TR::Register * J9::Z::JNILinkage::buildDirectDispatch(TR::Node * callNode)
    {
-    if (comp()->getOption(TR_TraceCG))
-       traceMsg(comp(), "\nbuildDirectDispatch\n");
+   if (comp()->getOption(TR_TraceCG))
+      traceMsg(comp(), "\nbuildDirectDispatch\n");
 
    TR::CodeGenerator * codeGen = cg();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(fe());
@@ -2978,7 +2932,7 @@ TR::Register * J9::Z::JNILinkage::buildDirectDispatch(TR::Node * callNode)
 
    TR::Register * methodAddressReg = NULL;
    TR::Register * javaLitOffsetReg = NULL;
-   intptrj_t targetAddress = (intptrj_t) 0;
+   intptr_t targetAddress = (intptr_t) 0;
    TR::DataType returnType = TR::NoType;
    int8_t numTempRegs = -1;
    comp()->setHasNativeCall();
@@ -3000,10 +2954,10 @@ TR::Register * J9::Z::JNILinkage::buildDirectDispatch(TR::Node * callNode)
    bool isCheckException = !fej9->jniNoExceptionsThrown(resolvedMethod);
    bool isKillAllUnlockedGPRs = isJNIGCPoint;
 
-   killMask = killAndAssignRegister(killMask, deps, &methodAddressReg, (cg()->comp()->target().isLinux()) ?  TR::RealRegister::GPR1 : TR::RealRegister::GPR9 , codeGen, true);
+   killMask = killAndAssignRegister(killMask, deps, &methodAddressReg, (comp()->target().isLinux()) ?  TR::RealRegister::GPR1 : TR::RealRegister::GPR9 , codeGen, true);
    killMask = killAndAssignRegister(killMask, deps, &javaLitOffsetReg, TR::RealRegister::GPR11, codeGen, true);
 
-   targetAddress = (intptrj_t) resolvedMethod->startAddressForJNIMethod(comp());
+   targetAddress = (intptr_t) resolvedMethod->startAddressForJNIMethod(comp());
    returnType = resolvedMethod->returnType();
 
    static char * disablePureFn = feGetEnv("TR_DISABLE_PURE_FUNC_RECOGNITION");
@@ -3039,7 +2993,7 @@ TR::Register * J9::Z::JNILinkage::buildDirectDispatch(TR::Node * callNode)
       }
 
    // JNI dispatch does not allow for any object references to survive in preserved registers as they are saved onto
-   // the system stack, which the JVM stack walker has has no awareness of. Hence we need to ensure that all object
+   // the system stack, which the JVM stack walker has no awareness of. Hence we need to ensure that all object
    // references are evicted from preserved registers at the call site.
    TR::Register* tempReg = cg()->allocateRegister();
 
@@ -3078,16 +3032,7 @@ TR::Register * J9::Z::JNILinkage::buildDirectDispatch(TR::Node * callNode)
      auto* literalOffsetMemoryReference = new (trHeapMemory()) TR::MemoryReference(methodMetaDataVirtualRegister, (int32_t)fej9->thisThreadGetJavaLiteralsOffset(), codeGen);
 
      // Set up literal offset slot to zero
-     if (cg()->comp()->target().cpu.getSupportsArch(TR::CPU::z10))
-        {
-        generateSILInstruction(codeGen, TR::InstOpCode::getMoveHalfWordImmOpCode(), callNode, literalOffsetMemoryReference, 0);
-        }
-     else
-        {
-        generateRIInstruction(codeGen, TR::InstOpCode::getLoadHalfWordImmOpCode(), callNode, javaLitOffsetReg, 0);
-
-        generateRXInstruction(codeGen, TR::InstOpCode::getStoreOpCode(), callNode, javaLitOffsetReg, literalOffsetMemoryReference);
-        }
+     generateSILInstruction(codeGen, TR::InstOpCode::getMoveHalfWordImmOpCode(), callNode, literalOffsetMemoryReference, 0);
      }
 
     if (isReleaseVMAccess)
@@ -3144,9 +3089,9 @@ TR::Register * J9::Z::JNILinkage::buildDirectDispatch(TR::Node * callNode)
    if (isJNICallOutFrame)
      {
      generateRXInstruction(codeGen, TR::InstOpCode::LA, callNode, javaStackPointerRealRegister,
-        generateS390MemoryReference(javaStackPointerRealRegister, 5 * sizeof(intptrj_t), codeGen));
+        generateS390MemoryReference(javaStackPointerRealRegister, 5 * sizeof(intptr_t), codeGen));
 
-     setOffsetToLongDispSlot(getOffsetToLongDispSlot() - (5 * (int32_t)sizeof(intptrj_t)) );
+     setOffsetToLongDispSlot(getOffsetToLongDispSlot() - (5 * (int32_t)sizeof(intptr_t)) );
      }
 
    if (isCheckException)
@@ -3322,7 +3267,7 @@ J9::Z::PrivateLinkage::buildDirectDispatch(TR::Node * callNode)
          break;
       case TR::lcall:
             {
-            if (cg()->comp()->target().is64Bit())
+            if (comp()->target().is64Bit())
                {
                returnRegister = dependencies->searchPostConditionRegister(getLongReturnRegister());
                }
@@ -3407,7 +3352,7 @@ J9::Z::PrivateLinkage::buildIndirectDispatch(TR::Node * callNode)
          break;
       case TR::lcalli:
             {
-            if (cg()->comp()->target().is64Bit())
+            if (comp()->target().is64Bit())
                {
                returnRegister = dependencies->searchPostConditionRegister(getLongReturnRegister());
                }
@@ -3459,53 +3404,6 @@ J9::Z::PrivateLinkage::buildIndirectDispatch(TR::Node * callNode)
    return returnRegister;
    }
 
-////////////////////////////////////////////////////////////////////////////////
-// J9::Z::PrivateLinkage::mapIncomingParms - maps parameters onto the stack for the given method.
-//   This function iterates over the parameters, mapping them onto the stack, either right
-//   to left, or left to right, depending on S390Linkage properties.
-//   This code was removed from J9::Z::PrivateLinkage::mapStack as it is common code that
-//   is now called by J9::Z::PrivateLinkage::mapCompactedStack as well.
-////////////////////////////////////////////////////////////////////////////////
-void
-J9::Z::PrivateLinkage::mapIncomingParms(TR::ResolvedMethodSymbol *method)
-   {
-   ListIterator<TR::ParameterSymbol> parameterIterator(&method->getParameterList());
-   TR::ParameterSymbol * parmCursor = parameterIterator.getFirst();
-   int32_t offsetToFirstParm = getOffsetToFirstParm();
-   if (getRightToLeft())
-      {
-      while (parmCursor != NULL)
-         {
-         parmCursor->setParameterOffset(parmCursor->getParameterOffset() + offsetToFirstParm);
-         parmCursor = parameterIterator.getNext();
-         }
-      }
-   else
-      {
-      uint32_t sizeOfParameterArea = method->getNumParameterSlots() << (cg()->comp()->target().is64Bit() ? 3 : 2);
-      while (parmCursor != NULL)
-         {
-         if (cg()->comp()->target().is64Bit() && parmCursor->getDataType() != TR::Address)
-            // in 64Bit mode: long and double args takes 2x8 byte slots
-            // all other types takes 1x8 byte
-            {
-            parmCursor->setParameterOffset(sizeOfParameterArea -
-                           parmCursor->getParameterOffset() -
-                           parmCursor->getSize() * 2 +
-                           offsetToFirstParm);
-            }
-         else
-            {
-            parmCursor->setParameterOffset(sizeOfParameterArea -
-                           parmCursor->getParameterOffset() -
-                           parmCursor->getSize() +
-                           offsetToFirstParm);
-            }
-         parmCursor = parameterIterator.getNext();
-         }
-      }
-   }
-
 void
 J9::Z::PrivateLinkage::setupBuildArgForLinkage(TR::Node * callNode, TR_DispatchType dispatchType, TR::RegisterDependencyConditions * deps, bool isFastJNI,
       bool isPassReceiver, int64_t & killMask, TR::Node * GlobalRegDeps, bool hasGlRegDeps, TR::SystemLinkage * systemLinkage)
@@ -3545,8 +3443,8 @@ J9::Z::PrivateLinkage::setupRegisterDepForLinkage(TR::Node * callNode, TR_Dispat
 
    if (dispatchType == TR_SystemDispatch)
      {
-      killMask = killAndAssignRegister(killMask, deps, methodAddressReg, (cg()->comp()->target().isLinux()) ?  TR::RealRegister::GPR14 : TR::RealRegister::GPR8 , codeGen, true);
-      killMask = killAndAssignRegister(killMask, deps, &javaLitOffsetReg, (cg()->comp()->target().isLinux()) ?  TR::RealRegister::GPR8 : TR::RealRegister::GPR14 , codeGen, true);
+      killMask = killAndAssignRegister(killMask, deps, methodAddressReg, (comp()->target().isLinux()) ?  TR::RealRegister::GPR14 : TR::RealRegister::GPR8 , codeGen, true);
+      killMask = killAndAssignRegister(killMask, deps, &javaLitOffsetReg, (comp()->target().isLinux()) ?  TR::RealRegister::GPR8 : TR::RealRegister::GPR14 , codeGen, true);
      }
 
    /*****************/
@@ -3554,7 +3452,7 @@ J9::Z::PrivateLinkage::setupRegisterDepForLinkage(TR::Node * callNode, TR_Dispat
    TR::RealRegister * systemStackRealRegister = systemLinkage->getStackPointerRealRegister();
    TR::Register * systemStackVirtualRegister = systemStackRealRegister;
 
-   if (cg()->comp()->target().isZOS())
+   if (comp()->target().isZOS())
       {
 
       TR::RealRegister::RegNum systemStackPointerRegister;
@@ -3592,8 +3490,8 @@ J9::Z::PrivateLinkage::setupRegisterDepForLinkage(TR::Node * callNode, TR_Dispat
 
 
    // This logic was originally in OMR::Z::Linkage::buildNativeDispatch and the condition is cg()->supportsJITFreeSystemStackPointer().
-   // The original condition is only true for J9 and only on zos, so replacing it with cg()->comp()->target().isZOS().
-   if ( cg()->comp()->target().isZOS() )
+   // The original condition is only true for J9 and only on zos, so replacing it with comp()->target().isZOS().
+   if ( comp()->target().isZOS() )
       {
       TR_J9VMBase *fej9 = (TR_J9VMBase *)(fe());
       generateRXInstruction(codeGen, TR::InstOpCode::getLoadOpCode(), callNode, systemStackVirtualRegister,
@@ -3610,7 +3508,7 @@ J9::Z::PrivateLinkage::getSystemStackPointerRegister()
    }
 
 
-J9::Z::JNILinkage::JNILinkage(TR::CodeGenerator * cg, TR_S390LinkageConventions elc, TR_LinkageConventions lc)
-   :J9::Z::PrivateLinkage(cg, elc, lc)
+J9::Z::JNILinkage::JNILinkage(TR::CodeGenerator * cg, TR_LinkageConventions elc)
+   :J9::Z::PrivateLinkage(cg, elc)
    {
    }

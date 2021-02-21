@@ -79,6 +79,8 @@ J9MemoryManagerFunctions MemoryManagerFunctions = {
 	j9gc_scavenger_enabled,
 	j9gc_concurrent_scavenger_enabled,
 	j9gc_software_read_barrier_enabled,
+	j9gc_hot_reference_field_required,
+	j9gc_max_hot_field_list_length,
 #if defined(J9VM_GC_HEAP_CARD_TABLE)
 	j9gc_concurrent_getCardSize,
 	j9gc_concurrent_getHeapBase,
@@ -103,8 +105,8 @@ J9MemoryManagerFunctions MemoryManagerFunctions = {
 	J9MetronomeWriteBarrierJ9ClassStore,
 	J9ReadBarrier,
 	J9ReadBarrierJ9Class,
-	j9gc_objaccess_monitorTableReadObject,
-	j9gc_objaccess_monitorTableReadObjectVM,
+	j9gc_weakRoot_readObject,
+	j9gc_weakRoot_readObjectVM,
 	j9gc_ext_check_is_valid_heap_object,
 #if defined(J9VM_GC_FINALIZATION)
 	j9gc_get_objects_pending_finalization_count,

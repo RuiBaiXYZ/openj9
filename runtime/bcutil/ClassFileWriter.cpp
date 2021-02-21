@@ -63,10 +63,11 @@ DECLARE_UTF8_ATTRIBUTE_NAME(RUNTIME_VISIBLE_TYPE_ANNOTATIONS, "RuntimeVisibleTyp
 DECLARE_UTF8_ATTRIBUTE_NAME(ANNOTATION_DEFAULT, "AnnotationDefault");
 DECLARE_UTF8_ATTRIBUTE_NAME(BOOTSTRAP_METHODS, "BootstrapMethods");
 DECLARE_UTF8_ATTRIBUTE_NAME(RECORD, "Record");
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+DECLARE_UTF8_ATTRIBUTE_NAME(PERMITTED_SUBCLASSES, "PermittedSubclasses");
+#if JAVA_SPEC_VERSION >= 11
 DECLARE_UTF8_ATTRIBUTE_NAME(NEST_MEMBERS, "NestMembers");
 DECLARE_UTF8_ATTRIBUTE_NAME(NEST_HOST, "NestHost");
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 void
 ClassFileWriter::analyzeROMClass()
@@ -93,6 +94,16 @@ ClassFileWriter::analyzeROMClass()
 		analyzeRecordAttribute();
 	}
 
+	if (J9ROMCLASS_IS_SEALED(_romClass)) {
+		addEntry((void*) &PERMITTED_SUBCLASSES, 0, CFR_CONSTANT_Utf8);
+
+		U_32 *permittedSubclassesCountPtr = getNumberOfPermittedSubclassesPtr(_romClass);
+		for (U_32 i = 0; i < *permittedSubclassesCountPtr; i++) {
+			J9UTF8* permittedSubclassNameUtf8 = permittedSubclassesNameAtIndex(permittedSubclassesCountPtr, i);
+			addEntry(permittedSubclassNameUtf8, 0, CFR_CONSTANT_Utf8);
+		}
+	}
+
 	J9EnclosingObject * enclosingObject = getEnclosingMethodForROMClass(_javaVM, NULL, _romClass);
 	J9UTF8 * genericSignature = getGenericSignatureForROMClass(_javaVM, NULL, _romClass);
 	J9UTF8 * sourceFileName = getSourceFileNameForROMClass(_javaVM, NULL, _romClass);
@@ -101,9 +112,9 @@ ClassFileWriter::analyzeROMClass()
 	U_32 * typeAnnotationsData = getClassTypeAnnotationsDataForROMClass(_romClass);
 	J9UTF8 * outerClassName = J9ROMCLASS_OUTERCLASSNAME(_romClass);
 	J9UTF8 * simpleName = getSimpleNameForROMClass(_javaVM, NULL, _romClass);
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 	J9UTF8 *nestHost = J9ROMCLASS_NESTHOSTNAME(_romClass);
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 	/* For a local class only InnerClasses.class[i].inner_name_index is preserved as simpleName in its J9ROMClass */
 	if ((0 != _romClass->innerClassCount) || J9_ARE_ANY_BITS_SET(_romClass->extraModifiers, J9AccClassInnerClass)) {
@@ -124,7 +135,7 @@ ClassFileWriter::analyzeROMClass()
 		}
 	}
 
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 	/* Class can not have both a nest members and nest host attribute */
 	if (0 != _romClass->nestMemberCount) {
 		U_16 nestMemberCount = _romClass->nestMemberCount;
@@ -139,7 +150,7 @@ ClassFileWriter::analyzeROMClass()
 		addEntry((void *) &NEST_HOST, 0, CFR_CONSTANT_Utf8);
 		addClassEntry(nestHost, 0);
 	}
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 	if (NULL != enclosingObject) {
 		addEntry((void *) &ENCLOSING_METHOD, 0, CFR_CONSTANT_Utf8);
@@ -454,7 +465,8 @@ ClassFileWriter::analyzeMethods()
 		if (J9ROMMETHOD_HAS_PARAMETER_ANNOTATIONS(method)) {
 			addEntry((void *) &RUNTIME_VISIBLE_PARAMETER_ANNOTATIONS, 0, CFR_CONSTANT_Utf8);
 		}
-		if (J9ROMMETHOD_HAS_METHOD_TYPE_ANNOTATIONS(getExtendedModifiersDataFromROMMethod(method))) {
+		U_32 extendedModifiers = getExtendedModifiersDataFromROMMethod(method);
+		if (J9ROMMETHOD_HAS_METHOD_TYPE_ANNOTATIONS(extendedModifiers) || J9ROMMETHOD_HAS_CODE_TYPE_ANNOTATIONS(extendedModifiers)) {
 			addEntry((void *) &RUNTIME_VISIBLE_TYPE_ANNOTATIONS, 0, CFR_CONSTANT_Utf8);
 		}
 		if (J9ROMMETHOD_HAS_DEFAULT_ANNOTATION(method)) {
@@ -925,10 +937,10 @@ ClassFileWriter::writeAttributes()
 	J9SourceDebugExtension * sourceDebugExtension = getSourceDebugExtensionForROMClass(_javaVM, NULL, _romClass);
 	U_32 * annotationsData = getClassAnnotationsDataForROMClass(_romClass);
 	U_32 * typeAnnotationsData = getClassTypeAnnotationsDataForROMClass(_romClass);
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 	J9UTF8 *nestHost = J9ROMCLASS_NESTHOSTNAME(_romClass);
 	U_16 nestMemberCount = _romClass->nestMemberCount;
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 	if ((0 != _romClass->innerClassCount) || J9_ARE_ANY_BITS_SET(_romClass->extraModifiers, J9AccClassInnerClass)) {
 		attributesCount += 1;
@@ -957,12 +969,15 @@ ClassFileWriter::writeAttributes()
 	if (J9_ARE_ANY_BITS_SET(_romClass->extraModifiers, J9AccRecord)) {
 		attributesCount += 1;
 	}
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+	if (J9ROMCLASS_IS_SEALED(_romClass)) {
+		attributesCount += 1;
+	}
+#if JAVA_SPEC_VERSION >= 11
 	/* Class can not have both a nest members and member of nest attribute */
 	if ((0 != _romClass->nestMemberCount) || (NULL != nestHost)) {
 		attributesCount += 1;
 	}
-#endif /* defined(J9VM_OPT_VALHALLA_NESTMATES) */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 	writeU16(attributesCount);
 
 	if ((0 != _romClass->innerClassCount) || J9_ARE_ANY_BITS_SET(_romClass->extraModifiers, J9AccClassInnerClass)) {
@@ -1004,7 +1019,7 @@ ClassFileWriter::writeAttributes()
 		}
 	}
 
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 	/* A class can only have one of the nest mate attributes */
 	if (0 != nestMemberCount) {
 		J9SRP *nestMembers = (J9SRP *) J9ROMCLASS_NESTMEMBERS(_romClass);
@@ -1021,7 +1036,7 @@ ClassFileWriter::writeAttributes()
 		writeAttributeHeader((J9UTF8 *) &NEST_HOST, 2);
 		writeU16(indexForClass(nestHost));
 	}
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 	if (NULL != enclosingObject) {
 		J9ROMNameAndSignature * nas = J9ENCLOSINGOBJECT_NAMEANDSIGNATURE(enclosingObject);
@@ -1084,6 +1099,32 @@ ClassFileWriter::writeAttributes()
 	/* record attribute */
 	if (J9_ARE_ANY_BITS_SET(_romClass->extraModifiers, J9AccRecord)) {
 		writeRecordAttribute();
+	}
+
+	/* write PermittedSubclasses attribute */
+	if (J9ROMCLASS_IS_SEALED(_romClass)) {
+		U_32 *permittedSubclassesCountPtr = getNumberOfPermittedSubclassesPtr(_romClass);
+		writeAttributeHeader((J9UTF8 *) &PERMITTED_SUBCLASSES, sizeof(U_16) + (*permittedSubclassesCountPtr * sizeof(U_16)));
+
+		writeU16(*permittedSubclassesCountPtr);
+
+		for (U_32 i = 0; i < *permittedSubclassesCountPtr; i++) {
+			J9UTF8* permittedSubclassNameUtf8 = permittedSubclassesNameAtIndex(permittedSubclassesCountPtr, i);
+
+			/* CONSTANT_Class_info index should be written. Find class entry that references the subclass name in constant pool. */
+			J9HashTableState hashTableState;
+			HashTableEntry * entry = (HashTableEntry *) hashTableStartDo(_cpHashTable, &hashTableState);
+			while (NULL != entry) {
+				if (CFR_CONSTANT_Class == entry->cpType) {
+					J9UTF8* classNameCandidate = (J9UTF8*)entry->address;
+					if (J9UTF8_EQUALS(classNameCandidate, permittedSubclassNameUtf8)) {
+						writeU16(entry->cpIndex);
+						break;
+					}
+				}
+				entry = (HashTableEntry *) hashTableNextDo(&hashTableState);
+			}
+		}
 	}
 }
 

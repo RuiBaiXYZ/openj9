@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -82,7 +82,7 @@ static void fixLoadingConstraints (J9JavaVM * vm, J9Class * oldClass, J9Class * 
 static UDATA classPairHash(void* entry, void* userData);
 static UDATA classPairEquals(void* left, void* right, void* userData);
 static UDATA findMethodInVTable(J9Method *method, UDATA *vTable);
-static jvmtiError addClassesRequiringNewITables(J9JavaVM *vm, J9HashTable *classHashTable, UDATA *addedMethodCountPtr, UDATA *addedClassCountPtr);
+static jvmtiError addClassesRequiringNewITables(J9JavaVM *vm, J9HashTable *classHashTable, UDATA *addedMethodCountPtr, UDATA *addedClassCountPtr, BOOLEAN fastHCR);
 static jvmtiError verifyFieldsAreSame (J9VMThread * currentThread, UDATA fieldType, J9ROMClass * originalROMClass, J9ROMClass * replacementROMClass,
 									   UDATA extensionsEnabled, UDATA * extensionsUsed);
 static jvmtiError verifyMethodsAreSame (J9VMThread * currentThread, J9JVMTIClassPair * classPair, UDATA extensionsEnabled, UDATA * extensionsUsed);
@@ -2319,8 +2319,7 @@ flushClassLoaderReflectCache(J9VMThread * currentThread, J9HashTable * classPair
 	}
 }
 
-
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 /**
  * \brief  Fix any resolved nest members
  * \ingroup
@@ -2334,7 +2333,6 @@ flushClassLoaderReflectCache(J9VMThread * currentThread, J9HashTable * classPair
  *	class within its next class. In order for these access checks to be accurate
  *	post nest host resolution, any classes that point to the original class def
  *	as their nest host must be updated to point do the replaced class def instead.
- *
  */
 void
 fixNestMembers(J9VMThread * currentThread, J9HashTable * classPairs)
@@ -2366,7 +2364,7 @@ fixNestMembers(J9VMThread * currentThread, J9HashTable * classPairs)
 		classPair = hashTableNextDo(&hashTableState);
 	}
 }
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 static void
 swapClassesForFastHCR(J9Class *originalClass, J9Class *obsoleteClass)
@@ -2381,7 +2379,6 @@ swapClassesForFastHCR(J9Class *originalClass, J9Class *obsoleteClass)
 
 	/* Preserved values. */
 	obsoleteClass->initializeStatus = originalClass->initializeStatus;
-
 
 	obsoleteClass->classObject = originalClass->classObject;
 	obsoleteClass->module = originalClass->module;
@@ -2403,8 +2400,14 @@ swapClassesForFastHCR(J9Class *originalClass, J9Class *obsoleteClass)
 	SWAP_MEMBER(specialSplitMethodTable, J9Method **, originalClass, obsoleteClass);
 	/* Force invokedynamics to be re-resolved as we can't map from the old callsite index to the new one */
 	SWAP_MEMBER(callSites, j9object_t*, originalClass, obsoleteClass);
+	/* Force varhanles to be re-resolved as we can't map from the old varhandle MTs index to the new one */
+	SWAP_MEMBER(varHandleMethodTypes, j9object_t*, originalClass, obsoleteClass);
 	/* Force methodTypes to be re-resolved as indexes are assigned in CP order, no mapping from old to new. */
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+	SWAP_MEMBER(invokeCache, j9object_t*, originalClass, obsoleteClass);
+#else /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 	SWAP_MEMBER(methodTypes, j9object_t*, originalClass, obsoleteClass);
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 
 	J9CLASS_EXTENDED_FLAGS_SET(obsoleteClass, J9ClassReusedStatics);
 	Assert_hshelp_true(0 == (J9CLASS_EXTENDED_FLAGS(originalClass) & J9ClassReusedStatics));
@@ -2472,8 +2475,17 @@ recreateRAMClasses(J9VMThread * currentThread, J9HashTable * classHashTable, J9H
 		if (fastHCR) {
 			options |= J9_FINDCLASS_FLAG_FAST_HCR;
 		}
-
-		if (J9_ARE_ALL_BITS_SET(originalRAMClass->classFlags, J9ClassIsAnonymous)) {
+		if (J9ROMCLASS_IS_HIDDEN(originalRAMClass->romClass)) {
+			options |= (J9_FINDCLASS_FLAG_HIDDEN | J9_FINDCLASS_FLAG_UNSAFE);
+			if (J9ROMCLASS_IS_OPTIONNESTMATE_SET(originalRAMClass->romClass)) {
+				options |= J9_FINDCLASS_FLAG_CLASS_OPTION_NESTMATE;
+			}
+			if (J9ROMCLASS_IS_OPTIONSTRONG_SET(originalRAMClass->romClass)) {
+				options |= J9_FINDCLASS_FLAG_CLASS_OPTION_STRONG ;
+			} else {
+				options |= J9_FINDCLASS_FLAG_ANON;
+			}
+		} else if (J9_ARE_ALL_BITS_SET(originalRAMClass->classFlags, J9ClassIsAnonymous)) {
 			options |= J9_FINDCLASS_FLAG_ANON;
 		}
 
@@ -2671,7 +2683,7 @@ classPairEquals(void* left, void* right, void* userData)
 }
 
 static jvmtiError
-addClassesRequiringNewITables(J9JavaVM *vm, J9HashTable *classHashTable, UDATA *addedMethodCountPtr, UDATA *addedClassCountPtr)
+addClassesRequiringNewITables(J9JavaVM *vm, J9HashTable *classHashTable, UDATA *addedMethodCountPtr, UDATA *addedClassCountPtr, BOOLEAN fastHCR)
 {
 	J9InternalVMFunctions *vmFuncs = vm->internalVMFunctions;
 	J9Class *clazz;
@@ -2695,59 +2707,62 @@ addClassesRequiringNewITables(J9JavaVM *vm, J9HashTable *classHashTable, UDATA *
 				result = hashTableFind(classHashTable, &exemplar);
 
 				if (NULL != result) {
-					BOOLEAN extensionsUsed = (0 != (result->flags & J9JVMTI_CLASS_PAIR_FLAG_USES_EXTENSIONS));
+					UDATA flags = 0;
+					U_32 nodeCount = hashTableGetCount(classHashTable);
 
-					/* If methods were added or removed (extensionsUsed) or re-ordered in the interface, the class should be redefined. */
-					if (extensionsUsed || (NULL != result->methodRemap)) {
-						U_32 nodeCount = hashTableGetCount(classHashTable);
-
-						memset(&exemplar, 0, sizeof(J9JVMTIClassPair));
-						exemplar.originalRAMClass = clazz;
-						exemplar.replacementClass.romClass = clazz->romClass;
-						exemplar.flags = J9JVMTI_CLASS_PAIR_FLAG_REDEFINED;
-
-						/* An interface of this class is being updated with extensions - this class will require new iTables. */
-						if (NULL == hashTableAdd(classHashTable, &exemplar)) {
-							vmFuncs->allClassesEndDo(&classWalkState);
-							return JVMTI_ERROR_OUT_OF_MEMORY;
+					if (!fastHCR) {
+						BOOLEAN extensionsUsed = (0 != (result->flags & J9JVMTI_CLASS_PAIR_FLAG_USES_EXTENSIONS));
+						/* If methods were added or removed (extensionsUsed) or re-ordered in the interface, the class should be redefined. */
+						if (extensionsUsed || (NULL != result->methodRemap)) {
+							/* An interface of this class is being updated with extensions - this class will require new iTables. */
+							flags = J9JVMTI_CLASS_PAIR_FLAG_REDEFINED;
 						}
+					}
 
-						/* Increment counts if the class was really added (i.e. did not exist before). */
-						if (hashTableGetCount(classHashTable) == (nodeCount + 1)) {
-							J9SubclassWalkState subclassState;
-							J9Class * subclass;
+					memset(&exemplar, 0, sizeof(J9JVMTIClassPair));
+					exemplar.originalRAMClass = clazz;
+					exemplar.replacementClass.romClass = clazz->romClass;
+					exemplar.flags = flags;
 
-							addedMethodCount += clazz->romClass->romMethodCount;
-							addedClassCount += 1;
-	
-							/* Now add all of the subclasses of the affected class to the table */
-							subclass = allSubclassesStartDo(clazz, &subclassState, TRUE);
-							while (subclass != NULL) {
-								U_32 nodeCount = hashTableGetCount(classHashTable);
+					if (NULL == hashTableAdd(classHashTable, &exemplar)) {
+						vmFuncs->allClassesEndDo(&classWalkState);
+						return JVMTI_ERROR_OUT_OF_MEMORY;
+					}
 
-								memset(&exemplar, 0x00, sizeof(J9JVMTIClassPair));
-								exemplar.originalRAMClass = subclass;
-								exemplar.replacementClass.romClass = subclass->romClass;
-								exemplar.flags = J9JVMTI_CLASS_PAIR_FLAG_REDEFINED;
+					/* Increment counts if the class was really added (i.e. did not exist before). */
+					if (hashTableGetCount(classHashTable) == (nodeCount + 1)) {
+						J9SubclassWalkState subclassState;
+						J9Class * subclass;
 
-								/* If this class is already in the table this add will have no effect */
-								result = hashTableAdd(classHashTable, &exemplar);
-								if (NULL == result) {
-									vmFuncs->allClassesEndDo(&classWalkState);
-									return JVMTI_ERROR_OUT_OF_MEMORY;
-								}
-								/* Ensure that classes already in the table get redefined */
-								result->flags |= J9JVMTI_CLASS_PAIR_FLAG_REDEFINED;
+						addedMethodCount += clazz->romClass->romMethodCount;
+						addedClassCount += 1;
 
-								/* Increment counts if the class was really added (i.e. did not exist before). */
-								if (hashTableGetCount(classHashTable) == (nodeCount + 1)) {
-									addedMethodCount += subclass->romClass->romMethodCount;
-									addedClassCount += 1;
-								}
+						/* Now add all of the subclasses of the affected class to the table */
+						subclass = allSubclassesStartDo(clazz, &subclassState, TRUE);
+						while (subclass != NULL) {
+							U_32 nodeCount = hashTableGetCount(classHashTable);
 
-								subclass = allSubclassesNextDo(&subclassState);
+							memset(&exemplar, 0x00, sizeof(J9JVMTIClassPair));
+							exemplar.originalRAMClass = subclass;
+							exemplar.replacementClass.romClass = subclass->romClass;
+							exemplar.flags = flags;
+
+							/* If this class is already in the table this add will have no effect */
+							result = hashTableAdd(classHashTable, &exemplar);
+							if (NULL == result) {
+								vmFuncs->allClassesEndDo(&classWalkState);
+								return JVMTI_ERROR_OUT_OF_MEMORY;
+							}
+							/* Ensure that classes already in the table get redefined */
+							result->flags |= flags;
+
+							/* Increment counts if the class was really added (i.e. did not exist before). */
+							if (hashTableGetCount(classHashTable) == (nodeCount + 1)) {
+								addedMethodCount += subclass->romClass->romMethodCount;
+								addedClassCount += 1;
 							}
 
+							subclass = allSubclassesNextDo(&subclassState);
 						}
 					}
 					break;
@@ -2775,6 +2790,8 @@ determineClassesToRecreate(J9VMThread * currentThread, jint classCount,
 	jvmtiError jvmtiResult;
 	jint i;
 	jint redefinedSubclassCount = 0;
+	UDATA addedClassCount = 0;
+	UDATA addedMethodCount = 0;
 
 	J9HashTable* classHashTable = hashTableNew(
 		OMRPORT_FROM_J9PORT(PORTLIB),
@@ -2858,19 +2875,15 @@ determineClassesToRecreate(J9VMThread * currentThread, jint classCount,
 	}
 	classCount += redefinedSubclassCount;
 
-	if (!fastHCR) {
-		UDATA addedClassCount, addedMethodCount;
-
-		/* Add any classes implementing interfaces that are being updated with extensions or re-ordered methods. */
-		jvmtiResult = addClassesRequiringNewITables(currentThread->javaVM, classHashTable, &addedClassCount, &addedMethodCount);
-		if (JVMTI_ERROR_NONE != jvmtiResult) {
-			hashTableFree(classHashTable);
-			return jvmtiResult;
-		}
-
-		redefinedMethodCount += addedMethodCount;
-		classCount += (jint) addedClassCount;
+	/* Add any classes implementing interfaces that are being updated with extensions or re-ordered methods. */
+	jvmtiResult = addClassesRequiringNewITables(currentThread->javaVM, classHashTable, &addedClassCount, &addedMethodCount, fastHCR);
+	if (JVMTI_ERROR_NONE != jvmtiResult) {
+		hashTableFree(classHashTable);
+		return jvmtiResult;
 	}
+
+	redefinedMethodCount += addedMethodCount;
+	classCount += (jint) addedClassCount;
 
 #ifdef J9VM_INTERP_NATIVE_SUPPORT
 	/* Pre-allocate memory to be used for the JIT event callback data */
@@ -3171,6 +3184,102 @@ done:
 
 }
 
+#if JAVA_SPEC_VERSION >= 15
+static jvmtiError
+verifyRecordAttributesAreSame(J9ROMClass *originalROMClass, J9ROMClass *replacementROMClass)
+{
+	jvmtiError rc = JVMTI_ERROR_NONE;
+
+	/* Since retranformation is not allowed to change inheritance there's no need to consider 
+	 * one class being a record and one not. */
+	if (J9ROMCLASS_IS_RECORD(originalROMClass) && J9ROMCLASS_IS_RECORD(replacementROMClass)) {
+		U_32 originalNumberOfRecords = getNumberOfRecordComponents(originalROMClass);
+		U_32 replacementNumberOfRecords = getNumberOfRecordComponents(replacementROMClass);
+
+		if (originalNumberOfRecords == replacementNumberOfRecords) {
+			if (originalNumberOfRecords > 0) {
+				J9ROMRecordComponentShape* originalRecordComponent = NULL;
+				J9ROMRecordComponentShape* replacementRecordComponent = NULL;
+				U_32 i = 0;
+
+				/* Compare record components in order. For two records to be the same their record components
+				 * must be in the same order. According to the spec: "Each component of the record must have 
+				 * exactly one corresponding entry in the 
+				 * components array, in the order in which the components are declared."
+				 */
+				originalRecordComponent = recordComponentStartDo(originalROMClass);
+				replacementRecordComponent = recordComponentStartDo(replacementROMClass);
+				for (; i < originalNumberOfRecords; i++) {
+					/* verify name and signature */
+					if (!NAME_AND_SIG_IDENTICAL(originalRecordComponent, replacementRecordComponent, 
+						J9ROMRECORDCOMPONENTSHAPE_NAME, J9ROMRECORDCOMPONENTSHAPE_SIGNATURE)
+					) {
+						rc = JVMTI_ERROR_UNSUPPORTED_REDEFINITION_CLASS_ATTRIBUTE_CHANGED;
+						goto done;
+					}
+					originalRecordComponent = recordComponentNextDo(originalRecordComponent);
+					replacementRecordComponent = recordComponentNextDo(replacementRecordComponent);
+				}
+			}
+		} else {
+			rc = JVMTI_ERROR_UNSUPPORTED_REDEFINITION_CLASS_ATTRIBUTE_CHANGED;
+		}
+	}
+
+done:
+	return rc;
+}
+
+static jvmtiError
+verifyPermittedSubclassAttributeContentsMatch(J9ROMClass *originalROMClass, J9ROMClass *replacementROMClass)
+{
+	jvmtiError rc = JVMTI_ERROR_NONE;
+
+	if (J9ROMCLASS_IS_SEALED(originalROMClass) && J9ROMCLASS_IS_SEALED(replacementROMClass)) {
+		U_32* originalPermittedSubclassesCountPtr = getNumberOfPermittedSubclassesPtr(originalROMClass);
+		U_32* replacementPermittedSubclassesCountPtr = getNumberOfPermittedSubclassesPtr(replacementROMClass);
+
+		if (*originalPermittedSubclassesCountPtr == *replacementPermittedSubclassesCountPtr) {
+			U_32 i = 0;
+
+			for (i = 0; i < *originalPermittedSubclassesCountPtr; i++) {
+				U_32 j = 0;
+				BOOLEAN foundMatchingSubclass = FALSE;
+				J9UTF8* originalSubclassNameUTF = permittedSubclassesNameAtIndex(originalPermittedSubclassesCountPtr, i);
+				
+				/* Find matching subclass name in replacement ROM class. The permitted subclasses are not required to be in the same order
+				 * as the original class. Assume the replacement subclass is in the same slot as original to try to improve speed.
+				 */
+				for (j = 0; j < *originalPermittedSubclassesCountPtr; j++){
+					U_32 adjustedIndex = (i + j) % *originalPermittedSubclassesCountPtr;
+					J9UTF8* replacementSubclassNameUTF = permittedSubclassesNameAtIndex(replacementPermittedSubclassesCountPtr, adjustedIndex);
+
+					if (J9UTF8_EQUALS(originalSubclassNameUTF, replacementSubclassNameUTF)) {
+						foundMatchingSubclass = TRUE;
+						break;
+					}
+				}
+
+				/* check if matching subclass was found. */
+				if (!foundMatchingSubclass) {
+					rc = JVMTI_ERROR_UNSUPPORTED_REDEFINITION_CLASS_ATTRIBUTE_CHANGED;
+					break;
+				}
+			}
+
+		} else {
+			rc = JVMTI_ERROR_UNSUPPORTED_REDEFINITION_CLASS_ATTRIBUTE_CHANGED;
+		}
+	} else if (J9ROMCLASS_IS_SEALED(originalROMClass) != J9ROMCLASS_IS_SEALED(replacementROMClass)) {
+		/* If sealed status has changed the PermittedSubclass attribute has also changed which is not allowed. */
+		rc = JVMTI_ERROR_UNSUPPORTED_REDEFINITION_CLASS_ATTRIBUTE_CHANGED;
+	}
+
+	return rc;
+}
+
+#endif /* JAVA_SPEC_VERSION >= 15 */
+
 jvmtiError
 verifyClassesAreCompatible(J9VMThread * currentThread, jint class_count, J9JVMTIClassPair * classPairs,
 						   UDATA extensionsEnabled, UDATA * extensionsUsed)
@@ -3273,7 +3382,21 @@ verifyClassesAreCompatible(J9VMThread * currentThread, jint class_count, J9JVMTI
 			return rc;
 		}
 
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 15
+		/* Verify that records attributes are the same */
+		rc = verifyRecordAttributesAreSame(originalROMClass, replacementROMClass);
+		if (rc != JVMTI_ERROR_NONE) {
+			return rc;
+		}
+
+		/* Verify that permitted subclass attributes contain the same classes */
+		rc = verifyPermittedSubclassAttributeContentsMatch(originalROMClass, replacementROMClass);
+		if (rc != JVMTI_ERROR_NONE) {
+			return rc;
+		}
+#endif /* JAVA_SPEC_VERSION >= 15 */
+
+#if JAVA_SPEC_VERSION >= 11
 		/* Verify that the nestmates attributes - nest host & nest members - are the same */
 		{
 			J9UTF8 *originalNestHostName = J9ROMCLASS_NESTHOSTNAME(originalROMClass);
@@ -3305,7 +3428,7 @@ verifyClassesAreCompatible(J9VMThread * currentThread, jint class_count, J9JVMTI
 				}
 			}
 		}
-#endif /* defined(J9VM_OPT_VALHALLA_NESTMATES) */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 		if (0 != classUsesExtensions) {
 			classPairs[i].flags |= J9JVMTI_CLASS_PAIR_FLAG_USES_EXTENSIONS;
@@ -3388,7 +3511,18 @@ reloadROMClasses(J9VMThread * currentThread, jint class_count, const jvmtiClassD
 			options = options | J9_FINDCLASS_FLAG_UNSAFE;
 		}
 		loadData.classLoader = originalRAMClass->classLoader;
-		if (J9_ARE_ALL_BITS_SET(originalRAMClass->classFlags, J9ClassIsAnonymous)) {
+		if (J9ROMCLASS_IS_HIDDEN(originalRAMClass->romClass)) {
+			options |= (J9_FINDCLASS_FLAG_HIDDEN | J9_FINDCLASS_FLAG_UNSAFE);
+			if (J9ROMCLASS_IS_OPTIONNESTMATE_SET(originalRAMClass->romClass)) {
+				options |= J9_FINDCLASS_FLAG_CLASS_OPTION_NESTMATE;
+			}
+			if (J9ROMCLASS_IS_OPTIONSTRONG_SET(originalRAMClass->romClass)) {
+				options |= J9_FINDCLASS_FLAG_CLASS_OPTION_STRONG ;
+			} else {
+				options |= J9_FINDCLASS_FLAG_ANON;
+				loadData.classLoader = vm->anonClassLoader;
+			}
+		} else if (J9_ARE_ALL_BITS_SET(originalRAMClass->classFlags, J9ClassIsAnonymous)) {
 			options = options | J9_FINDCLASS_FLAG_ANON;
 			loadData.classLoader = vm->anonClassLoader;
 		} 
@@ -3404,6 +3538,13 @@ reloadROMClasses(J9VMThread * currentThread, jint class_count, const jvmtiClassD
 		loadData.protectionDomain = J9VMJAVALANGCLASS_PROTECTIONDOMAIN(currentThread, heapClass);
 		loadData.options = options;
 
+		loadData.hostPackageName = NULL;
+		loadData.hostPackageLength = 0;
+		if ((J2SE_VERSION(vm) >= J2SE_V11) && J9_ARE_ALL_BITS_SET(originalRAMClass->classFlags, J9ClassIsAnonymous)) {
+			J9ROMClass *hostROMClass = originalRAMClass->hostClass->romClass;
+			loadData.hostPackageName = J9UTF8_DATA(J9ROMCLASS_CLASSNAME(hostROMClass));;
+			loadData.hostPackageLength = packageNameLength(hostROMClass);
+		}
 
 		loadData.freeUserData = NULL;
 		loadData.freeFunction = NULL;
@@ -3876,7 +4017,6 @@ hshelpUTRegister(J9JavaVM *vm)
 	UT_J9HSHELP_MODULE_LOADED(J9_UTINTERFACE_FROM_VM(vm));
 }
 
-
 /**
  * \brief	Notify the jit about redefined classes
  * \ingroup
@@ -3907,6 +4047,3 @@ jitClassRedefineEvent(J9VMThread * currentThread, J9JVMTIHCRJitEventData * jitEv
 }
 
 #endif /* J9VM_INTERP_HOT_CODE_REPLACEMENT */ /* End File Level Build Flags */
-
-
-

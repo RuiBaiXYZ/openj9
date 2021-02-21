@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar17]*/
 /*******************************************************************************
- * Copyright (c) 2012, 2019 IBM Corp. and others
+ * Copyright (c) 2012, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,20 +23,29 @@
 package com.ibm.lang.management;
 
 /**
- * The IBM-specific interface for the runtime system of the virtual machine.
+ * The OpenJ9 extension interface for the runtime system of the virtual machine.
  */
 public interface RuntimeMXBean extends java.lang.management.RuntimeMXBean {
 
 	/**
-	 * enum type defines the different states of the VM Idle 
+	 * Defines the different states of {@link com.ibm.lang.management.RuntimeMXBean#getVMIdleState()}.
 	 */
 	public enum VMIdleStates {
 		/* Below constant values reflect J9VMRuntimeStateListener.vmRuntimeState
 		 * from the VM and the VM constants J9VM_RUNTIME_STATE_ACTIVE and
 		 * J9VM_RUNTIME_STATE_IDLE. These values need to match the VM values.
 		 */
+		/**
+		 * VM idle state could not be determined.
+		 */
 		INVALID(-1, "Invalid"),
+		/**
+		 * VM idle state is active.
+		 */
 		ACTIVE(1, "Active"),
+		/**
+		 * VM idle state is idle.
+		 */
 		IDLE(2, "Idle");
 
 		private int stateVal;
@@ -83,15 +92,15 @@ public interface RuntimeMXBean extends java.lang.management.RuntimeMXBean {
 	 * 
 	 * @return A long representing the process ID (pid) on the underlying 
 	 * operating system.
-	/*[IF Java10]
+	/*[IF JAVA_SPEC_VERSION >= 10]
 	 * 
 	 * @deprecated As of Java 10. Use 
 	 * {@link java.lang.management.RuntimeMXBean#getPid() getPid()} instead.
 	 */
 	@Deprecated(forRemoval=true, since="10")
-	/*[ELSE]
+	/*[ELSE] JAVA_SPEC_VERSION >= 10
 	 */
-	/*[ENDIF]*/
+	/*[ENDIF] JAVA_SPEC_VERSION >= 10 */
 	public long getProcessID();
 
 	/**

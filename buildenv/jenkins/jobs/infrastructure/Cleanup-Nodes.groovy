@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2019 IBM Corp. and others
+ * Copyright (c) 2018, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -19,6 +19,7 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
+// #10071 This is a Jenkins class
 import hudson.slaves.OfflineCause
 
 defaultSetupLabel = 'worker'
@@ -86,10 +87,10 @@ properties([buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKe
             pipelineTriggers([cron('''# Daily at 8am, 12pm, 4pm, 11pm (before nightly build)
                                         0 8,12,16,23 * * *''')]),
             parameters(PARAMETERS)])
-*/
+ */
 
 jobs = [:]
-offlineSlaves = [:]
+offlineNodes = [:]
 buildNodes = []
 
 timeout(time: TIMEOUT_TIME.toInteger(), unit: TIMEOUT_UNITS) {
@@ -117,17 +118,19 @@ timeout(time: TIMEOUT_TIME.toInteger(), unit: TIMEOUT_UNITS) {
                                  'target*.tmp',
                                  'sharedcacheapi',
                                  'intermediateClassCreateTest',
-                                 'sh-np.*']
+                                 'sh-np.*',
+                                 'xlc*',
+                                 'sh-np-*']
 
                 for (aNode in jenkins.model.Jenkins.instance.getLabel(LABEL).getNodes()) {
                     def nodeName = aNode.getDisplayName()
 
                     if (aNode.toComputer().isOffline()) {
-                        // skip offline slave
+                        // skip offline nodes
                         def offlineCause = aNode.toComputer().getOfflineCause()
                         if (offlineCause instanceof OfflineCause.UserCause) {
                             // skip offline node disconnected by users
-                            offlineSlaves.put(nodeName, offlineCause.toString())
+                            offlineNodes.put(nodeName, offlineCause.toString())
                         } else {
                             // cache nodes, will attempt to reconnect nodes disconnected by system later
                             buildNodes.add(nodeName)
@@ -172,10 +175,18 @@ timeout(time: TIMEOUT_TIME.toInteger(), unit: TIMEOUT_UNITS) {
                                                 ipcs -ma
                                                 ipcs -ma | awk '/^m / { if (\$9 == 0) { print \$2 }}' | xargs -n 1 ipcrm -m
                                                 ipcs -ma
-						du -sh /cores
-						rm -rf /cores/*
-						du -sh /cores
+                                                du -sh /cores
+                                                rm -rf /cores/*
+                                                du -sh /cores
                                             """
+                                        }
+                                    }
+
+                                    // Cleanup zOS datasets 
+                                    if (nodeLabels.contains('sw.os.zos')) {
+                                        listcat = sh(script: "tso listcat | grep '${env.USER}' | cut -d. -f 2-", returnStdout: true).trim()
+                                        listcat.split('\n').each {
+                                            sh "tso delete ${it}"
                                         }
                                     }
 
@@ -203,7 +214,7 @@ timeout(time: TIMEOUT_TIME.toInteger(), unit: TIMEOUT_UNITS) {
                             }
 
                             if (MODES.contains('sanitize')) {
-                                stage("${nodeName} - Sanitize slave") {
+                                stage("${nodeName} - Sanitize node") {
                                     sanitize_node(nodeName)
                                 }
                             }
@@ -211,11 +222,11 @@ timeout(time: TIMEOUT_TIME.toInteger(), unit: TIMEOUT_UNITS) {
                     }
                 }
 
-                if (offlineSlaves) {
-                    println("Offline slaves: ${offlineSlaves.toString()}")
+                if (offlineNodes) {
+                    println("Offline nodes: ${offlineNodes.toString()}")
                 }
 
-            } catch(e) {
+            } catch (e) {
                 if (SLACK_CHANNEL) {
                     slackSend channel: SLACK_CHANNEL, color: 'danger', message: "Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)"
                 }
@@ -235,7 +246,7 @@ timeout(time: TIMEOUT_TIME.toInteger(), unit: TIMEOUT_UNITS) {
                         def aComputer = jenkins.model.Jenkins.instance.getNode(label).toComputer()
 
                         if (aComputer.isOffline() && !(aComputer.getOfflineCause() instanceof OfflineCause.UserCause)) {
-                            // reconnect slave (asynchronously)
+                            // reconnect node (asynchronously)
                             println("${label}: Reconnecting...")
                             aComputer.connect(true)
 
@@ -258,8 +269,8 @@ timeout(time: TIMEOUT_TIME.toInteger(), unit: TIMEOUT_UNITS) {
 }
 
 /*
-* Return a list of workspace directories (current build workspace excluded)
-*/
+ * Return a list of workspace directories (current build workspace excluded)
+ */
 def get_other_workspaces(workspaceDir) {
     // fetch all directories in workspaceDir (this should not fail)
     def workspaces = sh(script: "ls ${workspaceDir}", returnStdout: true).trim().tokenize(System.lineSeparator())
@@ -270,8 +281,8 @@ def get_other_workspaces(workspaceDir) {
 }
 
 /*
-* Kill all processes and reconnect a Jenkins node
-*/
+ * Kill all processes and reconnect a Jenkins node
+ */
 def sanitize_node(nodeName) {
     def workingNode = jenkins.model.Jenkins.instance.getNode(nodeName)
     def workingComputer = workingNode.toComputer()
@@ -297,11 +308,11 @@ def sanitize_node(nodeName) {
         // execute command
         sh "${cmd}"
 
-    } catch(e) {
+    } catch (e) {
         println(e.getMessage())
     }
 
-    //reconnect slave
+    //reconnect node
     timeout(time: RECONNECT_TIMEOUT.toInteger(), unit: 'MINUTES') {
         println("\t ${nodeName}: Disconnecting...")
         workingComputer.disconnect(null)

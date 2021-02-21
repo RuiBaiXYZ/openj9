@@ -20,9 +20,11 @@
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
 
+set(OMR_ENHANCED_WARNINGS OFF)
+
 add_tracegen(map.tdf)
 
-add_library(j9stackmap STATIC
+j9vm_add_library(j9stackmap STATIC
 	debuglocalmap.c
 	fixreturns.c
 	localmap.c

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -45,16 +45,18 @@ JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM* vm, char *options, void *reserved)
 #define JVMTI_VERSION_1_1 0x30010100
 #define JVMTI_VERSION_1_2 0x30010200
 #define JVMTI_VERSION_1 (JVMTI_VERSION_1_0)
-#define JVMTI_VERSION_9  0x30090000
+ifelse(eval(JAVA_SPEC_VERSION > 8), 1, [#define JVMTI_VERSION_9  0x30090000
 #define JVMTI_VERSION_11 0x300b0000
-
-#define JVMTI_VERSION JVMTI_VERSION_11
+ifelse(eval(JAVA_SPEC_VERSION >= 15), 1, [#define JVMTI_VERSION_15 0x300f0000], [dnl])], [dnl])
 
 #define JVMTI_1_0_SPEC_VERSION           (JVMTI_VERSION_1_0 + 37)	/* Spec version is 1.0.37 */
 #define JVMTI_1_1_SPEC_VERSION           (JVMTI_VERSION_1_1 + 102)	/* Spec version is 1.1.102 */
 #define JVMTI_1_2_SPEC_VERSION           (JVMTI_VERSION_1_2 + 1)	/* Spec version is 1.2.1 */
 #define JVMTI_1_2_3_SPEC_VERSION         (JVMTI_VERSION_1_2 + 3)  /* Spec version is 1.2.3 */
 
+ifelse(eval(JAVA_SPEC_VERSION >= 15), 1, [#define JVMTI_VERSION JVMTI_VERSION_15], [
+ifelse(eval(JAVA_SPEC_VERSION >= 11), 1, [#define JVMTI_VERSION JVMTI_VERSION_11], [
+#define JVMTI_VERSION JVMTI_1_2_SPEC_VERSION])])
 
 #define JVMTI_CLASS_STATUS_VERIFIED		0x00000001
 #define JVMTI_CLASS_STATUS_PREPARED		0x00000002
@@ -341,9 +343,8 @@ typedef enum jvmtiError {
 	JVMTI_ERROR_NAMES_DONT_MATCH = 69,
 	JVMTI_ERROR_UNSUPPORTED_REDEFINITION_CLASS_MODIFIERS_CHANGED = 70,
 	JVMTI_ERROR_UNSUPPORTED_REDEFINITION_METHOD_MODIFIERS_CHANGED = 71,
-/* #if defined(J9VM_OPT_VALHALLA_NESTMATES) */
-	JVMTI_ERROR_UNSUPPORTED_REDEFINITION_CLASS_ATTRIBUTE_CHANGED = 72,
-/* #endif defined(J9VM_OPT_VALHALLA_NESTMATES) */
+ifelse(eval(JAVA_SPEC_VERSION >= 11), 1,
+[	JVMTI_ERROR_UNSUPPORTED_REDEFINITION_CLASS_ATTRIBUTE_CHANGED = 72,], [dnl])
 	JVMTI_ERROR_UNMODIFIABLE_CLASS = 79,
 	JVMTI_ERROR_UNMODIFIABLE_MODULE = 80,
 	JVMTI_ERROR_NOT_AVAILABLE = 98,

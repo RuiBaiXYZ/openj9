@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar17]*/
 /*******************************************************************************
- * Copyright (c) 2005, 2016 IBM Corp. and others
+ * Copyright (c) 2005, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -24,7 +24,7 @@
 package com.ibm.lang.management;
 
 /**
- * The IBM-specific interface for monitoring the virtual machine's memory
+ * The OpenJ9 extension interface for monitoring the virtual machine's memory
  * management system.
  * 
  * @since 1.5
@@ -240,26 +240,62 @@ public interface MemoryMXBean extends java.lang.management.MemoryMXBean {
      */
     public long getSharedClassCacheFreeSpace();
 	
-	/**
-	 * Returns the current GC mode as a human-readable string.  
-	 * 
-	 * @return a String describing the mode the GC is currently operating in
-	 */
-	public String getGCMode();
+    /**
+     * Returns the current GC mode as a human-readable string.
+     * 
+     * @return a String describing the mode the GC is currently operating in
+     */
+    public String getGCMode();
 
-	/**
-     * Returns the amount of CPU time spent in the GC by the master thread, in milliseconds.
+/*[IF JAVA_SPEC_VERSION < 16]*/
+    /**
+     * Returns the amount of CPU time spent in the GC by the master thread, in
+     * milliseconds.
+     * 
+     * @return CPU time used in milliseconds
+     * 
+     * @deprecated renamed to getGCMainThreadCpuUsed
+     */
+    /*[IF JAVA_SPEC_VERSION >= 11]*/
+    @Deprecated(forRemoval=true, since="15")
+    /*[ELSE] JAVA_SPEC_VERSION >= 11 */
+    @Deprecated
+    /*[ENDIF] JAVA_SPEC_VERSION >= 11 */
+    public long getGCMasterThreadCpuUsed();
+/*[ENDIF] JAVA_SPEC_VERSION < 16 */
+
+    /**
+     * Returns the amount of CPU time spent in the GC by the main thread, in
+     * milliseconds.
      * 
      * @return CPU time used in milliseconds
      */
-	public long getGCMasterThreadCpuUsed();
+    public long getGCMainThreadCpuUsed();
 
-	/**
-     * Returns the total amount of CPU time spent in the GC by all slave threads, in milliseconds.
+/*[IF JAVA_SPEC_VERSION < 16]*/
+    /**
+     * Returns the total amount of CPU time spent in the GC by all slave threads, in
+     * milliseconds.
+     * 
+     * @return CPU time used in milliseconds
+     * 
+     * @deprecated renamed to getGCWorkerThreadsCpuUsed
+     */
+    /*[IF JAVA_SPEC_VERSION >= 11]*/
+    @Deprecated(forRemoval=true, since="15")
+    /*[ELSE] JAVA_SPEC_VERSION >= 11 */
+    @Deprecated
+    /*[ENDIF] JAVA_SPEC_VERSION >= 11 */
+    public long getGCSlaveThreadsCpuUsed();
+/*[ENDIF] JAVA_SPEC_VERSION < 16 */
+
+    /**
+     * Returns the total amount of CPU time spent in the GC by all worker threads,
+     * in milliseconds.
      * 
      * @return CPU time used in milliseconds
      */
-	public long getGCSlaveThreadsCpuUsed();
+    public long getGCWorkerThreadsCpuUsed();
 
 	/**
      * Returns the maximum number of GC worker threads.

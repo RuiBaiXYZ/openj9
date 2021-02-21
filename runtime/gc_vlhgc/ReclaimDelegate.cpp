@@ -1,6 +1,5 @@
-
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -42,7 +41,6 @@
 #include "CompactGroupManager.hpp"
 #include "CompactGroupPersistentStats.hpp"
 #include "CompactStats.hpp"
-#include "Dispatcher.hpp"
 #include "EnvironmentVLHGC.hpp"
 #include "GlobalAllocationManagerTarok.hpp"
 #include "InterRegionRememberedSet.hpp"
@@ -52,6 +50,7 @@
 #include "HeapRegionManagerTarok.hpp"
 #include "MemoryPoolBumpPointer.hpp"
 #include "ObjectAllocationInterface.hpp"
+#include "ParallelDispatcher.hpp"
 #include "ParallelSweepSchemeVLHGC.hpp"
 #include "VMThreadListIterator.hpp"
 #include "WriteOnceCompactor.hpp"
@@ -532,8 +531,6 @@ MM_ReclaimDelegate::performAtomicSweep(MM_EnvironmentVLHGC *env, MM_AllocateDesc
 void
 MM_ReclaimDelegate::createRegionCollectionSetForPartialGC(MM_EnvironmentVLHGC *env, UDATA desiredWorkToDo)
 {
-	Assert_MM_true(env->_cycleState->_shouldRunCopyForward);
-	
 	UDATA ignoreSkippedRegions = 0;
 	tagRegionsBeforeCompactWithWorkGoal(env, true, desiredWorkToDo, &ignoreSkippedRegions);
 }
@@ -569,7 +566,7 @@ MM_ReclaimDelegate::deriveCompactScore(MM_EnvironmentVLHGC *env)
 				region->_compactData._compactScore = 0.0;
 				notDefragmentationTarget += 1;
 			} else if (!region->getRememberedSetCardList()->isAccurate()) {
-				/* Overflowed regions or those that RSCL is being rebuilt will not be be compacted (not even put into the sorted list) */
+				/* Overflowed regions or those that RSCL is being rebuilt will not be compacted (not even put into the sorted list) */
 				region->_compactData._compactScore = 0.0;
 				overflowedRegionCount += 1;
 			} else if(!region->_sweepData._alreadySwept) {
@@ -674,7 +671,7 @@ void
 MM_ReclaimDelegate::postCompactCleanup(MM_EnvironmentVLHGC *env, MM_AllocateDescription *allocDescription, MM_MemorySubSpace *activeSubSpace, MM_GCCode gcCode)
 {
 	/* Restart the allocation caches associated to all threads */
-	masterThreadRestartAllocationCaches(env);
+	mainThreadRestartAllocationCaches(env);
 
 	/* ----- start of cleanupAfterCollect ------*/
 	
@@ -744,7 +741,6 @@ MM_ReclaimDelegate::runReclaimForAbortedCopyForward(MM_EnvironmentVLHGC *env, MM
 	MM_CompactGroupPersistentStats *persistentStats = extensions->compactGroupPersistentStats;
 
 	Trc_MM_ReclaimDelegate_runReclaimForAbortedCopyForward_Entry(env->getLanguageVMThread(), ((MM_GlobalAllocationManagerTarok *)MM_GCExtensions::getExtensions(env)->globalAllocationManager)->getFreeRegionCount());
-	Assert_MM_true(env->_cycleState->_shouldRunCopyForward);
 
 	/* Perform Atomic Sweep on nonEvacuated regions before compacting in order to maintain accurate projectedLiveByte for the regions
 	 * projectedLiveByte will be used in selecting RateOfReturnCollectionSet in future collection */
@@ -797,7 +793,7 @@ MM_ReclaimDelegate::compactAndCorrectStats(MM_EnvironmentVLHGC *env, MM_Allocate
 	 */
 	static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._compactStats.clear();
 	/* run the compactor and we will read the stats, afterward */
-	masterThreadCompact(env, allocDescription, nextMarkMap);
+	mainThreadCompact(env, allocDescription, nextMarkMap);
 }
 #endif /* defined(J9VM_GC_MODRON_COMPACTION) */	
 
@@ -833,7 +829,7 @@ MM_ReclaimDelegate::deleteSweepPoolState(MM_EnvironmentBase *env, void *sweepPoo
 
 #if defined(J9VM_GC_MODRON_COMPACTION)
 void
-MM_ReclaimDelegate::masterThreadCompact(MM_EnvironmentVLHGC *env, MM_AllocateDescription *allocDescription, MM_MarkMap *nextMarkMap)
+MM_ReclaimDelegate::mainThreadCompact(MM_EnvironmentVLHGC *env, MM_AllocateDescription *allocDescription, MM_MarkMap *nextMarkMap)
 {
 	PORT_ACCESS_FROM_ENVIRONMENT(env);
 	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(env);
@@ -852,7 +848,7 @@ MM_ReclaimDelegate::masterThreadCompact(MM_EnvironmentVLHGC *env, MM_AllocateDes
 #endif /* J9VM_GC_MODRON_COMPACTION */
 
 void
-MM_ReclaimDelegate::masterThreadRestartAllocationCaches(MM_EnvironmentVLHGC *env)
+MM_ReclaimDelegate::mainThreadRestartAllocationCaches(MM_EnvironmentVLHGC *env)
 {
 	GC_VMThreadListIterator vmThreadListIterator((J9JavaVM *)env->getLanguageVM());
 	J9VMThread *walkThread;

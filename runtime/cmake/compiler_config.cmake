@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2019 IBM Corp. and others
+# Copyright (c) 2017, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -24,7 +24,7 @@
 # used by the jit components.
 
 # TODO should probably rename to j9vm_jit_defines for less ambiguity
-add_library(j9vm_compiler_defines INTERFACE)
+j9vm_add_library(j9vm_compiler_defines INTERFACE)
 
 if(OMR_ENV_DATA64)
 	target_compile_definitions(j9vm_compiler_defines INTERFACE TR_64bit TR_HOST_64BIT TR_TARGET_64BIT)
@@ -38,6 +38,10 @@ elseif(OMR_ARCH_POWER)
 	target_compile_definitions(j9vm_compiler_defines INTERFACE TR_TARGET_POWER TR_HOST_POWER)
 elseif(OMR_ARCH_S390)
 	target_compile_definitions(j9vm_compiler_defines INTERFACE TR_TARGET_S390 TR_HOST_S390)
+elseif(OMR_ARCH_ARM)
+	target_compile_definitions(j9vm_compiler_defines INTERFACE TR_TARGET_ARM TR_HOST_ARM)
+elseif(OMR_ARCH_AARCH64)
+	target_compile_definitions(j9vm_compiler_defines INTERFACE TR_TARGET_ARM64 TR_HOST_ARM64)
 else()
-	message(FATAL_ERROR "Currently only x86, ppc, and s390 are supported under CMake")
+	message(FATAL_ERROR "Unsupported architecture")
 endif() #TODO OTHER PLATFORMS

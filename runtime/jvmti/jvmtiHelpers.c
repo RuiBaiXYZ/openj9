@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -66,6 +66,8 @@ static const UDATA reasonCodeFromJVMTIEvent[] = {
 	J9_JNI_OFFLOAD_SWITCH_JVMTI_GC_FINISH,								/* JVMTI_EVENT_GARBAGE_COLLECTION_FINISH */
 	J9_JNI_OFFLOAD_SWITCH_JVMTI_OBJECT_FREE,							/* JVMTI_EVENT_OBJECT_FREE */
 	J9_JNI_OFFLOAD_SWITCH_JVMTI_VM_OBJECT_ALLOC,						/* JVMTI_EVENT_VM_OBJECT_ALLOC */
+	0,																	/* Reserved for JVMTI event */
+	J9_JNI_OFFLOAD_SWITCH_JVMTI_SAMPLED_OBJECT_ALLOC,					/* JVMTI_EVENT_SAMPLED_OBJECT_ALLOC */
 	J9_JNI_OFFLOAD_SWITCH_J9JVMTI_COMPILING_START,						/* J9JVMTI_EVENT_COM_IBM_COMPILING_START */
 	J9_JNI_OFFLOAD_SWITCH_J9JVMTI_COMPILING_END,						/* J9JVMTI_EVENT_COM_IBM_COMPILING_END */
 	J9_JNI_OFFLOAD_SWITCH_J9JVMTI_INSTRUMENTABLE_OBJECT_ALLOC,			/* J9JVMTI_EVENT_COM_IBM_INSTRUMENTABLE_OBJECT_ALLOC */
@@ -73,7 +75,6 @@ static const UDATA reasonCodeFromJVMTIEvent[] = {
 	J9_JNI_OFFLOAD_SWITCH_J9JVMTI_VM_DUMP_END,							/* J9JVMTI_EVENT_COM_IBM_VM_DUMP_END */
 	J9_JNI_OFFLOAD_SWITCH_J9JVMTI_GC_CYCLE_START,						/* J9JVMTI_EVENT_COM_IBM_GARBAGE_COLLECTION_CYCLE_START */
 	J9_JNI_OFFLOAD_SWITCH_J9JVMTI_GC_CYCLE_FINISH,						/* J9JVMTI_EVENT_COM_IBM_GARBAGE_COLLECTION_CYCLE_FINISH */
-	J9_JNI_OFFLOAD_SWITCH_JVMTI_SAMPLED_OBJECT_ALLOC,					/* JVMTI_EVENT_VM_OBJECT_ALLOC */
 };
 #endif /* J9VM_OPT_JAVA_OFFLOAD_SUPPORT */
 
@@ -174,6 +175,8 @@ disposeEnvironment(J9JVMTIEnv * j9env, UDATA freeData)
 #if JAVA_SPEC_VERSION >= 11
 		if (j9env->capabilities.can_generate_sampled_object_alloc_events) {
 			J9JVMTI_DATA_FROM_VM(vm)->flags &= ~J9JVMTI_FLAG_SAMPLED_OBJECT_ALLOC_ENABLED;
+			/* Set sampling interval to UDATA_MAX to inform GC that sampling is not required */
+			vm->memoryManagerFunctions->j9gc_set_allocation_sampling_interval(vm, UDATA_MAX);
 		}
 #endif /* JAVA_SPEC_VERSION >= 11 */
 

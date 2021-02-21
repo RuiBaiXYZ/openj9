@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -76,12 +76,21 @@ typedef enum {
    compilationSymbolValidationManagerFailure       = 50,
    compilationAOTNoSupportForAOTFailure            = 51,
    compilationAOTValidateTMFailure                 = 52,
+   compilationILGenUnsupportedValueTypeOperationFailure = 53,
+   compilationAOTRelocationRecordGenerationFailure = 54,
+   compilationAotPatchedCPConstant                 = 55,
+   compilationAotHasInvokeSpecialInterface         = 56,
+   compilationAotValidateExceptionHookFailure      = 57,
+   compilationAotBlockFrequencyReloFailure         = 58,
+   compilationAotRecompQueuedFlagReloFailure       = 59,
+   compilationAOTValidateOSRFailure                = 60,
 #if defined(J9VM_OPT_JITSERVER)
-   compilationStreamFailure                        = 53,
-   compilationStreamLostMessage                    = 54,
-   compilationStreamMessageTypeMismatch            = 55,
-   compilationStreamVersionIncompatible            = 56,
-   compilationStreamInterrupted                    = 57,
+   compilationFirstJITServerFailure,
+   compilationStreamFailure                        = compilationFirstJITServerFailure,
+   compilationStreamLostMessage                    = compilationFirstJITServerFailure+1,
+   compilationStreamMessageTypeMismatch            = compilationFirstJITServerFailure+2,
+   compilationStreamVersionIncompatible            = compilationFirstJITServerFailure+3,
+   compilationStreamInterrupted                    = compilationFirstJITServerFailure+4,
 #endif /* defined(J9VM_OPT_JITSERVER) */
    /* please insert new codes before compilationMaxError which is used in jar2jxe to test the error codes range */
    /* If new codes are added then add the corresponding names in compilationErrorNames table in rossa.cpp */

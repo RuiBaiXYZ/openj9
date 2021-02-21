@@ -20,14 +20,14 @@
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
 
-# We don't want to suffix vm version to shared libs.
-set(CMAKE_SHARED_LIBRARY_SUFFIX ${J9VM_OLD_SHARED_SUFFIX})
+set(OMR_ENHANCED_WARNINGS OFF)
 
 add_tracegen(j9scar.tdf)
 
 # Note we add all the actual sources to this interface library.
-# This is so that we can reuse them in jvm_b150/jvm_b156 without having to explicitly re-list all the files
-add_library(jvm_common INTERFACE)
+# This is so that we can reuse them without having to explicitly re-list all the files.
+j9vm_add_library(jvm_common INTERFACE)
+
 target_sources(jvm_common INTERFACE
 	${CMAKE_CURRENT_SOURCE_DIR}/j7verify.c
 	${CMAKE_CURRENT_SOURCE_DIR}/j7vmi.c
@@ -57,12 +57,12 @@ target_link_libraries(jvm_common
 target_include_directories(jvm_common
 	INTERFACE
 		${CMAKE_CURRENT_BINARY_DIR}
-		#TODO we have to repeat ../include because of duplication of vmi.h
+		# TODO we have to repeat ../include because of duplication of vmi.h
 		../include
 		../jcl/
 )
 
-add_library(jvm SHARED ${CMAKE_CURRENT_BINARY_DIR}/ut_j9scar.c)
+j9vm_add_library(jvm SHARED ${CMAKE_CURRENT_BINARY_DIR}/ut_j9scar.c)
 target_link_libraries(jvm
 	PRIVATE
 		jvm_common

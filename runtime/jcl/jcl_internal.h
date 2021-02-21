@@ -143,6 +143,18 @@ fetchArrayClass(struct J9VMThread *vmThread, J9Class *elementTypeClass);
 jarray
 getRecordComponentsHelper(JNIEnv *env, jobject cls);
 
+/**
+ * Build an array of java.lang.String to return names of all permitted subclasses
+ * for a sealed class.
+ * 
+ * @param[in] env The JNI context.
+ * @param[in] cls A class.  Must be non-null.
+ * 
+ * @return jarray an array of java.lang.String
+ */
+jarray
+permittedSubclassesHelper(JNIEnv *env, jobject cls);
+
 /* ---------------- sigquit.c ---------------- */
 void
 J9SigQuitShutdown(J9JavaVM * vm);
@@ -155,6 +167,10 @@ initializeUnsafeMemoryTracking(J9JavaVM* vm);
 void
 freeUnsafeMemory(J9JavaVM* vm);
 
+/* ---------------- java_dyn_methodhandle.c ---------------- */
+#if defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT)
+void clearNonZAAPEligibleBit(JNIEnv *env, jclass nativeClass, const JNINativeMethod *nativeMethods, jint nativeMethodCount);
+#endif /* J9VM_OPT_JAVA_OFFLOAD_SUPPORT */
 
 #ifdef __cplusplus
 }

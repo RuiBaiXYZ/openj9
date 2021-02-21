@@ -34,15 +34,16 @@ CONFIGURE_ARGS += \
 	--enable-OMR_ARCH_AARCH64 \
 	--enable-OMR_ENV_DATA64 \
 	--enable-OMR_ENV_LITTLE_ENDIAN \
+	--enable-OMR_GC_CONCURRENT_SCAVENGER \
 	--enable-OMR_GC_TLH_PREFETCH_FTA \
 	--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS
 
 ifneq (,$(findstring _cmprssptrs,$(SPEC)))
 	CONFIGURE_ARGS += \
-		--enable-OMR_GC_COMPRESSED_POINTERS
+		OMR_GC_POINTER_MODE=compressed
 else
 	CONFIGURE_ARGS += \
-		--enable-OMR_GC_FULL_POINTERS
+		OMR_GC_POINTER_MODE=full
 endif
 
 ifneq (,$(findstring _cross,$(SPEC)))

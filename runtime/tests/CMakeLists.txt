@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2019 IBM Corp. and others
+# Copyright (c) 2017, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,12 +20,13 @@
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
 
-# We dont want to suffix vm version to shared libs
-set(CMAKE_SHARED_LIBRARY_SUFFIX ${J9VM_OLD_SHARED_SUFFIX})
-
-#add_subdirectory(aixerrmsg)
+if(OMR_OS_AIX)
+	add_subdirectory(aixerrmsg)
+endif()
 add_subdirectory(algorithm)
-add_subdirectory(bcprof)
+if(OMR_HOST_OS STREQUAL "win" AND NOT OMR_ENV_DATA64)
+	add_subdirectory(bcprof)
+endif()
 add_subdirectory(bcverify)
 add_subdirectory(cutest)
 add_subdirectory(gp)
@@ -35,14 +36,18 @@ add_subdirectory(jniarg)
 add_subdirectory(jsig)
 add_subdirectory(jvmtitests)
 add_subdirectory(lazyclassload)
-add_subdirectory(loadLibraryTest)
+if(OMR_HOST_OS STREQUAL "osx")
+	add_subdirectory(loadLibraryTest)
+endif()
 add_subdirectory(port)
 add_subdirectory(props)
 add_subdirectory(redirector)
 add_subdirectory(shared)
-#add_subdirectory(shared_service)
+# add_subdirectory(shared_service)
 add_subdirectory(thread)
-#add_subdirectory(unresolved)
+if(OMR_HOST_OS STREQUAL "linux")
+	add_subdirectory(unresolved)
+endif()
 add_subdirectory(vm)
 add_subdirectory(vm_lifecycle)
-#add_subdirectory(zos)
+# add_subdirectory(zos)

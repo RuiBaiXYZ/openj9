@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
 /*******************************************************************************
- * Copyright (c) 2013, 2018 IBM Corp. and others
+ * Copyright (c) 2013, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -22,6 +22,7 @@
  *******************************************************************************/
 package com.ibm.cuda;
 
+import com.ibm.oti.vm.VM;
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
@@ -50,9 +51,12 @@ public final class Cuda {
 		static {
 			instance = new Cleaner();
 
-			Thread daemon = new Thread(instance, "CUDA pinned buffer cleaner"); //$NON-NLS-1$
+			PrivilegedAction<Thread> createThread = () -> VM.getVMLangAccess().createThread(instance,
+				"CUDA pinned buffer cleaner", true, false, true, null); //$NON-NLS-1$
 
-			daemon.setDaemon(true);
+			// we assert privilege to create the Thread
+			Thread daemon = AccessController.doPrivileged(createThread);
+
 			daemon.start();
 		}
 
@@ -94,10 +98,7 @@ public final class Cuda {
 
 	static {
 		AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-			/*[USEMACROS]*/
-			String version = System.getProperty("com.ibm.oti.vm.library.version", "%%MACRO@com.ibm.oti.vm.library.version%%"); //$NON-NLS-1$ //$NON-NLS-2$
-
-			System.loadLibrary("cuda4j".concat(version)); //$NON-NLS-1$
+			System.loadLibrary("cuda4j29"); //$NON-NLS-1$
 			return null;
 		});
 

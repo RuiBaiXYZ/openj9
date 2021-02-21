@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -43,10 +43,12 @@
 #include "env/VMJ9.h"
 #include "env/VMAccessCriticalSection.hpp"
 #include "env/KnownObjectTable.hpp"
+#include "env/VerboseLog.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
 #include "ilgen/IlGenRequest.hpp"
 #include "infra/List.hpp"
+#include "optimizer/Inliner.hpp"
 #include "optimizer/OptimizationManager.hpp"
 #include "optimizer/Optimizer.hpp"
 #include "optimizer/TransformUtil.hpp"
@@ -136,7 +138,8 @@ J9::Compilation::Compilation(int32_t id,
       TR::Region &heapMemoryRegion,
       TR_Memory *m,
       TR_OptimizationPlan *optimizationPlan,
-      TR_RelocationRuntime *reloRuntime)
+      TR_RelocationRuntime *reloRuntime,
+      TR::Environment *target)
    : OMR::CompilationConnector(
       id,
       j9vmThread->omrVMThread,
@@ -146,7 +149,8 @@ J9::Compilation::Compilation(int32_t id,
       options,
       heapMemoryRegion,
       m,
-      optimizationPlan),
+      optimizationPlan,
+      target),
    _updateCompYieldStats(
       options.getOption(TR_EnableCompYieldStats) ||
       options.getVerboseOption(TR_VerboseCompYieldStats) ||
@@ -179,9 +183,17 @@ J9::Compilation::Compilation(int32_t id,
    _reloRuntime(reloRuntime),
 #if defined(J9VM_OPT_JITSERVER)
    _remoteCompilation(false),
-   _serializedRuntimeAssumptions(getTypedAllocator<SerializedRuntimeAssumption>(self()->allocator())),
+   _serializedRuntimeAssumptions(getTypedAllocator<SerializedRuntimeAssumption *>(self()->allocator())),
+   _clientData(NULL),
+   _globalMemory(*::trPersistentMemory, heapMemoryRegion),
+   _perClientMemory(_trMemory),
 #endif /* defined(J9VM_OPT_JITSERVER) */
-   _osrProhibitedOverRangeOfTrees(false)
+   _osrProhibitedOverRangeOfTrees(false),
+   _useTracingBuffer(false),
+   _tracingBufferStart(NULL),
+   _tracingBufferCursor(NULL),
+   _tracingBufferSize(0),
+   _tracingBufferFreeSpace(0)
    {
    _symbolValidationManager = new (self()->region()) TR::SymbolValidationManager(self()->region(), compilee);
 
@@ -212,7 +224,7 @@ J9::Compilation::Compilation(int32_t id,
       J9::MethodHandleThunkDetails & thunkDetails = static_cast<J9::MethodHandleThunkDetails &>(details);
       if (thunkDetails.isCustom())
          {
-         TR::KnownObjectTable::Index index = knot->getIndexAt(thunkDetails.getHandleRef());
+         TR::KnownObjectTable::Index index = knot->getOrCreateIndexAt(thunkDetails.getHandleRef());
          ListIterator<TR::ParameterSymbol> parms(&_methodSymbol->getParameterList());
          TR::ParameterSymbol* parm0 = parms.getFirst();
          parm0->setKnownObjectIndex(index);
@@ -223,6 +235,14 @@ J9::Compilation::Compilation(int32_t id,
 J9::Compilation::~Compilation()
    {
    _profileInfo->~TR_AccessedProfileInfo();
+   }
+
+void
+J9::Compilation::allocateTracingBuffer()
+   {
+   const int32_t size = TRACING_BUFFER_CAPACITY;
+   _tracingBufferStart = (char *)self()->region().allocate(size);
+   _tracingBufferSize = size;
    }
 
 TR_J9VMBase *
@@ -309,7 +329,7 @@ J9::Compilation::allocateCompYieldStatsMatrix()
 void
 J9::Compilation::printCompYieldStats()
    {
-   TR_VerboseLog::writeLine(TR_Vlog_PERF,"max yield-to-yield time of %u usec for ", (uint32_t)_maxYieldInterval);
+   TR_VerboseLog::writeLine(TR_Vlog_PERF, "Max yield-to-yield time of %u usec for ", static_cast<uint32_t>(_maxYieldInterval));
    TR_VerboseLog::write("%s -", J9::Compilation::getContextName(_sourceContextForMaxYieldInterval));
    TR_VerboseLog::write("- %s", J9::Compilation::getContextName(_destinationContextForMaxYieldInterval));
    }
@@ -353,6 +373,13 @@ J9::Compilation::printCompYieldStatsMatrix()
       }
    }
 
+TR_AOTMethodHeader *
+J9::Compilation::getAotMethodHeaderEntry()
+   {
+   J9JITDataCacheHeader *aotMethodHeader = (J9JITDataCacheHeader *)self()->getAotMethodDataStart();
+   TR_AOTMethodHeader *aotMethodHeaderEntry =  (TR_AOTMethodHeader *)(aotMethodHeader + 1);
+   return aotMethodHeaderEntry;
+   }
 
 TR::Node *
 J9::Compilation::findNullChkInfo(TR::Node *node)
@@ -526,6 +553,12 @@ J9::Compilation::isShortRunningMethod(int32_t callerIndex)
 bool
 J9::Compilation::isRecompilationEnabled()
    {
+
+   if (!self()->cg()->getSupportsRecompilation())
+      {
+      return false;
+      }
+
    if (self()->isDLT())
       {
       return false;
@@ -611,6 +644,8 @@ J9::Compilation::canAllocateInline(TR::Node* node, TR_OpaqueClassBlock* &classIn
 
    bool generateArraylets = self()->generateArraylets();
 
+   const bool areValueTypesEnabled = TR::Compiler->om.areValueTypesEnabled();
+
    if (node->getOpCodeValue() == TR::New)
       {
 
@@ -659,11 +694,26 @@ J9::Compilation::canAllocateInline(TR::Node* node, TR_OpaqueClassBlock* &classIn
       {
       classRef      = node->getSecondChild();
 
-      // In the case of dynamic array allocation, return 0 indicating variable dynamic array allocation
+      // In the case of dynamic array allocation, return 0 indicating variable dynamic array allocation,
+      // unless value types are enabled, in which case return -1 to prevent inline allocation
       if (classRef->getOpCodeValue() != TR::loadaddr)
          {
          classInfo = NULL;
-         return 0;
+         if (areValueTypesEnabled)
+            {
+            if (self()->getOption(TR_TraceCG))
+               {
+               traceMsg(self(), "cannot inline array allocation @ node %p because value types are enabled\n", node);
+               }
+            const char *signature = self()->signature();
+
+            TR::DebugCounter::incStaticDebugCounter(self(), TR::DebugCounter::debugCounterName(self(), "inlineAllocation/dynamicArray/failed/valueTypes/(%s)", signature));
+            return -1;
+            }
+         else
+            {
+            return 0;
+            }
          }
 
       classSymRef   = classRef->getSymbolReference();
@@ -673,8 +723,17 @@ J9::Compilation::canAllocateInline(TR::Node* node, TR_OpaqueClassBlock* &classIn
       if (clazz == NULL)
          return -1;
 
+      // Arrays of value type classes must have all their elements initialized with the
+      // default value of the component type.  For now, prevent inline allocation of them.
+      //
+      if (areValueTypesEnabled && TR::Compiler->cls.isValueTypeClass(reinterpret_cast<TR_OpaqueClassBlock*>(clazz)))
+         {
+         return -1;
+         }
+
       auto classOffset = self()->fej9()->getArrayClassFromComponentClass(TR::Compiler->cls.convertClassPtrToClassOffset(clazz));
       clazz = TR::Compiler->cls.convertClassOffsetToClassPtr(classOffset);
+
       if (!clazz)
          return -1;
 
@@ -713,7 +772,7 @@ J9::Compilation::canAllocateInline(TR::Node* node, TR_OpaqueClassBlock* &classIn
       }
    else if (!isRealTimeGC && size == 0)
       {
-#if (defined(TR_HOST_S390) && defined(TR_TARGET_S390)) || (defined(TR_TARGET_X86) && defined(TR_HOST_X86)) || (defined(TR_TARGET_POWER) && defined(TR_HOST_POWER))
+#if (defined(TR_HOST_S390) && defined(TR_TARGET_S390)) || (defined(TR_TARGET_X86) && defined(TR_HOST_X86)) || (defined(TR_TARGET_POWER) && defined(TR_HOST_POWER)) || (defined(TR_TARGET_ARM64) && defined(TR_HOST_ARM64))
       size = TR::Compiler->om.discontiguousArrayHeaderSizeInBytes();
       if (self()->getOption(TR_TraceCG))
          traceMsg(self(), "inline array allocation @ node %p for size 0\n", node);
@@ -773,8 +832,8 @@ J9::Compilation::freeKnownObjectTable()
          J9VMThread *thread = self()->fej9()->vmThread();
          TR_ASSERT(thread, "assertion failure");
 
-         TR_ArrayIterator<uintptrj_t> i(&_knownObjectTable->_references);
-         for (uintptrj_t *ref = i.getFirst(); !i.pastEnd(); ref = i.getNext())
+         TR_ArrayIterator<uintptr_t> i(&_knownObjectTable->_references);
+         for (uintptr_t *ref = i.getFirst(); !i.pastEnd(); ref = i.getNext())
             thread->javaVM->internalVMFunctions->j9jni_deleteLocalRef((JNIEnv*)thread, (jobject)ref);
          }
       }
@@ -1080,6 +1139,12 @@ J9::Compilation::addAOTNOPSite()
    return site;
    }
 
+bool
+J9::Compilation::incInlineDepth(TR::ResolvedMethodSymbol * method, TR_ByteCodeInfo & bcInfo, int32_t cpIndex, TR::SymbolReference *callSymRef, bool directCall, TR_PrexArgInfo *argInfo)
+   {
+   TR_ASSERT_FATAL(callSymRef == NULL, "Should not be calling this API for non-NULL symref!\n");
+   return OMR::CompilationConnector::incInlineDepth(method, bcInfo, cpIndex, callSymRef, directCall, argInfo);
+   }
 
 bool
 J9::Compilation::isGeneratedReflectionMethod(TR_ResolvedMethod * method)
@@ -1093,6 +1158,71 @@ J9::Compilation::isGeneratedReflectionMethod(TR_ResolvedMethod * method)
    return false;
    }
 
+TR_ExternalRelocationTargetKind
+J9::Compilation::getReloTypeForMethodToBeInlined(TR_VirtualGuardSelection *guard, TR::Node *callNode, TR_OpaqueClassBlock *receiverClass)
+   {
+   TR_ExternalRelocationTargetKind reloKind = OMR::Compilation::getReloTypeForMethodToBeInlined(guard, callNode, receiverClass);
+
+   if (callNode && self()->compileRelocatableCode())
+      {
+      if (guard && guard->_kind == TR_ProfiledGuard)
+         {
+         if (guard->_type == TR_MethodTest)
+            reloKind = TR_ProfiledMethodGuardRelocation;
+         else if (guard->_type == TR_VftTest)
+            reloKind = TR_ProfiledClassGuardRelocation;
+         }
+      else
+         {
+         TR::MethodSymbol *methodSymbol = callNode->getSymbolReference()->getSymbol()->castToMethodSymbol();
+
+         if (methodSymbol->isSpecial())
+            {
+            reloKind = TR_InlinedSpecialMethod;
+            }
+         else if (methodSymbol->isStatic())
+            {
+            reloKind = TR_InlinedStaticMethod;
+            }
+         else if (receiverClass
+                  && TR::Compiler->cls.isAbstractClass(self(), receiverClass)
+                  && methodSymbol->getResolvedMethodSymbol()->getResolvedMethod()->isAbstract())
+            {
+            reloKind = TR_InlinedAbstractMethod;
+            }
+         else if (methodSymbol->isVirtual())
+            {
+            reloKind = TR_InlinedVirtualMethod;
+            }
+         else if (methodSymbol->isInterface())
+            {
+            reloKind = TR_InlinedInterfaceMethod;
+            }
+         }
+
+      if (reloKind == TR_NoRelocation)
+         {
+         TR_InlinedCallSite *site = self()->getCurrentInlinedCallSite();
+         TR_OpaqueMethodBlock *caller;
+         if (site)
+            {
+            TR_AOTMethodInfo *aotMethodInfo = (TR_AOTMethodInfo *)site->_methodInfo;
+            caller = aotMethodInfo->resolvedMethod->getNonPersistentIdentifier();
+            }
+         else
+            {
+            caller = self()->getMethodBeingCompiled()->getNonPersistentIdentifier();
+            }
+
+         TR_ASSERT_FATAL(false, "Can't find relo kind for Caller %p Callee %p TR_ByteCodeInfo %p\n",
+                         caller,
+                         callNode->getSymbol()->castToResolvedMethodSymbol()->getResolvedMethod()->getNonPersistentIdentifier(),
+                         callNode->getByteCodeInfo());
+         }
+      }
+
+   return reloKind;
+   }
 
 bool
 J9::Compilation::compilationShouldBeInterrupted(TR_CallingContext callingContext)
@@ -1379,7 +1509,7 @@ J9::Compilation::notYetRunMeansCold()
 
    TR_ResolvedMethod *currentMethod = self()->getJittedMethodSymbol()->getResolvedMethod();
 
-   intptrj_t initialCount = currentMethod->hasBackwardBranches() ?
+   intptr_t initialCount = currentMethod->hasBackwardBranches() ?
                              self()->getOptions()->getInitialBCount() :
                              self()->getOptions()->getInitialCount();
 

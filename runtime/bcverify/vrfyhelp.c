@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -121,13 +121,14 @@ addClassName(J9BytecodeVerificationData * verifyData, U_8 * name, UDATA length, 
 	offset = (U_32 *) verifyData->classNameSegmentFree;
 	utf8 = (J9UTF8 *) (offset + 1);
 	J9UTF8_SET_LENGTH(utf8, (U_16) length);
-	verifyData->classNameSegmentFree += (sizeof(U_32) + sizeof(J9UTF8));
+	verifyData->classNameSegmentFree += sizeof(U_32);
 	if (classNameInClass) {
 		offset[0] = (U_32) ((UDATA) name - (UDATA) romClass);
+		verifyData->classNameSegmentFree += sizeof(U_32);
 	} else {
 		offset[0] = 0;
 		strncpy((char *) J9UTF8_DATA(utf8), (char *) name, length);
-		verifyData->classNameSegmentFree += (length - 2 + sizeof(U_32) - 1) & ~(sizeof(U_32) - 1);	/* next U_32 boundary */
+		verifyData->classNameSegmentFree += (sizeof(J9UTF8) + length + sizeof(U_32) - 1) & ~(sizeof(U_32) - 1);	/* next U_32 boundary */
 	}
 	verifyData->classNameList[index] = (J9UTF8 *) offset;
 	verifyData->classNameList[index + 1] = NULL;
@@ -152,7 +153,7 @@ findClassName(J9BytecodeVerificationData * verifyData, U_8 * name, UDATA length)
 
 
 	while ((offset = (U_32 *) verifyData->classNameList[index]) != NULL) {
-		utf8 = (J9UTF8 *) offset + 1;
+		utf8 = (J9UTF8 *) (offset + 1);
 		if ((UDATA) J9UTF8_LENGTH(utf8) == length) {
 			data = (U_8 *) ((UDATA) offset[0] + (UDATA) romClass);
 
@@ -192,7 +193,7 @@ convertClassNameToStackMapType(J9BytecodeVerificationData * verifyData, U_8 *nam
 
 
 	while ((offset = (U_32 *) verifyData->classNameList[index]) != NULL) {
-		utf8 = (J9UTF8 *) offset + 1;
+		utf8 = (J9UTF8 *) (offset + 1);
 		if ((UDATA) J9UTF8_LENGTH(utf8) == (UDATA)length) {
 			data = (U_8 *) ((UDATA) offset[0] + (UDATA) romClass);
 
@@ -533,8 +534,8 @@ isClassCompatible(J9BytecodeVerificationData *verifyData, UDATA sourceClass, UDA
 		 *    except Object (already checked above), java/lang/Cloneable and java/io/Serializable,
 		 *    which means targetClass must be one/array of Object, java/lang/Cloneable and java/io/Serializable.
 		 */
-		if (((CLONEABLE_CLASS_NAME_LENGTH == targetLength) && ((0 == strncmp((const char*)targetName, CLONEABLE_CLASS_NAME, CLONEABLE_CLASS_NAME_LENGTH))))
-		|| ((SERIALIZEABLE_CLASS_NAME_LENGTH == targetLength) && (0 == strncmp((const char*)targetName, SERIALIZEABLE_CLASS_NAME, SERIALIZEABLE_CLASS_NAME_LENGTH)))
+		if (J9UTF8_DATA_EQUALS(targetName, targetLength, CLONEABLE_CLASS_NAME, CLONEABLE_CLASS_NAME_LENGTH)
+		||  J9UTF8_DATA_EQUALS(targetName, targetLength, SERIALIZEABLE_CLASS_NAME, SERIALIZEABLE_CLASS_NAME_LENGTH)
 		) {
 			rc = isInterfaceClass(verifyData, targetName, targetLength, reasonCode);
 
@@ -577,6 +578,19 @@ isClassCompatible(J9BytecodeVerificationData *verifyData, UDATA sourceClass, UDA
 
 	if (NULL != verifyData->vmStruct->currentException) {
 		return (IDATA) FALSE;
+	}
+	
+	if (J9ROMCLASS_IS_HIDDEN(verifyData->romClass)) {	
+		J9UTF8* className = J9ROMCLASS_CLASSNAME(verifyData->romClass);
+		if (J9UTF8_DATA_EQUALS(J9UTF8_DATA(className),  J9UTF8_LENGTH(className), sourceName, sourceLength)) {
+			/* isRAMClassCompatible() cannot find ram class of a hidden class, we are testing if 
+			 * the source class is the subclass of target class. We can use superclass of source class instead here. 
+			 * A hidden class can not be super class of another class, the hidden class name it is not findable and its name is generated at runtime. 
+			 */
+			J9UTF8* superClassName = J9ROMCLASS_SUPERCLASSNAME(verifyData->romClass);
+			sourceLength = J9UTF8_LENGTH(superClassName);
+			sourceName = J9UTF8_DATA(superClassName);
+		}
 	}
 
 	rc = isRAMClassCompatible(verifyData, targetName, targetLength , sourceName, sourceLength, reasonCode);
@@ -951,8 +965,17 @@ isProtectedAccessPermitted(J9BytecodeVerificationData *verifyData, J9UTF8* decla
 
 		/* Short circuit if the classes are the same */
 		currentClassName = J9ROMCLASS_CLASSNAME(romClass);
-		if (compareTwoUTF8s(declaringClassName, currentClassName)) return TRUE;
-
+		if (compareTwoUTF8s(declaringClassName, currentClassName)) {
+			return TRUE;
+		}
+		if (J9ROMCLASS_IS_HIDDEN(romClass)) {
+			/* j9rtv_verifierGetRAMClass won't find hidden classes. We are checking if the current class has access to
+			 * proected memeber of declaringClass. We can use the superclass of current class instead here. */
+			currentClassName = J9ROMCLASS_SUPERCLASSNAME(romClass);
+			if (compareTwoUTF8s(declaringClassName, currentClassName)) {
+				return TRUE;
+			}
+		}
 		/* Get the ram classes for the current and defining classes */
 		currentRamClass = j9rtv_verifierGetRAMClass (verifyData, verifyData->classLoader, J9UTF8_DATA(currentClassName), J9UTF8_LENGTH(currentClassName), reasonCode);
 		if ((NULL == currentRamClass) && (BCV_ERR_INSUFFICIENT_MEMORY == *reasonCode)) {
@@ -1001,25 +1024,33 @@ isProtectedAccessPermitted(J9BytecodeVerificationData *verifyData, J9UTF8* decla
 		if (currentRamClass->packageID == definingRamClass->packageID) return TRUE;
 
 		/* Determine if the defining class is the same class or a super class of current class */
-		if (isSameOrSuperClassOf (definingRamClass, currentRamClass)) {
-			U_8 * targetClassName;
-			UDATA targetClassLength;
-			J9Class * targetRamClass;
+		if (isSameOrSuperClassOf(definingRamClass, currentRamClass)) {
+			U_8 * targetClassName = NULL;
+			UDATA targetClassLength = 0;
+			J9Class * targetRamClass = NULL;
 
 			/* NULL is compatible */
 			if (targetClass != BCV_BASE_TYPE_NULL) {
 				/* Get the targetRamClass */
-				getNameAndLengthFromClassNameList (verifyData, J9CLASS_INDEX_FROM_CLASS_ENTRY(targetClass), &targetClassName, &targetClassLength);
-				targetRamClass = j9rtv_verifierGetRAMClass (verifyData, verifyData->classLoader, targetClassName, targetClassLength, reasonCode);
+				getNameAndLengthFromClassNameList(verifyData, J9CLASS_INDEX_FROM_CLASS_ENTRY(targetClass), &targetClassName, &targetClassLength);
+				targetRamClass = j9rtv_verifierGetRAMClass(verifyData, verifyData->classLoader, targetClassName, targetClassLength, reasonCode);
 				if (NULL == targetRamClass) {
 					return FALSE;
 				}
 
 				/* Determine if the targetRamClass is the same class or a sub class of the current class */
 				/* flipped logic - currentRamClass is the same class or a super class of the target class */
-				if (!isSameOrSuperClassOf (currentRamClass, targetRamClass)) {
-					/* fail */
-					return FALSE;
+				if (J9ROMCLASS_IS_HIDDEN(romClass)) {
+					currentClassName = J9ROMCLASS_CLASSNAME(romClass);
+					if (!J9UTF8_DATA_EQUALS(targetClassName, targetClassLength, J9UTF8_DATA(currentClassName), J9UTF8_LENGTH(currentClassName))) {
+						/* fail if current class and target class are not the same */
+						return FALSE;
+					}
+				} else {
+					if (!isSameOrSuperClassOf(currentRamClass, targetRamClass)) {
+						/* fail */
+						return FALSE;
+					}
 				}
 			}
 		}
@@ -1032,12 +1063,7 @@ isProtectedAccessPermitted(J9BytecodeVerificationData *verifyData, J9UTF8* decla
 /* return TRUE if identical, FALSE otherwise */
 static UDATA compareTwoUTF8s(J9UTF8 * first, J9UTF8 * second)
 {
-	U_8 * f = J9UTF8_DATA(first);
-	U_8 * s = J9UTF8_DATA(second);
-
-	if (J9UTF8_LENGTH(first) != J9UTF8_LENGTH(second)) return 0;
-
-	return (memcmp(f, s, J9UTF8_LENGTH(first)) == 0);
+	return J9UTF8_EQUALS(first, second);
 }
 
 

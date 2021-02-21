@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -24,6 +24,7 @@
 #define INLINERTEMPFORJ9_INCL
 
 #include "j9cfg.h"
+#include "ras/LogTracer.hpp"
 #include "runtime/J9ValueProfiler.hpp"
 
 class OMR_InlinerPolicy;
@@ -149,11 +150,12 @@ class TR_J9InlinerUtil: public OMR_InlinerUtil
       virtual TR_InlinerTracer * getInlinerTracer(TR::Optimization *optimization);
       virtual TR_PrexArgInfo *computePrexInfo(TR_CallTarget *target);
       virtual TR_PrexArgInfo *computePrexInfo(TR_CallTarget *target, TR_PrexArgInfo *callerArgInfo);
+      static  TR_PrexArgInfo *computePrexInfo(TR_InlinerBase *inliner, TR_CallSite *site, TR_PrexArgInfo *callerArgInfo = NULL);
       virtual void refineInlineGuard(TR::Node *callNode, TR::Block *&block1, TR::Block *&block2,
                    bool &appendTestToBlock1, TR::ResolvedMethodSymbol * callerSymbol, TR::TreeTop *cursorTree,
                    TR::TreeTop *&virtualGuard, TR::Block *block4);
       virtual void refineInliningThresholds(TR::Compilation *comp, int32_t &callerWeightLimit, int32_t &maxRecursiveCallByteCodeSizeEstimate, int32_t &methodByteCodeSizeThreshold, int32_t &methodInWarmBlockByteCodeSizeThreshold, int32_t &methodInColdBlockByteCodeSizeThreshold, int32_t &nodeCountThreshold, int32_t size);
-      static void checkForConstClass(TR_CallTarget *target, TR_InlinerTracer *tracer);
+      static void checkForConstClass(TR_CallTarget *target, TR_LogTracer *tracer);
       virtual bool needTargetedInlining(TR::ResolvedMethodSymbol *callee);
       virtual void requestAdditionalOptimizations(TR_CallTarget *calltarget);
    protected:
@@ -176,7 +178,7 @@ class TR_J9InlinerPolicy : public OMR_InlinerPolicy
       TR_J9InlinerPolicy(TR::Compilation *comp);
       virtual bool inlineRecognizedMethod(TR::RecognizedMethod method);
       virtual bool tryToInlineTrivialMethod (TR_CallStack* callStack, TR_CallTarget* calltarget);
-      static bool isInlineableJNI(TR_ResolvedMethod *method,TR::Node *callNode);
+      bool isInlineableJNI(TR_ResolvedMethod *method,TR::Node *callNode);
       virtual bool alwaysWorthInlining(TR_ResolvedMethod * calleeMethod, TR::Node *callNode);
       bool adjustFanInSizeInExceedsSizeThreshold(int bytecodeSize,
                                                       uint32_t& calculatedSize,

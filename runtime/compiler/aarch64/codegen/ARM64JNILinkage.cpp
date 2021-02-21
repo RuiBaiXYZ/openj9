@@ -217,7 +217,7 @@ void J9::ARM64::JNILinkage::buildJNICallOutFrame(TR::Node *callNode, bool isWrap
 
    TR::ResolvedMethodSymbol *resolvedMethodSymbol = callNode->getSymbol()->castToResolvedMethodSymbol();
    TR_ResolvedMethod *resolvedMethod = resolvedMethodSymbol->getResolvedMethod();
-   uintptrj_t methodAddr = reinterpret_cast<uintptrj_t>(resolvedMethod->resolvedMethodAddress());
+   uintptr_t methodAddr = reinterpret_cast<uintptr_t>(resolvedMethod->resolvedMethodAddress());
 
    // push the RAM method for the native
    if (fej9->needClassAndMethodPointerRelocations())
@@ -282,11 +282,13 @@ void J9::ARM64::JNILinkage::restoreJNICallOutFrame(TR::Node *callNode, bool tear
       // leave a bunch of pinned garbage behind that screws up the gc quality forever
       TR::LabelSymbol      *refPoolRestartLabel = generateLabelSymbol(cg());
       TR::LabelSymbol      *refPoolSnippetLabel = generateLabelSymbol(cg());
-      TR::SymbolReference *collapseSymRef = cg()->getSymRefTab()->findOrCreateRuntimeHelper(TR_ARM64jitCollapseJNIReferenceFrame, false, false, false);
+      TR::SymbolReference *collapseSymRef = cg()->getSymRefTab()->findOrCreateRuntimeHelper(TR_ARM64jitCollapseJNIReferenceFrame);
       TR::Snippet *snippet = new (trHeapMemory()) TR::ARM64HelperCallSnippet(cg(), callNode, refPoolSnippetLabel, collapseSymRef, refPoolRestartLabel);
       cg()->addSnippet(snippet);
       generateTrg1MemInstruction(cg(), TR::InstOpCode::ldrimmx, callNode, scratchReg, new (trHeapMemory()) TR::MemoryReference(javaStackReg, fej9->constJNICallOutFrameFlagsOffset(), cg()));
-      generateTestImmInstruction(cg(), callNode, scratchReg, fej9->constJNIReferenceFrameAllocatedFlags(), true);
+
+      TR_ASSERT_FATAL(fej9->constJNIReferenceFrameAllocatedFlags() == 0x30000, "constJNIReferenceFrameAllocatedFlags must be 0x30000");
+      generateTestImmInstruction(cg(), callNode, scratchReg, 0x401, false); // 0x401 is immr:imms for 0x30000
       generateConditionalBranchInstruction(cg(), TR::InstOpCode::b_cond, callNode, refPoolSnippetLabel, TR::CC_NE);
       generateLabelInstruction(cg(), TR::InstOpCode::label, callNode, refPoolRestartLabel);
       }
@@ -767,7 +769,7 @@ void J9::ARM64::JNILinkage::checkForJNIExceptions(TR::Node *callNode, TR::Regist
    }
 
 TR::Instruction *J9::ARM64::JNILinkage::generateMethodDispatch(TR::Node *callNode, bool isJNIGCPoint,
-                                                               TR::RegisterDependencyConditions *deps, uintptrj_t targetAddress, TR::Register *scratchReg)
+                                                               TR::RegisterDependencyConditions *deps, uintptr_t targetAddress, TR::Register *scratchReg)
    {
    TR::ResolvedMethodSymbol *resolvedMethodSymbol = callNode->getSymbol()->castToResolvedMethodSymbol();
    TR_ResolvedMethod *resolvedMethod = resolvedMethodSymbol->getResolvedMethod();
@@ -824,7 +826,7 @@ TR::Register *J9::ARM64::JNILinkage::buildDirectDispatch(TR::Node *callNode)
    TR::MethodSymbol *callSymbol = callSymRef->getSymbol()->castToMethodSymbol();
    TR::ResolvedMethodSymbol *resolvedMethodSymbol = callNode->getSymbol()->castToResolvedMethodSymbol();
    TR_ResolvedMethod *resolvedMethod = resolvedMethodSymbol->getResolvedMethod();
-   uintptrj_t targetAddress = reinterpret_cast<uintptrj_t>(resolvedMethod->startAddressForJNIMethod(comp()));
+   uintptr_t targetAddress = reinterpret_cast<uintptr_t>(resolvedMethod->startAddressForJNIMethod(comp()));
    TR_J9VMBase *fej9 = reinterpret_cast<TR_J9VMBase *>(fe());
 
    bool dropVMAccess = !fej9->jniRetainVMAccess(resolvedMethod);
@@ -946,5 +948,7 @@ TR::Register *J9::ARM64::JNILinkage::buildDirectDispatch(TR::Node *callNode)
    generateLabelInstruction(cg(), TR::InstOpCode::label, callNode, depLabel, postLabelDeps);
 
    callNode->setRegister(returnRegister);
+
+   deps->stopUsingDepRegs(cg(), returnRegister);
    return returnRegister;
    }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -59,6 +59,7 @@
 #include "optimizer/PreEscapeAnalysis.hpp"
 #include "optimizer/PostEscapeAnalysis.hpp"
 #include "optimizer/DataAccessAccelerator.hpp"
+#include "optimizer/HotFieldMarking.hpp"
 #include "optimizer/IsolatedStoreElimination.hpp"
 #include "optimizer/LoopAliasRefiner.hpp"
 #include "optimizer/MonitorElimination.hpp"
@@ -78,6 +79,7 @@
 #include "optimizer/UnsafeFastPath.hpp"
 #include "optimizer/VarHandleTransformer.hpp"
 #include "optimizer/StaticFinalFieldFolding.hpp"
+#include "optimizer/HandleRecompilationOps.hpp"
 
 
 static const OptimizationStrategy J9EarlyGlobalOpts[] =
@@ -87,7 +89,7 @@ static const OptimizationStrategy J9EarlyGlobalOpts[] =
    { OMR::inlining                             },
    { OMR::methodHandleInvokeInliningGroup,  OMR::IfEnabled },
    { OMR::staticFinalFieldFolding,             },
-   { OMR::osrGuardInsertion,                OMR::IfVoluntaryOSR       },
+   { OMR::osrGuardInsertion,                OMR::MustBeDone       },
    { OMR::osrExceptionEdgeRemoval                       }, // most inlining is done by now
    { OMR::jProfilingBlock                      },
    { OMR::stringBuilderTransformer             },
@@ -284,6 +286,7 @@ static const OptimizationStrategy coldStrategyOpts[] =
    { OMR::globalLiveVariablesForGC,                  OMR::IfAggressiveLiveness  },
    { OMR::profilingGroup,                            OMR::IfProfiling                },
    { OMR::regDepCopyRemoval                                                     },
+   { OMR::hotFieldMarking                                                       },
    { OMR::endOpts                                                               }
    };
 
@@ -304,7 +307,7 @@ static const OptimizationStrategy warmStrategyOpts[] =
    { OMR::inlining                                                              },
    { OMR::methodHandleInvokeInliningGroup,                       OMR::IfEnabled },
    { OMR::staticFinalFieldFolding,                                              },
-   { OMR::osrGuardInsertion,                         OMR::IfVoluntaryOSR       },
+   { OMR::osrGuardInsertion,                         OMR::MustBeDone       },
    { OMR::osrExceptionEdgeRemoval                       }, // most inlining is done by now
    { OMR::jProfilingBlock                                                       },
    { OMR::virtualGuardTailSplitter                                              }, // merge virtual guards
@@ -373,6 +376,7 @@ static const OptimizationStrategy warmStrategyOpts[] =
    { OMR::globalLiveVariablesForGC                                              },
    { OMR::profilingGroup,                            OMR::IfProfiling                },
    { OMR::regDepCopyRemoval                                                     },
+   { OMR::hotFieldMarking                                                       },
    { OMR::endOpts                                                               }
    };
 
@@ -385,7 +389,7 @@ static const OptimizationStrategy reducedWarmStrategyOpts[] =
    {
    { OMR::inlining                                                              },
    { OMR::staticFinalFieldFolding,                                              },
-   { OMR::osrGuardInsertion,                         OMR::IfVoluntaryOSR       },
+   { OMR::osrGuardInsertion,                         OMR::MustBeDone       },
    { OMR::osrExceptionEdgeRemoval                                               }, // most inlining is done by now
    { OMR::jProfilingBlock                                                       },
    { OMR::dataAccessAccelerator                                                 }, // immediate does unconditional dataAccessAccelerator after inlining
@@ -400,6 +404,7 @@ static const OptimizationStrategy reducedWarmStrategyOpts[] =
    { OMR::jProfilingRecompLoopTest,                  OMR::IfLoops                    },
    { OMR::cheapTacticalGlobalRegisterAllocatorGroup, OMR::IfEnabled                  },
    { OMR::jProfilingValue,                           OMR::MustBeDone                 },
+   { OMR::hotFieldMarking                                                       },
    { OMR::endOpts                                                               }
    };
 
@@ -468,6 +473,7 @@ const OptimizationStrategy hotStrategyOpts[] =
    { OMR::finalGlobalGroup                                                }, // done just before codegen
    { OMR::profilingGroup,                        OMR::IfProfiling              },
    { OMR::regDepCopyRemoval                                               },
+   { OMR::hotFieldMarking                                                       },
    { OMR::endOpts                                                         }
    };
 
@@ -549,6 +555,7 @@ const OptimizationStrategy scorchingStrategyOpts[] =
    { OMR::finalGlobalGroup                                   }, // done just before codegen
    { OMR::profilingGroup,                        OMR::IfProfiling },
    { OMR::regDepCopyRemoval                                  },
+   { OMR::hotFieldMarking                                                       },
    { OMR::endOpts                                            }
 #endif
    };
@@ -648,7 +655,7 @@ static const OptimizationStrategy cheapWarmStrategyOpts[] =
    { OMR::inlining                                                              },
    { OMR::methodHandleInvokeInliningGroup,           OMR::IfEnabled             },
    { OMR::staticFinalFieldFolding,                                              },
-   { OMR::osrGuardInsertion,                         OMR::IfVoluntaryOSR        },
+   { OMR::osrGuardInsertion,                         OMR::MustBeDone        },
    { OMR::osrExceptionEdgeRemoval                                               }, // most inlining is done by now
    { OMR::jProfilingBlock                                                       },
    { OMR::virtualGuardTailSplitter                                              }, // merge virtual guards
@@ -719,6 +726,7 @@ static const OptimizationStrategy cheapWarmStrategyOpts[] =
    { OMR::globalLiveVariablesForGC                                              },
    { OMR::profilingGroup,                            OMR::IfProfiling                },
    { OMR::regDepCopyRemoval                                                     },
+   { OMR::hotFieldMarking                                                       },
    { OMR::endOpts                                                               }
    };
 
@@ -817,6 +825,10 @@ J9::Optimizer::Optimizer(TR::Compilation *comp, TR::ResolvedMethodSymbol *method
       new (comp->allocator()) TR::OptimizationManager(self(), TR_JProfilingValue::create, OMR::jProfilingValue);
    _opts[OMR::staticFinalFieldFolding] =
          new (comp->allocator()) TR::OptimizationManager(self(), TR_StaticFinalFieldFolding::create, OMR::staticFinalFieldFolding);
+   _opts[OMR::handleRecompilationOps] =
+      new (comp->allocator()) TR::OptimizationManager(self(), TR_HandleRecompilationOps::create, OMR::handleRecompilationOps);
+   _opts[OMR::hotFieldMarking] =
+      new (comp->allocator()) TR::OptimizationManager(self(), TR_HotFieldMarking::create, OMR::hotFieldMarking);
    // NOTE: Please add new J9 optimizations here!
 
    // initialize additional J9 optimization groups

@@ -56,28 +56,31 @@ extern "C" {
  *    5.0    Java9 (929 AND 829)
  */
 
-#define TR_AOTHeaderMajorVersion 5
-#define TR_AOTHeaderMinorVersion 1
+#define TR_AOTHeaderMajorVersion 6
+#define TR_AOTHeaderMinorVersion 0
 #define TR_AOTHeaderEyeCatcher   0xA0757A27
 
 /* AOT Header Flags */
 typedef enum TR_AOTFeatureFlags
    {
-   TR_FeatureFlag_sanityCheckBegin              = 0x00000001,
-   TR_FeatureFlag_IsSMP                         = 0x00000002,
-   TR_FeatureFlag_UsesCompressedPointers        = 0x00000004,
-   TR_FeatureFlag_UseDFPHardware                = 0x00000008,
-   TR_FeatureFlag_DisableTraps                  = 0x00000010,
-   TR_FeatureFlag_TLHPrefetch                   = 0x00000020,
-   TR_FeatureFlag_MethodTrampolines             = 0x00000040,
-   TR_FeatureFlag_MultiTenancy                  = 0x00000080,
-   TR_FeatureFlag_HCREnabled                    = 0x00000100,
-   TR_FeatureFlag_SIMDEnabled                   = 0x00000200,     //set and tested for s390
-   TR_FeatureFlag_AsyncCompilation              = 0x00000400,     //async compilation - switch to interpreter code NOT generated
-   TR_FeatureFlag_ConcurrentScavenge            = 0x00000800,
-   TR_FeatureFlag_SoftwareReadBarrier           = 0x00001000,
-   TR_FeatureFlag_UsesTM                        = 0x00002000,
-   TR_FeatureFlag_SanityCheckEnd                = 0x80000000
+   TR_FeatureFlag_sanityCheckBegin                   = 0x00000001,
+   TR_FeatureFlag_IsSMP                              = 0x00000002,
+   TR_FeatureFlag_UsesCompressedPointers             = 0x00000004,
+   TR_FeatureFlag_UseDFPHardware                     = 0x00000008,
+   TR_FeatureFlag_DisableTraps                       = 0x00000010,
+   TR_FeatureFlag_TLHPrefetch                        = 0x00000020,
+   TR_FeatureFlag_MethodTrampolines                  = 0x00000040,
+   // Available                                      = 0x00000080,
+   TR_FeatureFlag_HCREnabled                         = 0x00000100,
+   TR_FeatureFlag_SIMDEnabled                        = 0x00000200,     //set and tested for s390
+   TR_FeatureFlag_AsyncCompilation                   = 0x00000400,     //async compilation - switch to interpreter code NOT generated
+   TR_FeatureFlag_ConcurrentScavenge                 = 0x00000800,
+   TR_FeatureFlag_SoftwareReadBarrier                = 0x00001000,
+   TR_FeatureFlag_UsesTM                             = 0x00002000,
+   TR_FeatureFlag_IsVariableHeapBaseForBarrierRange0 = 0x00004000,
+   TR_FeatureFlag_IsVariableHeapSizeForBarrierRange0 = 0x00008000,
+   TR_FeatureFlag_IsVariableActiveCardTableBase      = 0x00010000,
+   TR_FeatureFlag_SanityCheckEnd                     = 0x80000000
    } TR_AOTFeatureFlags;
 
 
@@ -95,14 +98,13 @@ typedef struct TR_AOTHeader {
     uintptr_t *relativeMethodMetaDataTable;
     uintptr_t architectureAndOs;
     uintptr_t endiannessAndWordSize;
-    uintptr_t processorSignature;
     uintptr_t featureFlags;
     uintptr_t vendorId;
     uintptr_t gcPolicyFlag;
     uintptr_t compressedPointerShift;
     uint32_t lockwordOptionHashValue;
     int32_t   arrayLetLeafSize;
-    TR_ProcessorFeatureFlags processorFeatureFlags;
+    OMRProcessorDesc processorDescription;
 } TR_AOTHeader;
 
 typedef struct TR_AOTRuntimeInfo {
@@ -115,6 +117,9 @@ typedef struct TR_AOTRuntimeInfo {
 #ifdef __cplusplus
 }
 #endif
+
+extern J9_CFUNC void
+printAOTHeaderProcessorFeatures(TR_AOTHeader * aotHeaderAddress, char * buff, const size_t BUFF_SIZE);
 
 class TR_RelocationRuntime {
    public:
@@ -180,6 +185,7 @@ class TR_RelocationRuntime {
       virtual bool storeAOTHeader(TR_FrontEnd *fe, J9VMThread *curThread);
       virtual TR_AOTHeader *createAOTHeader(TR_FrontEnd *fe);
       virtual bool validateAOTHeader(TR_FrontEnd *fe, J9VMThread *curThread);
+      virtual OMRProcessorDesc getProcessorDescriptionFromSCC(TR_FrontEnd *fe, J9VMThread *curThread) { TR_ASSERT_FATAL(0, "Error: getProcessorDescriptionFromSCC not supported in this relocation runtime"); return OMRProcessorDesc();}
 
       static uintptr_t    getGlobalValue(uint32_t g)
          {
@@ -347,6 +353,7 @@ public:
       virtual bool storeAOTHeader(TR_FrontEnd *fe, J9VMThread *curThread);
       virtual TR_AOTHeader *createAOTHeader(TR_FrontEnd *fe);
       virtual bool validateAOTHeader(TR_FrontEnd *fe, J9VMThread *curThread);
+      virtual OMRProcessorDesc getProcessorDescriptionFromSCC(TR_FrontEnd *fe, J9VMThread *curThread);
 
 private:
       uint32_t getCurrentLockwordOptionHashValue(J9JavaVM *vm) const;
@@ -357,8 +364,8 @@ private:
 
       virtual void incompatibleCache(U_32 module, U_32 reason, char *assumeMessage);
 
-      void checkAOTHeaderFlags(TR_FrontEnd *fe, TR_AOTHeader * hdrInCache, intptr_t featureFlags);
-      bool generateError(char *assumeMessage);
+      void checkAOTHeaderFlags(TR_AOTHeader * hdrInCache, intptr_t featureFlags);
+      bool generateError(U_32 module_name, U_32 reason, char *assumeMessage);
 
       bool _sharedCacheIsFull;
 
@@ -379,6 +386,7 @@ public:
       virtual bool storeAOTHeader(TR_FrontEnd *fe, J9VMThread *curThread)  override { TR_ASSERT_FATAL(0, "Should not be called in this RelocationRuntime!"); return 0;}
       virtual TR_AOTHeader *createAOTHeader(TR_FrontEnd *fe)  override { TR_ASSERT_FATAL(0, "Should not be called in this RelocationRuntime!"); return 0;}
       virtual bool validateAOTHeader(TR_FrontEnd *fe, J9VMThread *curThread)  override { TR_ASSERT_FATAL(0, "Should not be called in this RelocationRuntime!"); return 0;}
+      virtual OMRProcessorDesc getProcessorDescriptionFromSCC(TR_FrontEnd *fe, J9VMThread *curThread) override { TR_ASSERT_FATAL(0, "Should not be called in this RelocationRuntime!"); return OMRProcessorDesc(); }
 
       static uint8_t *copyDataToCodeCache(const void *startAddress, size_t totalSize, TR_J9VMBase *fe);
 

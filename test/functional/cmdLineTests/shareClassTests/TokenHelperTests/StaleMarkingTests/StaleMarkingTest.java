@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2005, 2018 IBM Corp. and others
+ * Copyright (c) 2005, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,7 +26,7 @@ import java.io.FileInputStream;
 import java.net.URL;
 import java.util.Properties;
 
-import CustomClassloaders.CustomTokenClassLoader;
+import CustomCLs.CustomTokenClassLoader;
 import Utilities.StringManipulator;
 import Utilities.TestClass;
 import Utilities.URLClassPathCreator;
@@ -62,21 +62,21 @@ public class StaleMarkingTest {
 		}
 		
 		String clc = props.getProperty("NumberOfClassloaders");
-		Integer c = new Integer(clc);
+		Integer c = Integer.valueOf(clc);
 		int classloaderCount = c.intValue();
 		String [] classLoaderPaths = new String[classloaderCount];
 		int maxClassesToLoad =0;
 		for(int index = 0; index < classloaderCount; index++){
 			classLoaderPaths[index] = props.getProperty("ClassPath"+index);
 			String ctl = props.getProperty("NumberOfClassesToLoad"+index);
-			Integer intctl = new Integer(ctl);
+			Integer intctl = Integer.valueOf(ctl);
 			maxClassesToLoad = ((intctl.intValue() > maxClassesToLoad) ? intctl.intValue() : maxClassesToLoad);
 		}
 
 		String [][] classesToLoad = new String[classloaderCount][maxClassesToLoad];
 		for(int loaderIndex = 0; loaderIndex < classloaderCount; loaderIndex++){
 			String nctls = props.getProperty("NumberOfClassesToLoad"+loaderIndex);
-			Integer i = new Integer(nctls);
+			Integer i = Integer.valueOf(nctls);
 			int classesToLoadCount = i.intValue();
 			String classesString = props.getProperty("ClassesToLoad"+loaderIndex);
 			for (int classesIndex = 0; classesIndex < classesToLoadCount; classesIndex++){
@@ -86,7 +86,7 @@ public class StaleMarkingTest {
 		
 		String findPath = props.getProperty("FindPath");
 		String ctf = props.getProperty("NumberOfClassesToFind");
-		Integer intctf = new Integer(ctf);
+		Integer intctf = Integer.valueOf(ctf);
 		int numberOfClassesToFind = intctf.intValue();
 		
 		String classesString = props.getProperty("FindClasses");

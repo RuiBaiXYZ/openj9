@@ -67,10 +67,10 @@ static DestroyVM globalDestroyVM=NULL;
 static JavaVM * globalVM = NULL;
 
 #if defined(AIXPPC)
-/* Used to keep track of whether or not opening of the "master redirector" has been attempted. 
+/* Used to keep track of whether or not opening of the "main redirector" has been attempted. 
  * Avoiding an infinite loop when libjvm.a is soft linked to libjvm.so
  */
-static int attempted_to_open_master = 0;
+static int attempted_to_open_main = 0;
 
 int openLibraries(const char *libraryDir);
 #else /* defined(AIXPPC) */
@@ -139,6 +139,7 @@ typedef enum gc_policy{
 #ifndef PATH_MAX
 #define PATH_MAX 1023
 #endif
+#define ENVVAR_JAVA_OPTIONS "JAVA_OPTIONS"
 #define ENVVAR_OPENJ9_JAVA_OPTIONS "OPENJ9_JAVA_OPTIONS"
 #define ENVVAR_IBM_JAVA_OPTIONS "IBM_JAVA_OPTIONS"
 
@@ -463,6 +464,60 @@ parseMemorySizeValue(char *option)
 	return result;
 }
 
+#define GC_POLICY_OPTION "-Xgcpolicy:"
+#define LENGTH_GC_POLICY_OPTION (sizeof(GC_POLICY_OPTION) - 1)
+
+static void
+checkEnvOptions(char *envOptions, int *gcPolicy, char **xcompressedstr, char **xnocompressedstr, char **xjvmstr, int *xjvm, char **namedVM, size_t *nameLength, char **xmxstr)
+{
+	char *gcPolicyString = findStartOfMostRightOption(envOptions, GC_POLICY_OPTION);
+	if (NULL == gcPolicyString) {
+		if (hasEnvOption(envOptions, "-XX:+UseNoGC")) {
+			gcPolicyString = GC_POLICY_OPTION "nogc";
+		}
+	}
+	if (NULL != gcPolicyString) {
+		parseGCPolicy(gcPolicyString + LENGTH_GC_POLICY_OPTION, gcPolicy);
+	}
+
+	if (hasEnvOption(envOptions, "-Xcompressedrefs")) {
+		xcompressed = 0;
+		*xcompressedstr = "-Xcompressedrefs";
+	}
+	if (hasEnvOption(envOptions, "-XX:+UseCompressedOops")) {
+		xcompressed = 0;
+		*xcompressedstr = "-XX:+UseCompressedOops";
+	}
+	if (hasEnvOption(envOptions, "-Xnocompressedrefs")) {
+		xnocompressed = 0;
+		*xnocompressedstr = "-Xnocompressedrefs";
+	}
+	if (hasEnvOption(envOptions, "-XX:-UseCompressedOops")) {
+		xnocompressed = 0;
+		*xnocompressedstr = "-XX:-UseCompressedOops";
+	}
+	
+	*xjvmstr = strstr(envOptions, "-Xjvm:");
+	if (NULL != *xjvmstr) {
+		char *space = NULL;
+
+		xjvm = 0;
+		*namedVM = *xjvmstr + 6;
+		/* make sure that we don't include the rest of the env var by saving the length until the next space */
+		space = strstr(*namedVM, " ");
+		if (NULL == space) {
+			*nameLength = strlen(*namedVM);
+		} else {
+			*nameLength = (size_t)(space - *namedVM);
+		}
+	}
+
+	*xmxstr = findStartOfMostRightOption(envOptions, XMX);
+	if (NULL != *xmxstr) {
+		*xmxstr += sizeof(XMX) - 1;
+	}
+}
+
 /**
  * @param args The VM command line arguments
  * @param retBuffer The buffer which will be populated with the directory name (must be big enough to contain the name and the NULL byte)
@@ -491,69 +546,27 @@ chooseJVM(JavaVMInitArgs *args, char *retBuffer, size_t bufferLength)
 	int ignoreUnrecognizedEnabled = 0;
 
 	int gcPolicy = GC_POLICY_GENCON;
-	const char *gcPolicyOption = "-Xgcpolicy:";
-	size_t gcPolicyOptionLength = strlen(gcPolicyOption);
-	char *gcPolicyString = NULL;
 
 	char *xmxstr = NULL;
 	U_64 requestedHeapSize = 0;
 
-	/* the command line is handled below but look into the ENVVAR_OPENJ9_JAVA_OPTIONS here, since it is a special case */
+	/* 
+	 * The command line is handled below but look into the multiple JAVA_OPTIONS environment variables here, since it is a special case.
+	 * First look at JAVA_OPTIONS, then OPENJ9_JAVA_OPTIONS or IBM_JAVA_OPTIONS if OPENJ9_JAVA_OPTIONS isn't defined.
+	 */
+#if (JAVA_SPEC_VERSION != 8) || defined(OPENJ9_BUILD)
+	envOptions = getenv(ENVVAR_JAVA_OPTIONS);
+	if (NULL != envOptions) {
+		checkEnvOptions(envOptions, &gcPolicy, &xcompressedstr, &xnocompressedstr, &xjvmstr, &xjvm, &namedVM, &nameLength, &xmxstr);
+	}
+#endif /* (JAVA_SPEC_VERSION != 8) || defined(OPENJ9_BUILD) */
+	
 	envOptions = getenv(ENVVAR_OPENJ9_JAVA_OPTIONS);
 	if (NULL == envOptions) {
 		envOptions = getenv(ENVVAR_IBM_JAVA_OPTIONS);
 	}
 	if (NULL != envOptions) {
-		/* we need a non-zero index to point to where this occurs to use the first index we don't have - the number of arguments in the list */
-		int i = 0;
-
-		gcPolicyString = findStartOfMostRightOption(envOptions, gcPolicyOption);
-		if (NULL == gcPolicyString) {
-			if (hasEnvOption(envOptions, "-XX:+UseNoGC")) {
-				gcPolicyString = "nogc";
-			}
-		}
-
-		if (NULL != gcPolicyString) {
-			parseGCPolicy(gcPolicyString + gcPolicyOptionLength, &gcPolicy);
-		}
-
-		if (hasEnvOption(envOptions, "-Xcompressedrefs")) {
-			xcompressed = i;
-			xcompressedstr = "-Xcompressedrefs";
-		}
-		if (hasEnvOption(envOptions, "-XX:+UseCompressedOops")) {
-			xcompressed = i;
-			xcompressedstr = "-XX:+UseCompressedOops";
-		}
-		if (hasEnvOption(envOptions, "-Xnocompressedrefs")) {
-			xnocompressed = i;
-			xnocompressedstr = "-Xnocompressedrefs";
-		}
-		if (hasEnvOption(envOptions, "-XX:-UseCompressedOops")) {
-			xnocompressed = i;
-			xnocompressedstr = "-XX:-UseCompressedOops";
-		}
-		
-		xjvmstr = strstr(envOptions, "-Xjvm:");
-		if (NULL != xjvmstr) {
-			char *space = NULL;
-
-			xjvm = i;
-			namedVM = strstr(envOptions, "-Xjvm:") + 6;
-			/* make sure that we don't include the rest of the env var by saving the length until the next space */
-			space = strstr(namedVM, " ");
-			if (NULL == space) {
-				nameLength = strlen(namedVM);
-			} else {
-				nameLength = (size_t)(space - namedVM);
-			}
-		}
-
-		xmxstr = findStartOfMostRightOption(envOptions, XMX);
-		if (NULL != xmxstr) {
-			xmxstr += sizeof(XMX)-1;
-		}
+		checkEnvOptions(envOptions, &gcPolicy, &xcompressedstr, &xnocompressedstr, &xjvmstr, &xjvm, &namedVM, &nameLength, &xmxstr);
 	}
 
 	for( i=0; i < args->nOptions; i++ ) {
@@ -575,8 +588,8 @@ chooseJVM(JavaVMInitArgs *args, char *retBuffer, size_t bufferLength)
 			xmxstr = args->options[i].optionString + sizeof(XMX)-1;
 		} else if ((0 == strcmp(args->options[i].optionString, "-XXvm:ignoreUnrecognized")) || (JNI_TRUE == args->ignoreUnrecognized)) {
 			ignoreUnrecognizedEnabled = 1;
-		} else if (0 == strncmp(args->options[i].optionString, gcPolicyOption, gcPolicyOptionLength)) {
-			parseGCPolicy(args->options[i].optionString + gcPolicyOptionLength, &gcPolicy);
+		} else if (0 == strncmp(args->options[i].optionString, GC_POLICY_OPTION, LENGTH_GC_POLICY_OPTION)) {
+			parseGCPolicy(args->options[i].optionString + LENGTH_GC_POLICY_OPTION, &gcPolicy);
 		}
 	}
 
@@ -601,8 +614,13 @@ chooseJVM(JavaVMInitArgs *args, char *retBuffer, size_t bufferLength)
 
 	}
 
-	/* decode which VM directory to use */
+	/*
+	 * Decode which VM directory to use.
+	 * If running in Mixed References mode, the 'default' (OPENJ9_NOCR_JVM_DIR) directory is used.
+	 */
 	basePointer = OPENJ9_NOCR_JVM_DIR;
+
+#if !(defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS))
 	if ((xnocompressed != -1) && (xcompressed < xnocompressed)) {
 		basePointer = OPENJ9_NOCR_JVM_DIR;
 		optionUsed = xnocompressedstr;
@@ -646,7 +664,7 @@ chooseJVM(JavaVMInitArgs *args, char *retBuffer, size_t bufferLength)
 				basePointer = OPENJ9_CR_JVM_DIR;
 			}
 		}
-		}
+	}
 
 	/*
 	 * Jazz 31002 : if -XXvm:ignoreUnrecognized is specified and that the targeted VM
@@ -655,6 +673,7 @@ chooseJVM(JavaVMInitArgs *args, char *retBuffer, size_t bufferLength)
 	if (!isPackagedWithSubdir(basePointer) && (1 == ignoreUnrecognizedEnabled)) {
 		basePointer = OPENJ9_NOCR_JVM_DIR;
 	}
+#endif /* !(defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)) */
 
 	/* if we didn't set the string length already, do it now for the comparison and copy */
 	if (0 == nameLength) {
@@ -680,23 +699,30 @@ chooseJVM(JavaVMInitArgs *args, char *retBuffer, size_t bufferLength)
 		}
 		fprintf(stdout, "does not exist.\n");
 
+#if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
+		fprintf(stdout,
+				"This JVM package includes both the '-Xcompressedrefs' and the '-Xnocompressedrefs' "
+				"configurations, however the VM directory could not be found. Please download the latest "
+				"JVM package or build with the most recent changes and run the JVM again.\n"
+		);
+#else
 		/* direct user to OpenJ9 build configurations to properly generate the requested build. */
-		if (OPENJ9_NOCR_JVM_DIR == basePointer) {
+		if (0 == strcmp(OPENJ9_NOCR_JVM_DIR, basePointer)) {
 			fprintf(stdout,
 					"This JVM package only includes the '-Xcompressedrefs' configuration. Please run "
 					"the VM without specifying the '-Xnocompressedrefs' option or by specifying the "
 					"'-Xcompressedrefs' option.\nTo compile the other configuration, please run configure "
-					"with '--with-noncompressedrefs.\n"
+					"with '--with-noncompressedrefs'.\n"
 			);
-		}
-		if (OPENJ9_CR_JVM_DIR == basePointer) {
+		} else if (0 == strcmp(OPENJ9_CR_JVM_DIR, basePointer)) {
 			fprintf(stdout,
 					"This JVM package only includes the '-Xnocompressedrefs' configuration. Please run "
 					"the VM without specifying the '-Xcompressedrefs' option or by specifying the "
 					"'-Xnocompressedrefs' option.\nTo compile the other configuration, please run configure "
-					"without '--with-noncompressedrefs.\n"
+					"without '--with-noncompressedrefs'.\n"
 			);
 		}
+#endif /* defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS) */
 		exit(-1);
 	}
 }
@@ -1024,8 +1050,8 @@ findDir(const char *libraryDir) {
 	/* It is possible to open multiple redirectors on AIX.
 	 * This leads to issues with global function static being properly initialized.
 	 * To avoid those problems, designate the redirector in jre/lib/<arch>/j9vm/libjvm.so
-	 * as the master redirector.  If a redirector is not this one, it will try and open
-	 * the master and redirect to it instead of trying to open the target libjvm.so.
+	 * as the main redirector.  If a redirector is not this one, it will try and open
+	 * the main and redirect to it instead of trying to open the target libjvm.so.
 	 *
 	 * NOTE: it is possible that jre/lib/<arch>/j9vm/libjvm.a is a soft link to
 	 * jre/lib/<arch>/j9vm/libjvm.so.  If this happens and libjvm.a is opened before libjvm.so
@@ -1033,15 +1059,15 @@ findDir(const char *libraryDir) {
 	 * We need to detect this case and avoid it.
 	 * We can't simply check for libjvm.a and not try libjvm.so since if they are not soft linked there
 	 * would be uninitialized function pointers in the function table.
-	 * So, try to get to the master at least once.  If we detect that we have tried to open the master
-	 * then we are the master so don't try again.*/
+	 * So, try to get to the main at least once.  If we detect that we have tried to open the main
+	 * then we are the main so don't try again.*/
 	libraryNameWithPath = getLibraryNameWithPath(libraryNameWithPath);
-	if ((0 == attempted_to_open_master) && (NULL == strstr(jvmBufferData(libraryNameWithPath), J9VM_LIB_ARCH_DIR "j9vm/libjvm.so"))) {
+	if ((0 == attempted_to_open_main) && (NULL == strstr(jvmBufferData(libraryNameWithPath), J9VM_LIB_ARCH_DIR "j9vm/libjvm.so"))) {
 		J9StringBuffer *tmpBuffer = jvmBufferCat(NULL, jvmBufferData(buffer));
 		char *tmpBufferData = jvmBufferData(tmpBuffer);
 
-		/* mark that we tried to open the master redirector */
-		attempted_to_open_master = 1;
+		/* mark that we tried to open the main redirector */
+		attempted_to_open_main = 1;
 
 		/* strip back the path */
 		truncatePath(tmpBufferData, FALSE); /* at jre/bin/classic -or- jre/lib/<arch>/classic */
@@ -1076,7 +1102,7 @@ findDir(const char *libraryDir) {
  * as this directory.  Sets the global function pointers up for
  * passthrough.
  * 
- * on AIX this function is used in the generated.c functions to find the 'master' 
+ * on AIX this function is used in the generated.c functions to find the 'main' 
  * redirector (see details in findDir()).
  */
 #if defined(AIXPPC)

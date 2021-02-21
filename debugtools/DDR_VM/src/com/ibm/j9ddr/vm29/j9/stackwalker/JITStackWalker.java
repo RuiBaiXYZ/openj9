@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2009, 2019 IBM Corp. and others
+ * Copyright (c) 2009, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -31,7 +31,6 @@ import com.ibm.j9ddr.vm29.j9.AlgorithmVersion;
 import com.ibm.j9ddr.vm29.j9.BaseAlgorithm;
 import com.ibm.j9ddr.vm29.j9.ConstantPoolHelpers;
 import com.ibm.j9ddr.vm29.j9.IAlgorithm;
-import com.ibm.j9ddr.vm29.j9.J9ConfigFlags;
 import com.ibm.j9ddr.vm29.j9.gc.GCObjectIterator;
 import com.ibm.j9ddr.vm29.j9.stackwalker.MethodMetaData.JITMaps;
 import com.ibm.j9ddr.vm29.pointer.AbstractPointer;
@@ -159,7 +158,7 @@ public class JITStackWalker
 		
 		private static U8Pointer MASK_PC(AbstractPointer ptr)
 		{
-			if (J9ConfigFlags.arch_s390 && !J9BuildFlags.env_data64) {
+			if (J9BuildFlags.arch_s390 && !J9BuildFlags.env_data64) {
 				return U8Pointer.cast(UDATA.cast(ptr).bitAnd(0x7FFFFFFF));
 			} else {
 				return U8Pointer.cast(ptr);
@@ -293,10 +292,6 @@ public class JITStackWalker
 			walkState.arg0EA = walkState.i2jState.a0();
 			returnSP = walkState.i2jState.returnSP();
 			walkState.previousFrameFlags = new UDATA(0);
-			if (returnSP.anyBitsIn(J9_STACK_FLAGS_ARGS_ALIGNED)) {
-				swPrintf(walkState, 2, "I2J args were copied for alignment");
-				walkState.previousFrameFlags = new UDATA(J9_STACK_FLAGS_JIT_ARGS_ALIGNED);
-			}
 			walkState.walkSP = returnSP.untag(3L);
 			swPrintf(walkState, 2, "I2J values: PC = {0}, A0 = {1}, walkSP = {2}, literals = {3}, JIT PC = {4}, pcAddress = {5}, decomp = {6}", 
 					walkState.pc.getHexAddress(),
@@ -646,7 +641,7 @@ public class JITStackWalker
 		{
 			U64Pointer base = U64Pointer.cast(walkState.walkedEntryLocalStorage.jitFPRegisterStorageBase());
 
-			if (J9ConfigFlags.arch_s390) {
+			if (J9BuildFlags.arch_s390) {
 				/* 390 uses FPR0/2/4/6 for arguments, so double fpParmNumber to get the right register */
 				fpParmNumber = fpParmNumber.add(fpParmNumber);
 				/* On 390, either vector or floating point registers are preserved in the ELS, not both.

@@ -33,10 +33,10 @@ import java.util.Formatter;
 import java.util.StringJoiner;
 import java.util.Iterator;
 import java.nio.charset.Charset;
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 import java.util.function.Function;
 import java.util.Optional;
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 /*[IF Sidecar19-SE]*/
 import java.util.Spliterator;
 import java.util.stream.StreamSupport;
@@ -47,16 +47,16 @@ import java.util.stream.IntStream;
 import sun.misc.Unsafe;
 /*[ENDIF] Sidecar19-SE*/
 
-/*[IF Java11]*/
+/*[IF JAVA_SPEC_VERSION >= 11]*/
 import java.util.stream.Stream;
-/*[ENDIF] Java11*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 import java.lang.constant.Constable;
 import java.lang.constant.ConstantDesc;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodHandles.Lookup;
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
 /**
  * Strings are objects which represent immutable arrays of characters.
@@ -67,9 +67,9 @@ import java.lang.invoke.MethodHandles.Lookup;
  * @see StringBuffer
  */
 public final class String implements Serializable, Comparable<String>, CharSequence
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	, Constable, ConstantDesc
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 {
 
 	/*
@@ -113,6 +113,31 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		}
 	}
 
+/*[IF JAVA_SPEC_VERSION >= 16]*/
+	/**
+	 * Copy bytes from value starting at srcIndex into the bytes array starting at
+	 * destIndex. No range checking is needed. Caller ensures bytes is in UTF16.
+	 * 
+	 * @param bytes copy destination
+	 * @param srcIndex index into value
+	 * @param destIndex index into bytes
+	 * @param coder LATIN1 or UTF16
+	 * @param length the number of elements to copy
+	 */
+	void getBytes(byte[] bytes, int srcIndex, int destIndex, byte coder, int length) {
+		// Check if the String is compressed
+		if (enableCompression && (null == compressionFlag || this.coder == LATIN1)) {
+			if (String.LATIN1 == coder) {
+				compressedArrayCopy(value, srcIndex, bytes, destIndex, length);
+			} else {
+				decompress(value, srcIndex, bytes, destIndex, length);
+			}
+		} else {
+			decompressedArrayCopy(value, srcIndex, bytes, destIndex, length);
+		}
+	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
+	
 	// no range checking, caller ensures bytes is in UTF16
 	// coder is one of LATIN1 or UTF16
 	void getBytes(byte[] bytes, int offset, byte coder) {
@@ -568,7 +593,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 
 				compressedArrayCopy(data, start, value, 0, length);
 			} else {
-				value = new byte[length * 2];
+				value = StringUTF16.newBytesFor(length);
 				coder = UTF16;
 
 				high <<= 8;
@@ -676,6 +701,10 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		int slen = s.lengthInternal();
 
 		int concatlen = slen + 1;
+		if (concatlen < 0) {
+			/*[MSG "K0D01", "Array capacity exceeded"]*/
+			throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+		}
 
 		// Check if the String is compressed
 		if (enableCompression && (null == compressionFlag || s.coder == LATIN1) && c <= 255) {
@@ -686,7 +715,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 
 			helpers.putByteInArrayByIndex(value, slen, (byte) c);
 		} else {
-			value = new byte[concatlen * 2];
+			value = StringUTF16.newBytesFor(concatlen);
 			coder = UTF16;
 
 			decompressedArrayCopy(s.value, 0, value, 0, slen);
@@ -726,7 +755,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 
 			compress(data, 0, value, 0, data.length);
 		} else {
-			value = new byte[data.length * 2];
+			value = StringUTF16.newBytesFor(data.length);
 			coder = UTF16;
 
 			decompressedArrayCopy(data, 0, value, 0, data.length);
@@ -761,7 +790,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 
 				compress(data, start, value, 0, length);
 			} else {
-				value = new byte[length * 2];
+				value = StringUTF16.newBytesFor(length);
 				coder = UTF16;
 
 				decompressedArrayCopy(data, start, value, 0, length);
@@ -824,7 +853,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 				if (start == 0 && data.length == length * 2) {
 					value = data;
 				} else {
-					value = new byte[length * 2];
+					value = StringUTF16.newBytesFor(length);
 
 					decompressedArrayCopy(data, start, value, 0, length);
 				}
@@ -887,7 +916,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 				if (sharingIsAllowed && start == 0 && data.length == length * 2) {
 					value = data;
 				} else {
-					value = new byte[length * 2];
+					value = StringUTF16.newBytesFor(length);
 
 					decompressedArrayCopy(data, start, value, 0, length);
 				}
@@ -939,6 +968,10 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		int s2len = s2.lengthInternal();
 
 		int concatlen = s1len + s2len;
+		if (concatlen < 0) {
+			/*[MSG "K0D01", "Array capacity exceeded"]*/
+			throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+		}
 
 		if (enableCompression && (null == compressionFlag || (s1.coder | s2.coder) == LATIN1)) {
 			value = new byte[concatlen];
@@ -947,7 +980,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 			compressedArrayCopy(s1.value, 0, value, 0, s1len);
 			compressedArrayCopy(s2.value, 0, value, s1len, s2len);
 		} else {
-			value = new byte[concatlen * 2];
+			value = StringUTF16.newBytesFor(concatlen);
 			coder = UTF16;
 
 			// Check if the String is compressed
@@ -990,7 +1023,12 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		int s2len = s2.lengthInternal();
 		int s3len = s3.lengthInternal();
 
-		int concatlen = s1len + s2len + s3len;
+		long totalLen = (long) s1len + (long) s2len + (long) s3len;
+		if (totalLen > Integer.MAX_VALUE) {
+			/*[MSG "K0D01", "Array capacity exceeded"]*/
+			throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+		}
+		int concatlen = (int) totalLen;
 
 		if (enableCompression && (null == compressionFlag || (s1.coder | s2.coder | s3.coder) == LATIN1)) {
 			value = new byte[concatlen];
@@ -1000,7 +1038,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 			compressedArrayCopy(s2.value, 0, value, s1len, s2len);
 			compressedArrayCopy(s3.value, 0, value, s1len + s2len, s3len);
 		} else {
-			value = new byte[concatlen * 2];
+			value = StringUTF16.newBytesFor(concatlen);
 			coder = UTF16;
 
 			// Check if the String is compressed
@@ -1056,6 +1094,10 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 
 		// Char length of the final String
 		int len = s1len + v1len;
+		if (len < 0) {
+			/*[MSG "K0D01", "Array capacity exceeded"]*/
+			throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+		}
 
 		if (enableCompression && (null == compressionFlag || s1.coder == LATIN1)) {
 			value = new byte[len];
@@ -1081,7 +1123,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 			// Copy in s1 contents
 			compressedArrayCopy(s1.value, 0, value, 0, s1len);
 		} else {
-			value = new byte[len * 2];
+			value = StringUTF16.newBytesFor(len);
 			coder = UTF16;
 
 			// Copy in v1
@@ -1159,7 +1201,12 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		}
 
 		// Char length of the final String
-		int len = s1len + v1len + v2len + s2len + s3len;
+		long totalLen = (long) s1len + (long) v1len + (long) v2len + (long) s2len + (long) s3len;
+		if (totalLen > Integer.MAX_VALUE) {
+			/*[MSG "K0D01", "Array capacity exceeded"]*/
+			throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+		}
+		int len = (int) totalLen;
 
 		if (enableCompression && (null == compressionFlag || (s1.coder | s2.coder | s3.coder) == LATIN1)) {
 			value = new byte[len];
@@ -1213,7 +1260,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 				helpers.putByteInArrayByIndex(value, index1--, (byte) '-');
 			}
 		} else {
-			value = new byte[len * 2];
+			value = StringUTF16.newBytesFor(len);
 			coder = UTF16;
 
 			int start = len;
@@ -1407,21 +1454,43 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		return s1len - s2len;
 	}
 
-	private char compareValue(char c) {
-		if (c < 128) {
-			if ('A' <= c && c <= 'Z') {
-				return (char) (c + ('a' - 'A'));
-			}
+	private static int compareValue(int codepoint) {
+		if ('A' <= codepoint && codepoint <= 'Z') {
+			return codepoint + ('a' - 'A');
+		}
+
+		return Character.toLowerCase(Character.toUpperCase(codepoint));
+	}
+
+	private static char compareValue(char c) {
+		if ('A' <= c && c <= 'Z') {
+			return (char) (c + ('a' - 'A'));
 		}
 
 		return Character.toLowerCase(Character.toUpperCase(c));
 	}
 
-	private char compareValue(byte b) {
+	private static char compareValue(byte b) {
 		if ('A' <= b && b <= 'Z') {
 			return (char)(helpers.byteToCharUnsigned(b) + ('a' - 'A'));
 		}
 		return Character.toLowerCase(Character.toUpperCase(helpers.byteToCharUnsigned(b)));
+	}
+
+	private static boolean charValuesEqualIgnoreCase(char c1, char c2) {
+		boolean charValuesEqual = false;
+		char c1upper = (char) toUpperCase(c1);
+		char c2upper = (char) toUpperCase(c2);
+
+		// If at least one char is ASCII, converting to upper cases then compare should be sufficient.
+		// If both chars are not in ASCII char set, need to convert to lower case and compare as well.
+		if (((c1 <= 255 || c2 <= 255) && (c1upper == c2upper))
+				|| (toLowerCase(c1upper) == toLowerCase(c2upper))
+		) {
+			charValuesEqual = true;
+		}
+
+		return charValuesEqual;
 	}
 
 	/**
@@ -1466,12 +1535,26 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 			while (o1 < end) {
 				char charAtO1 = s1.charAtInternal(o1++, s1Value);
 				char charAtO2 = s2.charAtInternal(o2++, s2Value);
+				int codepointAtO1 = charAtO1;
+				int codepointAtO2 = charAtO2;
 
 				if (charAtO1 == charAtO2) {
+					/*[IF JAVA_SPEC_VERSION >= 16]*/
+					if (Character.isHighSurrogate(charAtO1) && (o1 < end)) {
+						codepointAtO1 = Character.toCodePoint(charAtO1, s1.charAtInternal(o1++, s1Value));
+						codepointAtO2 = Character.toCodePoint(charAtO2, s2.charAtInternal(o2++, s2Value));
+						if (codepointAtO1 == codepointAtO2) {
+							continue;
+						}
+					} else {
+						continue;
+					}
+					/*[ELSE]*/
 					continue;
+					/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
 				}
 
-				int result = compareValue(charAtO1) - compareValue(charAtO2);
+				int result = compareValue(codepointAtO1) - compareValue(codepointAtO2);
 
 				if (result != 0) {
 					return result;
@@ -1504,8 +1587,12 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		}
 
 		int concatlen = s1len + s2len;
+		if (concatlen < 0) {
+			/*[MSG "K0D01", "Array capacity exceeded"]*/
+			throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+		}
 
-		if (enableCompression && (null == compressionFlag || (s1.coder | s2.coder) == LATIN1)) {
+		if (enableCompression && ((null == compressionFlag) || ((s1.coder | s2.coder) == LATIN1))) {
 			byte[] buffer = new byte[concatlen];
 
 			compressedArrayCopy(s1.value, 0, buffer, 0, s1len);
@@ -1513,7 +1600,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 
 			return new String(buffer, LATIN1);
 		} else {
-			byte[] buffer = new byte[concatlen * 2];
+			byte[] buffer = StringUTF16.newBytesFor(concatlen);
 
 			// Check if the String is compressed
 			if (enableCompression && s1.coder == LATIN1) {
@@ -1718,13 +1805,16 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		byte[] s2Value = s2.value;
 
 		if (enableCompression && (null == compressionFlag || (s1.coder | s2.coder) == LATIN1)) {
-			// Compare the last chars. Under string compression, the compressible char set obeys 1-1 mapping for upper/lower
-			// case, converting to lower cases then compare should be sufficient.
+			// Compare the last chars.
+			// In order to tell 2 chars are different:
+			// Under string compression, the compressible char set obeys 1-1 mapping for upper/lower case,
+			// converting to upper cases then compare should be sufficient.
 			byte byteAtO1Last = helpers.getByteFromArrayByIndex(s1Value, s1len - 1);
 			byte byteAtO2Last = helpers.getByteFromArrayByIndex(s2Value, s1len - 1);
 
-			if (byteAtO1Last != byteAtO2Last &&
-					toUpperCase(helpers.byteToCharUnsigned(byteAtO1Last)) != toUpperCase(helpers.byteToCharUnsigned(byteAtO2Last))) {
+			if ((byteAtO1Last != byteAtO2Last)
+					&& (toUpperCase(helpers.byteToCharUnsigned(byteAtO1Last)) != toUpperCase(helpers.byteToCharUnsigned(byteAtO2Last)))
+			) {
 				return false;
 			}
 
@@ -1732,30 +1822,54 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 				byte byteAtO1 = helpers.getByteFromArrayByIndex(s1Value, o1++);
 				byte byteAtO2 = helpers.getByteFromArrayByIndex(s2Value, o2++);
 
-				if (byteAtO1 != byteAtO2 &&
-						toUpperCase(helpers.byteToCharUnsigned(byteAtO1)) != toUpperCase(helpers.byteToCharUnsigned(byteAtO2))) {
+				if ((byteAtO1 != byteAtO2)
+						&& (toUpperCase(helpers.byteToCharUnsigned(byteAtO1)) != toUpperCase(helpers.byteToCharUnsigned(byteAtO2)))
+				) {
 					return false;
 				}
 			}
 		} else {
-			// Compare the last chars. Under string compression, the compressible char set obeys 1-1 mapping for upper/lower
-			// case, converting to lower cases then compare should be sufficient.
+			// Compare the last chars.
+			// In order to tell 2 chars are different:
+			// If at least one char is ASCII, converting to upper cases then compare should be sufficient.
+			// If both chars are not in ASCII char set, need to convert to lower case and compare as well.
 			char charAtO1Last = s1.charAtInternal(s1len - 1, s1Value);
 			char charAtO2Last = s2.charAtInternal(s1len - 1, s2Value);
 
-			if (charAtO1Last != charAtO2Last &&
-					toUpperCase(charAtO1Last) != toUpperCase(charAtO2Last) &&
-					((charAtO1Last <= 255 && charAtO2Last <= 255) || Character.toLowerCase(charAtO1Last) != Character.toLowerCase(charAtO2Last))) {
+			if ((charAtO1Last != charAtO2Last)
+					&& !charValuesEqualIgnoreCase(charAtO1Last, charAtO2Last)
+					/*[IF JAVA_SPEC_VERSION >= 16]*/
+					&& (!Character.isLowSurrogate(charAtO1Last) || !Character.isLowSurrogate(charAtO2Last))
+					/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
+			) {
 				return false;
 			}
 
+			/*[IF JAVA_SPEC_VERSION >= 16]*/
+			while (o1 < end) {
+			/*[ELSE]*/
 			while (o1 < end - 1) {
+			/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
 				char charAtO1 = s1.charAtInternal(o1++, s1Value);
 				char charAtO2 = s2.charAtInternal(o2++, s2Value);
 
-				if (charAtO1 != charAtO2 &&
-						toUpperCase(charAtO1) != toUpperCase(charAtO2) &&
-						((charAtO1 <= 255 && charAtO2 <= 255) || Character.toLowerCase(charAtO1) != Character.toLowerCase(charAtO2))) {
+				/*[IF JAVA_SPEC_VERSION >= 16]*/
+				if (Character.isHighSurrogate(charAtO1) && Character.isHighSurrogate(charAtO2) && (o1 < end)) {
+					int codepointAtO1 = Character.toCodePoint(charAtO1, s1.charAtInternal(o1++, s1Value));
+					int codepointAtO2 = Character.toCodePoint(charAtO2, s2.charAtInternal(o2++, s2Value));
+					if ((codepointAtO1 != codepointAtO2)
+							&& (compareValue(codepointAtO1) != compareValue(codepointAtO2))
+					) {
+						return false;
+					} else {
+						continue;
+					}
+				}
+				/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
+
+				if ((charAtO1 != charAtO2)
+						&& (!charValuesEqualIgnoreCase(charAtO1, charAtO2))
+				) {
 					return false;
 				}
 			}
@@ -2379,9 +2493,9 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 				byte byteAtO1 = helpers.getByteFromArrayByIndex(s1Value, o1++);
 				byte byteAtO2 = helpers.getByteFromArrayByIndex(s2Value, o2++);
 
-				if (byteAtO1 != byteAtO2 &&
-						toUpperCase(helpers.byteToCharUnsigned(byteAtO1)) != toUpperCase(helpers.byteToCharUnsigned(byteAtO2)) &&
-						toLowerCase(helpers.byteToCharUnsigned(byteAtO1)) != toLowerCase(helpers.byteToCharUnsigned(byteAtO2))) {
+				if ((byteAtO1 != byteAtO2)
+						&& (!charValuesEqualIgnoreCase(helpers.byteToCharUnsigned(byteAtO1), helpers.byteToCharUnsigned(byteAtO2)))
+				) {
 					return false;
 				}
 			}
@@ -2390,9 +2504,21 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 				char charAtO1 = s1.charAtInternal(o1++, s1Value);
 				char charAtO2 = s2.charAtInternal(o2++, s2Value);
 
-				if (charAtO1 != charAtO2 &&
-						toUpperCase(charAtO1) != toUpperCase(charAtO2) &&
-						toLowerCase(charAtO1) != toLowerCase(charAtO2)) {
+				/*[IF JAVA_SPEC_VERSION >= 16]*/
+				if (Character.isHighSurrogate(charAtO1) && Character.isHighSurrogate(charAtO2) && (o1 < end)) {
+					int codepointAtO1 = Character.toCodePoint(charAtO1, s1.charAtInternal(o1++, s1Value));
+					int codepointAtO2 = Character.toCodePoint(charAtO2, s2.charAtInternal(o2++, s2Value));
+					if ((codepointAtO1 != codepointAtO2)
+							&& (compareValue(codepointAtO1) != compareValue(codepointAtO2))
+					) {
+						return false;
+					}
+				}
+				/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
+
+				if ((charAtO1 != charAtO2)
+						&& (!charValuesEqualIgnoreCase(charAtO1, charAtO2))
+				) {
 					return false;
 				}
 			}
@@ -2432,7 +2558,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 
 				return new String(buffer, LATIN1);
 			} else {
-				byte[] buffer = new byte[len * 2];
+				byte[] buffer = StringUTF16.newBytesFor(len);
 
 				decompress(value, 0, buffer, 0, len);
 
@@ -2443,7 +2569,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 				return new String(buffer, UTF16);
 			}
 		} else {
-			byte[] buffer = new byte[len * 2];
+			byte[] buffer = StringUTF16.newBytesFor(len);
 
 			decompressedArrayCopy(value, 0, buffer, 0, len);
 
@@ -2491,7 +2617,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		return regionMatches(start, prefix, 0, prefix.lengthInternal());
 	}
 
-/*[IF Java11]*/
+/*[IF JAVA_SPEC_VERSION >= 11]*/
 	/**
 	 * Strip leading and trailing white space from a string.
 	 *
@@ -2584,20 +2710,12 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 	 */
 	public Stream<String> lines() {
 		if (enableCompression && (null == compressionFlag || coder == LATIN1)) {
-			/*[IF Java12 & !Java13]*/
-			return StringLatin1.lines(value, 0, 0);
-			/*[ELSE]*/
 			return StringLatin1.lines(value);
-			/*[ENDIF] Java12*/
 		} else {
-			/*[IF Java12 & !Java13]*/
-			return StringUTF16.lines(value, 0, 0);
-			/*[ELSE]*/
 			return StringUTF16.lines(value);
-			/*[ENDIF] Java12*/
 		}
 	}
-/*[ENDIF] Java11*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 
 	/**
 	 * Copies a range of characters into a new String.
@@ -2692,7 +2810,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		return toLowerCase(Locale.getDefault());
 	}
 
-	private int toLowerCase(int codePoint) {
+	private static int toLowerCase(int codePoint) {
 		if (codePoint < 128) {
 			if ('A' <= codePoint && codePoint <= 'Z') {
 				return codePoint + ('a' - 'A');
@@ -2704,7 +2822,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		}
 	}
 
-	private int toUpperCase(int codePoint) {
+	private static int toUpperCase(int codePoint) {
 		if (codePoint < 128) {
 			if ('a' <= codePoint && codePoint <= 'z') {
 				return codePoint - ('a' - 'A');
@@ -2726,16 +2844,18 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 	public String toLowerCase(Locale locale) {
 		// check locale for null
 		String language = locale.getLanguage();
+		int sLength = lengthInternal();
 
-		if (isEmpty()) {
+		if (sLength == 0) {
 			return this;
 		}
 
-		int sLength = lengthInternal();
+		boolean useIntrinsic = helpers.supportsIntrinsicCaseConversion()
+				&& (language == "en") //$NON-NLS-1$
+				&& (sLength <= (Integer.MAX_VALUE / 2));
 
-		if (enableCompression && (null == compressionFlag || coder == LATIN1)) {
-
-			if (helpers.supportsIntrinsicCaseConversion() && language == "en") { //$NON-NLS-1$
+		if (enableCompression && ((null == compressionFlag) || (coder == LATIN1))) {
+			if (useIntrinsic) {
 				byte[] output = new byte[sLength << coder];
 
 				if (helpers.toLowerIntrinsicLatin1(value, output, sLength)) {
@@ -2744,7 +2864,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 			}
 			return StringLatin1.toLowerCase(this, value, locale);
 		} else {
-			if (helpers.supportsIntrinsicCaseConversion() && language == "en") { //$NON-NLS-1$
+			if (useIntrinsic) {
 				byte[] output = new byte[sLength << coder];
 
 				if (helpers.toLowerIntrinsicUTF16(value, output, sLength * 2)) {
@@ -2783,16 +2903,18 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 	 */
 	public String toUpperCase(Locale locale) {
 		String language = locale.getLanguage();
+		int sLength = lengthInternal();
 
-		if (isEmpty()) {
+		if (sLength == 0) {
 			return this;
 		}
 
-		int sLength = lengthInternal();
+		boolean useIntrinsic = helpers.supportsIntrinsicCaseConversion()
+				&& (language == "en") //$NON-NLS-1$
+				&& (sLength <= (Integer.MAX_VALUE / 2));
 
 		if (enableCompression && (null == compressionFlag || coder == LATIN1)) {
-
-			if (helpers.supportsIntrinsicCaseConversion() && language == "en") { //$NON-NLS-1$
+			if (useIntrinsic) {
 				byte[] output = new byte[sLength << coder];
 
 				if (helpers.toUpperIntrinsicLatin1(value, output, sLength)) {
@@ -2801,7 +2923,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 			}
 			return StringLatin1.toUpperCase(this, value, locale);
 		} else {
-			if (helpers.supportsIntrinsicCaseConversion() && language == "en") { //$NON-NLS-1$
+			if (useIntrinsic) {
 				byte[] output = new byte[sLength << coder];
 
 				if (helpers.toUpperIntrinsicUTF16(value, output, sLength * 2)) {
@@ -3090,7 +3212,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 					}
 					return new String(newChars, 0, newCharIndex, true);
 				} else if (!enableCompression || !isCompressed()) {
-					byte[] newChars = new byte[length << 1];
+					byte[] newChars = StringUTF16.newBytesFor(length);
 					char toReplace = regex.charAtInternal(0);
 					char replacement = (char)-1; // assign dummy value that will never be used
 					if (substituteLength == 1) {
@@ -3210,8 +3332,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 			}
 			java.util.ArrayList<String> parts = new java.util.ArrayList<String>((max > 0 && max < 100) ? max : 10);
 
-			byte[]
-			chars = this.value;
+			byte[] chars = this.value;
 
 			final boolean compressed = enableCompression && (null == compressionFlag || coder == LATIN1);
 
@@ -3233,8 +3354,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 			} else {
 				int rLength = regex.lengthInternal();
 
-				byte[]
-				splitChars = regex.value;
+				byte[] splitChars = regex.value;
 
 				char firstChar = charAtInternal(0, regex.value);
 				while (current < end) {
@@ -3614,7 +3734,14 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		int sequence1len = sequence1.length();
 
 		if (sequence1len == 0) {
-			StringBuilder builder = new StringBuilder((len + 1) * sequence2.length());
+			int sequence2len = sequence2.length();
+
+			if ((sequence2len != 0) && (len >= ((Integer.MAX_VALUE - len) / sequence2len))) {
+				/*[MSG "K0D01", "Array capacity exceeded"]*/
+				throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+			}
+
+			StringBuilder builder = new StringBuilder(len + ((len + 1) * sequence2len));
 
 			builder.append(sequence2);
 
@@ -3626,26 +3753,29 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		} else {
 			StringBuilder builder = new StringBuilder();
 
-			int start = 0, copyStart = 0, firstIndex;
+			int start = 0;
+			int copyStart = 0;
 
 			char charAt0 = sequence1.charAt(0);
 
 			while (start < len) {
-				if ((firstIndex = indexOf(charAt0, start)) == -1) {
+				int firstIndex = indexOf(charAt0, start);
+
+				if (firstIndex == -1) {
 					break;
 				}
 
 				boolean found = true;
 
-				if (sequence1.length() > 1) {
-					if (firstIndex + sequence1len > len) {
+				if (sequence1len > 1) {
+					if (sequence1len > len - firstIndex) {
+						/* the tail of this string is too short to find sequence1 */
 						break;
 					}
 
 					for (int i = 1; i < sequence1len; i++) {
 						if (charAt(firstIndex + i) != sequence1.charAt(i)) {
 							found = false;
-
 							break;
 						}
 					}
@@ -3879,7 +4009,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		return value;
 	}
 
-	/*[IF Java11]*/
+	/*[IF JAVA_SPEC_VERSION >= 11]*/
 	/**
 	 * Returns a string object containing the character (Unicode code point)
 	 * specified.
@@ -3936,6 +4066,10 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		}
 
 		int length = lengthInternal();
+		if (length > Integer.MAX_VALUE / count) {
+			/*[MSG "K0D01", "Array capacity exceeded"]*/
+			throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+		}
 		int repeatlen = length * count;
 
 		if (enableCompression && (null == compressionFlag || coder == LATIN1)) {
@@ -3947,7 +4081,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 
 			return new String(buffer, LATIN1);
 		} else {
-			byte[] buffer = new byte[repeatlen * 2];
+			byte[] buffer = StringUTF16.newBytesFor(repeatlen);
 
 			for (int i = 0; i < count; i++) {
 				decompressedArrayCopy(value, 0, buffer, i * length, length);
@@ -3956,7 +4090,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 			return new String(buffer, UTF16);
 		}
 	}
-	/*[ENDIF] Java11 */
+	/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 
 /*[ELSE] Sidecar19-SE*/
 	// DO NOT CHANGE OR MOVE THIS LINE
@@ -4291,7 +4425,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 
 			if (enableCompression) {
 				if (canEncodeAsLatin1(buffer, 0, buffer.length)) {
-					value = new char[(buffer.length + 1) / 2];
+					value = new char[(buffer.length + 1) >>> 1];
 					count = buffer.length;
 
 					compress(buffer, 0, value, 0, buffer.length);
@@ -4336,7 +4470,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		if (start >= 0 && 0 <= length && length <= data.length - start) {
 			if (enableCompression) {
 				if (high == 0) {
-					value = new char[(length + 1) / 2];
+					value = new char[(length + 1) >>> 1];
 					count = length;
 
 					compressedArrayCopy(data, start, value, 0, length);
@@ -4411,7 +4545,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 
 			if (enableCompression) {
 				if (canEncodeAsLatin1(buffer, 0, buffer.length)) {
-					value = new char[(buffer.length + 1) / 2];
+					value = new char[(buffer.length + 1) >>> 1];
 					count = buffer.length;
 
 					compress(buffer, 0, value, 0, buffer.length);
@@ -4469,11 +4603,15 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		int slen = s.lengthInternal();
 
 		int concatlen = slen + 1;
+		if (concatlen < 0) {
+			/*[MSG "K0D01", "Array capacity exceeded"]*/
+			throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+		}
 
 		if (enableCompression) {
 			// Check if the String is compressed
 			if ((null == compressionFlag || s.count >= 0) && c <= 255) {
-				value = new char[(concatlen + 1) / 2];
+				value = new char[(concatlen + 1) >>> 1];
 				count = concatlen;
 
 				compressedArrayCopy(s.value, 0, value, 0, slen);
@@ -4522,7 +4660,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 	String(char[] data, boolean ignore) {
 		if (enableCompression) {
 			if (canEncodeAsLatin1(data, 0, data.length)) {
-				value = new char[(data.length + 1) / 2];
+				value = new char[(data.length + 1) >>> 1];
 				count = data.length;
 
 				compress(data, 0, value, 0, data.length);
@@ -4562,7 +4700,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		if (start >= 0 && 0 <= length && length <= data.length - start) {
 			if (enableCompression) {
 				if (canEncodeAsLatin1(data, start, length)) {
-					value = new char[(length + 1) / 2];
+					value = new char[(length + 1) >>> 1];
 					count = length;
 
 					compress(data, start, value, 0, length);
@@ -4620,7 +4758,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 						value = data;
 						count = length;
 					} else {
-						value = new char[(length + 1) / 2];
+						value = new char[(length + 1) >>> 1];
 						count = length;
 
 						compressedArrayCopy(data, start, value, 0, length);
@@ -4643,7 +4781,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 			if (length == 0) {
 				value = emptyValue;
 				count = 0;
-			} else if (length == 1 && data[start] < 256) {
+			} else if (length == 1 && data[start] <= 255) {
 				char theChar = data[start];
 
 				value = decompressedAsciiTable[theChar];
@@ -4698,7 +4836,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 						value = data;
 						count = length;
 					} else {
-						value = new char[(length + 1) / 2];
+						value = new char[(length + 1) >>> 1];
 						count = length;
 
 						compressedArrayCopy(data, start, value, 0, length);
@@ -4797,10 +4935,14 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		int s2len = s2.lengthInternal();
 
 		int concatlen = s1len + s2len;
+		if (concatlen < 0) {
+			/*[MSG "K0D01", "Array capacity exceeded"]*/
+			throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+		}
 
 		if (enableCompression) {
 			if (null == compressionFlag || (s1.count | s2.count) >= 0) {
-				value = new char[(concatlen + 1) / 2];
+				value = new char[(concatlen + 1) >>> 1];
 				count = concatlen;
 
 				compressedArrayCopy(s1.value, 0, value, 0, s1len);
@@ -4853,12 +4995,17 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		int s1len = s1.lengthInternal();
 		int s2len = s2.lengthInternal();
 		int s3len = s3.lengthInternal();
+		long totalLen = (long) s1len + (long) s2len + (long) s3len;
+		if (totalLen > Integer.MAX_VALUE) {
+			/*[MSG "K0D01", "Array capacity exceeded"]*/
+			throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+		}
 
-		int concatlen = s1len + s2len + s3len;
+		int concatlen = (int) totalLen;
 
 		if (enableCompression) {
 			if (null == compressionFlag || (s1.count | s2.count | s3.count) >= 0) {
-				value = new char[(concatlen + 1) / 2];
+				value = new char[(concatlen + 1) >>> 1];
 				count = concatlen;
 
 				compressedArrayCopy(s1.value, 0, value, 0, s1len);
@@ -4927,11 +5074,15 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 
 		// Char length of the final String
 		int len = s1len + v1len;
+		if (len < 0) {
+			/*[MSG "K0D01", "Array capacity exceeded"]*/
+			throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+		}
 
 		if (enableCompression) {
 			// Check if the String is compressed
 			if (null == compressionFlag || s1.count >= 0) {
-				value = new char[(len + 1) / 2];
+				value = new char[(len + 1) >>> 1];
 				count = len;
 
 				// Copy in v1
@@ -5054,11 +5205,17 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		}
 
 		// Char length of the final String
-		int len = s1len + v1len + v2len + s2len + s3len;
+		long totalLen = (long) s1len + (long) v1len + (long) v2len + (long) s2len + (long) s3len;
+		if (totalLen > Integer.MAX_VALUE) {
+			/*[MSG "K0D01", "Array capacity exceeded"]*/
+			throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+		}
+
+		int len = (int) totalLen;
 
 		if (enableCompression) {
 			if (null == compressionFlag || (s1.count | s2.count | s3.count) >= 0) {
-				value = new char[(len + 1) / 2];
+				value = new char[(len + 1) >>> 1];
 				count = len;
 
 				int start = len;
@@ -5337,8 +5494,8 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 						helpers.byteToCharUnsigned(helpers.getByteFromArrayByIndex(s1Value, o1++)) -
 						helpers.byteToCharUnsigned(helpers.getByteFromArrayByIndex(s2Value, o2++))) != 0) {
 					return result;
-					}
 				}
+			}
 		} else {
 			while (o1 < end) {
 				if ((result = s1.charAtInternal(o1++, s1Value) - s2.charAtInternal(o2++, s2Value)) != 0) {
@@ -5350,21 +5507,35 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		return s1len - s2len;
 	}
 
-	private char compareValue(char c) {
-		if (c < 128) {
-			if ('A' <= c && c <= 'Z') {
-				return (char) (c + ('a' - 'A'));
-			}
+	private static char compareValue(char c) {
+		if ('A' <= c && c <= 'Z') {
+			return (char) (c + ('a' - 'A'));
 		}
 
 		return Character.toLowerCase(Character.toUpperCase(c));
 	}
 
-	private char compareValue(byte b) {
+	private static char compareValue(byte b) {
 		if ('A' <= b && b <= 'Z') {
 			return (char) (helpers.byteToCharUnsigned(b) + ('a' - 'A'));
 		}
 		return Character.toLowerCase(Character.toUpperCase(helpers.byteToCharUnsigned(b)));
+	}
+
+	private static boolean charValuesEqualIgnoreCase(char c1, char c2) {
+		boolean charValuesEqual = false;
+		char c1upper = (char) toUpperCase(c1);
+		char c2upper = (char) toUpperCase(c2);
+
+		// If at least one char is ASCII, converting to upper cases then compare should be sufficient.
+		// If both chars are not in ASCII char set, need to convert to lower case and compare as well.
+		if (((c1 <= 255 || c2 <= 255) && (c1upper == c2upper))
+				|| (toLowerCase(c1upper) == toLowerCase(c2upper))
+		) {
+			charValuesEqual = true;
+		}
+
+		return charValuesEqual;
 	}
 
 	/**
@@ -5392,7 +5563,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		char[] s1Value = s1.value;
 		char[] s2Value = s2.value;
 
-		if (enableCompression && (null == compressionFlag || (s1.count | s2.count) >= 0)) {
+		if (enableCompression && ((null == compressionFlag) || ((s1.count | s2.count) >= 0))) {
 			while (o1 < end) {
 				byte byteAtO1;
 				byte byteAtO2;
@@ -5445,9 +5616,13 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		}
 
 		int concatlen = s1len + s2len;
+		if (concatlen < 0) {
+			/*[MSG "K0D01", "Array capacity exceeded"]*/
+			throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+		}
 
-		if (enableCompression && (null == compressionFlag || (s1.count | s2.count) >= 0)) {
-			char[] buffer = new char[(concatlen + 1) / 2];
+		if (enableCompression && ((null == compressionFlag) || ((s1.count | s2.count) >= 0))) {
+			char[] buffer = new char[(concatlen + 1) >>> 1];
 
 			compressedArrayCopy(s1.value, 0, buffer, 0, s1len);
 			compressedArrayCopy(s2.value, 0, buffer, s1len, s2len);
@@ -5673,21 +5848,23 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 			// Compare the last chars.
 			// In order to tell 2 chars are different:
 			// Under string compression, the compressible char set obeys 1-1 mapping for upper/lower case,
-			// converting to lower cases then compare should be sufficient.
-			byte byteAtO1Last = helpers.getByteFromArrayByIndex(s1Value, s1len-1);
-			byte byteAtO2Last = helpers.getByteFromArrayByIndex(s2Value, s1len-1);
+			// converting to upper cases then compare should be sufficient.
+			byte byteAtO1Last = helpers.getByteFromArrayByIndex(s1Value, s1len - 1);
+			byte byteAtO2Last = helpers.getByteFromArrayByIndex(s2Value, s1len - 1);
 
-			if (byteAtO1Last != byteAtO2Last
-					&& toUpperCase(helpers.byteToCharUnsigned(byteAtO1Last)) != toUpperCase(helpers.byteToCharUnsigned(byteAtO2Last))) {
+			if ((byteAtO1Last != byteAtO2Last)
+					&& (toUpperCase(helpers.byteToCharUnsigned(byteAtO1Last)) != toUpperCase(helpers.byteToCharUnsigned(byteAtO2Last)))
+			) {
 				return false;
 			}
 
-			while (o1 < end-1) {
+			while (o1 < end - 1) {
 				byte byteAtO1 = helpers.getByteFromArrayByIndex(s1Value, o1++);
 				byte byteAtO2 = helpers.getByteFromArrayByIndex(s2Value, o2++);
 
-				if (byteAtO1 != byteAtO2
-						&& toUpperCase(helpers.byteToCharUnsigned(byteAtO1)) != toUpperCase(helpers.byteToCharUnsigned(byteAtO2))) {
+				if ((byteAtO1 != byteAtO2)
+						&& (toUpperCase(helpers.byteToCharUnsigned(byteAtO1)) != toUpperCase(helpers.byteToCharUnsigned(byteAtO2)))
+				) {
 					return false;
 				}
 			}
@@ -5696,22 +5873,22 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 			// In order to tell 2 chars are different:
 			// If at least one char is ASCII, converting to upper cases then compare should be sufficient.
 			// If both chars are not in ASCII char set, need to convert to lower case and compare as well.
-			char charAtO1Last = s1.charAtInternal(s1len-1, s1Value);
-			char charAtO2Last = s2.charAtInternal(s1len-1, s2Value);
+			char charAtO1Last = s1.charAtInternal(s1len - 1, s1Value);
+			char charAtO2Last = s2.charAtInternal(s1len - 1, s2Value);
 
-			if (charAtO1Last != charAtO2Last
-					&& toUpperCase(charAtO1Last) != toUpperCase(charAtO2Last)
-					&& ((charAtO1Last < 256 && charAtO2Last < 256) || Character.toLowerCase(charAtO1Last) != Character.toLowerCase(charAtO2Last))) {
+			if ((charAtO1Last != charAtO2Last)
+					&& (!charValuesEqualIgnoreCase(charAtO1Last, charAtO2Last))
+			) {
 				return false;
 			}
 
-			while (o1 < end-1) {
+			while (o1 < end - 1) {
 				char charAtO1 = s1.charAtInternal(o1++, s1Value);
 				char charAtO2 = s2.charAtInternal(o2++, s2Value);
 
-				if (charAtO1 != charAtO2
-						&& toUpperCase(charAtO1) != toUpperCase(charAtO2)
-						&& ((charAtO1 < 256 && charAtO2 < 256) || Character.toLowerCase(charAtO1) != Character.toLowerCase(charAtO2))) {
+				if ((charAtO1 != charAtO2)
+						&& (!charValuesEqualIgnoreCase(charAtO1, charAtO2))
+				) {
 					return false;
 				}
 			}
@@ -6427,9 +6604,9 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 				byte byteAtO1 = helpers.getByteFromArrayByIndex(s1Value, o1++);
 				byte byteAtO2 = helpers.getByteFromArrayByIndex(s2Value, o2++);
 
-				if (byteAtO1 != byteAtO2
-						&& toUpperCase(helpers.byteToCharUnsigned(byteAtO1)) != toUpperCase(helpers.byteToCharUnsigned(byteAtO2))
-						&& toLowerCase(helpers.byteToCharUnsigned(byteAtO1)) != toLowerCase(helpers.byteToCharUnsigned(byteAtO2))) {
+				if ((byteAtO1 != byteAtO2)
+						&& (!charValuesEqualIgnoreCase(helpers.byteToCharUnsigned(byteAtO1), helpers.byteToCharUnsigned(byteAtO2)))
+				) {
 					return false;
 				}
 			}
@@ -6438,9 +6615,9 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 				char charAtO1 = s1.charAtInternal(o1++, s1Value);
 				char charAtO2 = s2.charAtInternal(o2++, s2Value);
 
-				if (charAtO1 != charAtO2
-						&& toUpperCase(charAtO1) != toUpperCase(charAtO2)
-						&& toLowerCase(charAtO1) != toLowerCase(charAtO2)) {
+				if ((charAtO1 != charAtO2)
+						&& (!charValuesEqualIgnoreCase(charAtO1, charAtO2))
+				) {
 					return false;
 				}
 			}
@@ -6470,7 +6647,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		// Check if the String is compressed
 		if (enableCompression && (null == compressionFlag || count >= 0)) {
 			if (newChar <= 255) {
-				char[] buffer = new char[(len + 1) / 2];
+				char[] buffer = new char[(len + 1) >>> 1];
 
 				compressedArrayCopy(value, 0, buffer, 0, len);
 
@@ -6629,7 +6806,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		return toLowerCase(Locale.getDefault());
 	}
 
-	private int toLowerCase(int codePoint) {
+	private static int toLowerCase(int codePoint) {
 		if (codePoint < 128) {
 			if ('A' <= codePoint && codePoint <= 'Z') {
 				return codePoint + ('a' - 'A');
@@ -6641,7 +6818,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 		}
 	}
 
-	private int toUpperCase(int codePoint) {
+	private static int toUpperCase(int codePoint) {
 		if (codePoint < 128) {
 			if ('a' <= codePoint && codePoint <= 'z') {
 				return codePoint - ('a' - 'A');
@@ -6728,20 +6905,19 @@ written authorization of the copyright holder.
 	public String toLowerCase(Locale locale) {
 		// check locale for null
 		String language = locale.getLanguage();
+		int sLength = lengthInternal();
 
-		if (isEmpty()) {
+		if (sLength == 0) {
 			return this;
 		}
 
-		if (helpers.supportsIntrinsicCaseConversion() && language == "en") { //$NON-NLS-1$
-			int sLength = lengthInternal();
-
-			if (enableCompression && (null == compressionFlag || count >= 0)) {
-				char[] output = new char[(sLength + 1) / 2];
+		if (helpers.supportsIntrinsicCaseConversion() && (language == "en")) { //$NON-NLS-1$
+			if (enableCompression && ((null == compressionFlag) || (count >= 0))) {
+				char[] output = new char[(sLength + 1) >>> 1];
 				if (helpers.toLowerIntrinsicLatin1(value, output, sLength)) {
 					return new String(output, 0, sLength, true);
 				}
-			} else {
+			} else if (sLength <= (Integer.MAX_VALUE / 2)) {
 				char[] output = new char[sLength];
 				if (helpers.toLowerIntrinsicUTF16(value, output, sLength * 2)) {
 					return new String(output, 0, sLength, false);
@@ -6868,7 +7044,7 @@ written authorization of the copyright holder.
 		int high = data.length - 1;
 
 		while (low <= high) {
-			mid = (low + high) >> 1;
+			mid = (low + high) >>> 1;
 
 			value = data[mid];
 
@@ -6957,11 +7133,11 @@ written authorization of the copyright holder.
 		return false;
 	}
 
-	private boolean isWordPart(int codePoint) {
+	private static boolean isWordPart(int codePoint) {
 		return codePoint == 0x345 || isWordStart(codePoint);
 	}
 
-	private boolean isWordStart(int codePoint) {
+	private static boolean isWordStart(int codePoint) {
 		int type = Character.getType(codePoint);
 
 		return (type >= Character.UPPERCASE_LETTER && type <= Character.TITLECASE_LETTER) || (codePoint >= 0x2B0 && codePoint <= 0x2B8)
@@ -7004,7 +7180,7 @@ written authorization of the copyright holder.
 	 *
 	 * @return the index into the upperValues table, or -1
 	 */
-	private int upperIndex(int ch) {
+	private static int upperIndex(int ch) {
 		int index = -1;
 
 		if (ch <= 0x587) {
@@ -7061,22 +7237,21 @@ written authorization of the copyright holder.
 	 */
 	public String toUpperCase(Locale locale) {
 		String language = locale.getLanguage();
+		int sLength = lengthInternal();
 
-		if (isEmpty()) {
+		if (sLength == 0) {
 			return this;
 		}
 
-		if (helpers.supportsIntrinsicCaseConversion() && language == "en") { //$NON-NLS-1$
-			int sLength = lengthInternal();
-
-			if (enableCompression && (null == compressionFlag || count >= 0)) {
-				char[] output = new char[(sLength + 1) / 2];
-				if (helpers.toUpperIntrinsicLatin1(value, output, sLength)){
+		if (helpers.supportsIntrinsicCaseConversion() && (language == "en")) { //$NON-NLS-1$
+			if (enableCompression && ((null == compressionFlag) || (count >= 0))) {
+				char[] output = new char[(sLength + 1) >>> 1];
+				if (helpers.toUpperIntrinsicLatin1(value, output, sLength)) {
 					return new String(output, 0, sLength, true);
 				}
-			} else {
+			} else if (sLength <= (Integer.MAX_VALUE / 2)) {
 				char[] output = new char[sLength];
-				if (helpers.toUpperIntrinsicUTF16(value, output, sLength * 2)){
+				if (helpers.toUpperIntrinsicUTF16(value, output, sLength * 2)) {
 					return new String(output, 0, sLength, false);
 				}
 			}
@@ -7406,7 +7581,7 @@ written authorization of the copyright holder.
 			int length = lengthInternal();
 			if (substituteLength < 2) {
 				if (enableCompression && isCompressed() && (substituteLength == 0 || substitute.isCompressed())) {
-					char[] newChars = new char[(length + 1) >> 1];
+					char[] newChars = new char[(length + 1) >>> 1];
 					byte toReplace = helpers.getByteFromArrayByIndex(regex.value, 0);
 					byte replacement = (byte)-1;  // assign dummy value that will never be used
 					if (substituteLength == 1) {
@@ -7679,7 +7854,7 @@ written authorization of the copyright holder.
 			}
 
 			if (canEncodeAsLatin1) {
-				value = new char[(size + 1) / 2];
+				value = new char[(size + 1) >>> 1];
 				count = size;
 
 				for (int i = start, j = 0; i < start + length; ++i) {
@@ -8018,7 +8193,14 @@ written authorization of the copyright holder.
 		int sequence1len = sequence1.length();
 
 		if (sequence1len == 0) {
-			StringBuilder builder = new StringBuilder((len + 1) * sequence2.length());
+			int sequence2len = sequence2.length();
+
+			if ((sequence2len != 0) && (len >= ((Integer.MAX_VALUE - len) / sequence2len))) {
+				/*[MSG "K0D01", "Array capacity exceeded"]*/
+				throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+			}
+
+			StringBuilder builder = new StringBuilder(len + ((len + 1) * sequence2len));
 
 			builder.append(sequence2);
 
@@ -8030,26 +8212,29 @@ written authorization of the copyright holder.
 		} else {
 			StringBuilder builder = new StringBuilder();
 
-			int start = 0, copyStart = 0, firstIndex;
+			int start = 0;
+			int copyStart = 0;
 
 			char charAt0 = sequence1.charAt(0);
 
 			while (start < len) {
-				if ((firstIndex = indexOf(charAt0, start)) == -1) {
+				int firstIndex = indexOf(charAt0, start);
+
+				if (firstIndex == -1) {
 					break;
 				}
 
 				boolean found = true;
 
-				if (sequence1.length() > 1) {
-					if (firstIndex + sequence1len > len) {
+				if (sequence1len > 1) {
+					if (sequence1len > len - firstIndex) {
+						/* the tail of this string is too short to find sequence1 */
 						break;
 					}
 
 					for (int i = 1; i < sequence1len; i++) {
 						if (charAt(firstIndex + i) != sequence1.charAt(i)) {
 							found = false;
-
 							break;
 						}
 					}
@@ -8175,7 +8360,7 @@ written authorization of the copyright holder.
 
 			if (enableCompression) {
 				if (canEncodeAsLatin1(chars, 0, chars.length)) {
-					value = new char[(chars.length + 1) / 2];
+					value = new char[(chars.length + 1) >>> 1];
 					count = chars.length;
 
 					compress(chars, 0, value, 0, chars.length);
@@ -8265,7 +8450,7 @@ written authorization of the copyright holder.
 
 /*[ENDIF] Sidecar19-SE*/
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	/**
 	 * Apply a function to this string. The function expects a single String input
 	 * and returns an R.
@@ -8356,9 +8541,9 @@ written authorization of the copyright holder.
 
 		return builder.toString();
 	}
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
-/*[IF Java13]*/
+/*[IF JAVA_SPEC_VERSION >= 13]*/
 	/**
 	 * Determine if current String object is LATIN1.
 	 *
@@ -8377,8 +8562,9 @@ written authorization of the copyright holder.
 	 * @return the formatted result
 	 *
 	 * @see #format(String, Object...)
+	 * 
+	 * @since 15
 	 */
-	@Deprecated(forRemoval=true, since="13")
 	public String formatted(Object... args) {
 		return String.format(this, args);
 	}
@@ -8388,8 +8574,9 @@ written authorization of the copyright holder.
 	 * removes the trailing spaces in every line from the string
 	 *
 	 * @return this string with incidental whitespaces removed from every line
+	 * 
+	 * @since 15 
 	 */
-	@Deprecated(forRemoval=true, since="13")
 	public String stripIndent() {
 		if (isEmpty()) {
 			return this;
@@ -8456,8 +8643,9 @@ written authorization of the copyright holder.
 	 *
 	 * @throws IllegalArgumentException
 	 *          If invalid escape sequence is detected
+	 * 
+	 * @since 15
 	 */
-	@Deprecated(forRemoval=true, since="13")
 	public String translateEscapes() {
 		StringBuilder builder = new StringBuilder();
 		char[] charArray = toCharArray();
@@ -8548,5 +8736,5 @@ written authorization of the copyright holder.
 		}
 		return builder.toString();
 	}
-/*[ENDIF] Java13 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 13 */
 }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2005, 2018 IBM Corp. and others
+ * Copyright (c) 2005, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,7 +26,7 @@ import java.io.FileInputStream;
 import java.net.URL;
 import java.util.Properties;
 
-import CustomClassloaders.CustomURLLoader;
+import CustomCLs.CustomURLLoader;
 import Utilities.StringManipulator;
 import Utilities.URLClassPathCreator;
 
@@ -64,7 +64,7 @@ public class MultiLoadURLClassPathMatchingTest {
 		}
 
 		String numberOfUrlsString = props.getProperty("NumberOfUrls");
-		Integer tempNumberOfUrls = new Integer(numberOfUrlsString);
+		Integer tempNumberOfUrls = Integer.valueOf(numberOfUrlsString);
 		int numberOfUrls = tempNumberOfUrls.intValue();
 		
 		int maxClassesToLoad = 0;
@@ -73,10 +73,10 @@ public class MultiLoadURLClassPathMatchingTest {
 		for(int index = 0; index < numberOfUrls; index++){
 			urls[index] = props.getProperty("Url"+index);
 			String ctl = props.getProperty("NumberOfClassesToLoad"+index);
-			Integer intctl = new Integer(ctl);
+			Integer intctl = Integer.valueOf(ctl);
 			maxClassesToLoad = ((intctl.intValue() > maxClassesToLoad) ? intctl.intValue() : maxClassesToLoad);
 			String ctf = props.getProperty("NumberOfClassesToFind"+index);
-			Integer intctf = new Integer(ctf);
+			Integer intctf = Integer.valueOf(ctf);
 			maxClassesToFind = ((intctf.intValue() > maxClassesToFind) ? intctf.intValue() : maxClassesToFind);
 		}
 		
@@ -89,10 +89,10 @@ public class MultiLoadURLClassPathMatchingTest {
 			String findClasses = props.getProperty("FindClasses"+urlIndex);
 			String result = props.getProperty("Results"+urlIndex);
 			String ctl = props.getProperty("NumberOfClassesToLoad"+urlIndex);
-			Integer intctl = new Integer(ctl);
+			Integer intctl = Integer.valueOf(ctl);
 			int numberOfClassesToLoad = intctl.intValue();
 			String ctf = props.getProperty("NumberOfClassesToFind"+urlIndex);
-			Integer intctf = new Integer(ctf);
+			Integer intctf = Integer.valueOf(ctf);
 			int numberOfClassesToFind = intctf.intValue();
 			for(int classToLoadIndex = 0; classToLoadIndex < numberOfClassesToLoad; classToLoadIndex++){
 				classesToLoad[urlIndex][classToLoadIndex] = manipulator.getStringElement(classToLoadIndex, loadClasses);

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2002, 2020 IBM Corp. and others
+ * Copyright (c) 2002, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -275,7 +275,7 @@ static void testBackupAndRestoreLibpath(void);
 #endif  /* AIXPPC */
 
 /* Defined in j9memcategories.c */
-extern OMRMemCategorySet j9MasterMemCategorySet;
+extern OMRMemCategorySet j9MainMemCategorySet;
 
 void exitHook(J9JavaVM *vm);
 static jint JNI_CreateJavaVM_impl(JavaVM **pvm, void **penv, void *vm_args, BOOLEAN isJITServer);
@@ -294,6 +294,7 @@ static jint formatErrorMessage(int errorCode, char *inBuffer, jint inBufferLengt
 #if defined(J9VM_OPT_JITSERVER)
 static int32_t startJITServer(struct JITServer *);
 static int32_t waitForJITServerTermination(struct JITServer *);
+static int32_t destroyJITServer(struct JITServer **);
 #endif /* J9VM_OPT_JITSERVER */
 
 /**
@@ -926,6 +927,8 @@ getj9bin()
 #define JVM_ARCH_DIR "arm"
 #elif defined(J9AARCH64)
 #define JVM_ARCH_DIR "aarch64"
+#elif defined(RISCV64)
+#define JVM_ARCH_DIR "riscv64"
 #else
 #error "Must define an architecture"
 #endif
@@ -1473,7 +1476,9 @@ static jint initializeReflectionGlobals(JNIEnv * env, BOOLEAN includeAccessors) 
  *
  * DLL: jvm
  */
-jint JNICALL JNI_CreateJavaVM(JavaVM **pvm, void **penv, void *vm_args) {
+jint JNICALL
+JNI_CreateJavaVM(JavaVM **pvm, void **penv, void *vm_args)
+{
 	return JNI_CreateJavaVM_impl(pvm, penv, vm_args, FALSE);
 }
 
@@ -1492,6 +1497,7 @@ JITServer_CreateServer(JITServer **jitServer, void *serverArgs)
 	}
 	server->startJITServer = startJITServer;
 	server->waitForJITServerTermination = waitForJITServerTermination;
+	server->destroyJITServer = destroyJITServer;
 	rc = JNI_CreateJavaVM_impl(&server->jvm, (void **)&env, serverArgs, TRUE);
 
 	if (JNI_OK != rc) {
@@ -1504,6 +1510,7 @@ JITServer_CreateServer(JITServer **jitServer, void *serverArgs)
 _end:
 	if ((JITSERVER_OK != rc) && (NULL != server)) {
 		free(server);
+		*jitServer = NULL;
 	}
 	return rc;
 }
@@ -1513,7 +1520,7 @@ _end:
  *
  * @param jitServer pointer to the JITServer interface
  *
- * @returns zero on success, else negative error code
+ * @returns JITSERVER_OK on success, else negative error code
  */
 static int32_t
 startJITServer(JITServer *jitServer)
@@ -1543,7 +1550,7 @@ startJITServer(JITServer *jitServer)
  *
  * @param jitServer pointer to the JITServer interface
  *
- * @returns zero on success, else negative error code
+ * @returns JITSERVER_OK on success, else negative error code
  */
 static int32_t
 waitForJITServerTermination(JITServer *jitServer)
@@ -1567,6 +1574,31 @@ waitForJITServerTermination(JITServer *jitServer)
 	}
 	return rc;
 }
+
+/**
+ * Frees the resources allocated by JITServer_CreateServer.
+ *
+ * @param jitServer double pointer to the JITServer interface. Must not be NULL
+ *
+ * @returns JITSERVER_OK on success, else negative error code
+ *
+ * @note on return *jitServer is set to NULL
+ */
+static int32_t
+destroyJITServer(JITServer **jitServer)
+{
+	JavaVM *vm = (*jitServer)->jvm;
+	jint rc = (*vm)->DestroyJavaVM(vm);
+	free(*jitServer);
+	*jitServer = NULL;
+	if (JNI_OK == rc) {
+		rc = JITSERVER_OK;
+	} else {
+		rc = JITSERVER_DESTROY_ERROR;
+	}
+	return rc;
+}
+
 #endif /* J9VM_OPT_JITSERVER */
 
 /*
@@ -1685,12 +1717,48 @@ JNI_CreateJavaVM_impl(JavaVM **pvm, void **penv, void *vm_args, BOOLEAN isJITSer
 	 * trying to load application native libraries that are linked against
 	 * libraries in /usr/lib we could fail to find those libraries if /usr/lib
 	 * is not on the LIBPATH.
-	 * */
-	addToLibpath("/usr/lib", FALSE);
+	 */
+	{
+		/* github #8504 shows tests fail if the libpath is modified
+		 * when creating a new process from Java.  The easy fix is to only
+		 * append to the libpath if /usr/lib isn't already present.
+		 * Example libpath:
+		 * LIBPATH=/jre/lib/ppc64/j9vm:/jre/lib/ppc64:/jre/lib/ppc64/jli:/jre/../lib/ppc64:/usr/lib
+		 */
+
+		const char *currentLibPath = getenv("LIBPATH");
+		BOOLEAN appendToLibPath = TRUE;
+		if (NULL != currentLibPath) {
+			const size_t currentLibPathLength = strlen(currentLibPath);
+			const char *usrLib = "/usr/lib";
+			const UDATA usrLibLength = LITERAL_STRLEN("/usr/lib");
+			const char *needle = strstr(currentLibPath, usrLib);
+			while (NULL != needle) {
+				/* Note, inside the loop we're guaranteed to have
+				 * usrLibLength of string to operate on so we can
+				 * always peek needle[usrLibLength] and will get
+				 * either a value or '\0'
+				 */
+				const ptrdiff_t offsetFromStart = needle - currentLibPath;
+				if ((0 == offsetFromStart) || (':' == needle[-1])) {
+					if  ((':' == needle[usrLibLength]) || ('\0' == needle[usrLibLength])) {
+						/* Found a match */
+						appendToLibPath = FALSE;
+						break;
+					}
+				}
+				needle = strstr(needle + usrLibLength, usrLib);
+			}
+		}
+		if (appendToLibPath) {
+			addToLibpath("/usr/lib", FALSE);
+		}
+	}
 	/* CMVC 135358.
 	 * This function modifies LIBPATH while dlopen()ing J9 shared libs.
-	 * Save the original so that it can be restored at the end of the
-	 * function.
+	 * Save the original, with appended /usr/lib so that it can be
+	 * restored at the end of the function.  Can't reuse the getenv
+	 * result from above.
 	 */
 	origLibpath = getenv("LIBPATH");
 #endif
@@ -1805,9 +1873,9 @@ JNI_CreateJavaVM_impl(JavaVM **pvm, void **penv, void *vm_args, BOOLEAN isJITSer
 	/* Get the thread library memory categories */
 	{
 #if CALL_BUNDLED_FUNCTIONS_DIRECTLY
-		IDATA threadCategoryResult = omrthread_lib_control(J9THREAD_LIB_CONTROL_GET_MEM_CATEGORIES, (UDATA)&j9MasterMemCategorySet);
+		IDATA threadCategoryResult = omrthread_lib_control(J9THREAD_LIB_CONTROL_GET_MEM_CATEGORIES, (UDATA)&j9MainMemCategorySet);
 #else
-		IDATA threadCategoryResult = f_threadLibControl(J9THREAD_LIB_CONTROL_GET_MEM_CATEGORIES, (UDATA)&j9MasterMemCategorySet);
+		IDATA threadCategoryResult = f_threadLibControl(J9THREAD_LIB_CONTROL_GET_MEM_CATEGORIES, (UDATA)&j9MainMemCategorySet);
 #endif /* CALL_BUNDLED_FUNCTIONS_DIRECTLY */
 
 		if (threadCategoryResult) {
@@ -1824,7 +1892,7 @@ JNI_CreateJavaVM_impl(JavaVM **pvm, void **penv, void *vm_args, BOOLEAN isJITSer
 		}
 	}
 	/* Register the J9 memory categories with the port library */
-	j9portLibrary.omrPortLibrary.port_control(&j9portLibrary.omrPortLibrary, J9PORT_CTLDATA_MEM_CATEGORIES_SET, (UDATA)&j9MasterMemCategorySet);
+	j9portLibrary.omrPortLibrary.port_control(&j9portLibrary.omrPortLibrary, J9PORT_CTLDATA_MEM_CATEGORIES_SET, (UDATA)&j9MainMemCategorySet);
 
 	Assert_SC_true(J2SE_CURRENT_VERSION >= J2SE_18);
 	setNLSCatalog(&j9portLibrary);
@@ -3571,75 +3639,80 @@ JVM_LoadSystemLibrary(const char *libName)
  *	successful, returns the file handle, otherwise returns NULL.
  *
  *	@param libName a null terminated string containing the libName.
+ *	  For Windows platform, this incoming libName is encoded as J9STR_CODE_WINDEFAULTACP,
+ *	  and is required to be converted to J9STR_CODE_MUTF8 for internal usages.
  *
  *	@return the shared library's handle if successful, throws java/lang/UnsatisfiedLinkError on failure
  *
  *	DLL: jvm
  */
 
-/* NOTE THIS IS NOT REQUIRED FOR 1.4 */
+/* NOTE this is required by JDK15+ jdk.internal.loader.NativeLibraries.load().
+ *  it is only invoked by jdk.internal.loader.BootLoader.loadLibrary().
+ */
 
 void* JNICALL
 JVM_LoadLibrary(const char *libName)
 {
-	JNIEnv *env;
-	JavaVM *vm = (JavaVM *) BFUjavaVM;
-	char errMsg[512];
+	void *result = NULL;
+	J9JavaVM *javaVM = (J9JavaVM*)BFUjavaVM;
 
-#ifdef WIN32
-	HINSTANCE dllHandle;
-	UINT prevMode;
-
-	Trc_SC_LoadLibrary_Entry(libName);
-
-	prevMode = SetErrorMode( SEM_NOOPENFILEERRORBOX|SEM_FAILCRITICALERRORS );
-
-	/* LoadLibrary will try appending .DLL if necessary */
-	dllHandle = LoadLibrary ((LPCSTR)libName);
-	if (NULL == dllHandle) {
-		goto _end;
+#if defined(WIN32)
+	char *libNameConverted = NULL;
+	UDATA libNameLen = strlen(libName);
+	PORT_ACCESS_FROM_JAVAVM(javaVM);
+	UDATA libNameLenConverted = j9str_convert(J9STR_CODE_WINDEFAULTACP, J9STR_CODE_MUTF8, libName, libNameLen, NULL, 0);
+	if (libNameLenConverted > 0) {
+		libNameLenConverted += 1; /* adding an extra byte for null */
+		libNameConverted = j9mem_allocate_memory(libNameLenConverted, OMRMEM_CATEGORY_VM);
+		if (NULL != libNameConverted) {
+			libNameLenConverted = j9str_convert(J9STR_CODE_WINDEFAULTACP, J9STR_CODE_MUTF8, libName, libNameLen, libNameConverted, libNameLenConverted);
+			if (libNameLenConverted > 0) {
+				/* j9str_convert null-terminated the string */
+				libName = libNameConverted;
+			}
+		}
 	}
+	if (libName == libNameConverted) {
+#endif /* defined(WIN32) */
+		Trc_SC_LoadLibrary_Entry(libName);
+		if (NULL == javaVM->applicationClassLoader) {
+			J9NativeLibrary *nativeLibrary = NULL;
+			J9InternalVMFunctions *vmFuncs = javaVM->internalVMFunctions;
+			J9VMThread *currentThread = vmFuncs->currentVMThread(javaVM);
+			Assert_SC_notNull(currentThread);
+			vmFuncs->internalEnterVMFromJNI(currentThread);
+			vmFuncs->internalReleaseVMAccess(currentThread);
+			if (vmFuncs->registerBootstrapLibrary(currentThread, libName, &nativeLibrary, FALSE) == J9NATIVELIB_LOAD_OK) {
+				result = (void*)nativeLibrary->handle;
+			}
+			vmFuncs->internalAcquireVMAccess(currentThread);
+			vmFuncs->internalExitVMToJNI(currentThread);
+			Trc_SC_LoadLibrary_BootStrap(libName);
+		} else {
+			PORT_ACCESS_FROM_JAVAVM(javaVM);
+			UDATA handle = 0;
+			UDATA flags = J9_ARE_ANY_BITS_SET(javaVM->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_LAZY_SYMBOL_RESOLUTION) ? J9PORT_SLOPEN_LAZY : 0;
+			UDATA slOpenResult = j9sl_open_shared_library((char *)libName, &handle, flags);
 
-	SetErrorMode(prevMode);
-	Trc_SC_LoadLibrary_Exit(dllHandle);
-	return dllHandle;
-
-_end:
-	SetErrorMode(prevMode);
-
-#endif
-
-#if defined(J9UNIX) || defined(J9ZOS390)
-	void *dllHandle;
-#if defined(AIXPPC)
-	/* CMVC 137341:
-	 * dlopen() searches for libraries using the LIBPATH envvar as it was when the process
-	 * was launched.  This causes multiple issues such as:
-	 *  - finding 32 bit binaries for libomrsig.so instead of the 64 bit binary needed and vice versa
-	 *  - finding compressed reference binaries instead of non-compressed ref binaries
-	 *
-	 * calling loadAndInit(libname, 0 -> no flags, NULL -> use the currently defined LIBPATH) allows
-	 * us to load the library with the current libpath instead of the one at process creation
-	 * time. We can then call dlopen() as per normal and the just loaded library will be found.
-	 * */
-	loadAndInit((char *)libName, L_RTLD_LOCAL, NULL);
-#endif
-	dllHandle = dlopen( (char *)libName, RTLD_LAZY );
-	if(NULL != dllHandle) {
-		Trc_SC_LoadLibrary_Exit(dllHandle);
-		return dllHandle;
+			Trc_SC_LoadLibrary_OpenShared(libName);
+			if (0 != slOpenResult) {
+				slOpenResult = j9sl_open_shared_library((char *)libName, &handle, flags | J9PORT_SLOPEN_DECORATE);
+				Trc_SC_LoadLibrary_OpenShared_Decorate(libName);
+			}
+			if (0 == slOpenResult) {
+				result = (void*)handle;
+			}
+		}
+#if defined(WIN32)
 	}
-#endif /* defined(J9UNIX) || defined(J9ZOS390) */
+	if (NULL != libNameConverted) {
+		j9mem_free_memory(libNameConverted);
+	}
+#endif /* defined(WIN32) */
+	Trc_SC_LoadLibrary_Exit(result);
 
-	/* We are here means we failed to load library. Throw java.lang.UnsatisfiedLinkError */
- 	(*vm)->GetEnv(vm, (void **) &env, JNI_VERSION_1_2);
- 	if (NULL != env) {
- 		j9portLibrary.omrPortLibrary.str_printf(&j9portLibrary.omrPortLibrary, errMsg, sizeof(errMsg), "Failed to load library \"%s\"", libName);
- 		throwNewUnsatisfiedLinkError(env, errMsg);
- 	}
-
-	Trc_SC_LoadLibrary_Exit(NULL);
-	return NULL;
+	return result;
 }
 
 
@@ -4389,8 +4462,8 @@ JVM_RaiseSignal(jint sigNum)
  *
  * If handler has the special value of J9_PRE_DEFINED_HANDLER_CHECK (2),
  * then the predefinedHandlerWrapper is registered with asynchSignalReporterThread
- * in OMR. masterASynchSignalHandler notifies asynchSignalReporterThread whenever a
- * signal is received. If the old OS handler is a master signal handler, then a
+ * in OMR. mainASynchSignalHandler notifies asynchSignalReporterThread whenever a
+ * signal is received. If the old OS handler is a main signal handler, then a
  * Java signal handler was previously registered with the signal. In this case,
  * J9_USE_OLD_JAVA_SIGNAL_HANDLER must be returned. sun.misc.Signal.handle(...) or
  * jdk.internal.misc.Signal.handle(...) will return the old Java signal handler if
@@ -4457,7 +4530,7 @@ JVM_RegisterSignal(jint sigNum, void *handler)
 		}
 	}
 
-	/* If oldHandler is a master handler, then a Java signal handler was previously registered with
+	/* If oldHandler is a main handler, then a Java signal handler was previously registered with
 	 * the signal. sun.misc.Signal.handle(...) or jdk.internal.misc.Signal.handle(...) will return
 	 * the old Java signal handler if JVM_RegisterSignal returns J9_USE_OLD_JAVA_SIGNAL_HANDLER.
 	 * Otherwise, an instance of NativeHandler is returned with the oldHandler's address stored in
@@ -4465,7 +4538,7 @@ JVM_RegisterSignal(jint sigNum, void *handler)
 	 * NativeHandler.handler, which represents the address of the native signal handler function. In
 	 * Java 9, NativeHandler.handle() will throw UnsupportedOperationException.
 	 */
-	if (j9sig_is_master_signal_handler(oldHandler)) {
+	if (j9sig_is_main_signal_handler(oldHandler)) {
 		oldHandler = (void *)J9_USE_OLD_JAVA_SIGNAL_HANDLER;
 	}
 
@@ -5404,6 +5477,7 @@ JVM_InitClassName
 }
 
 
+#if JAVA_SPEC_VERSION < 17
 /**
  * Return the JVM_INTERFACE_VERSION. This function should not lock, gc or throw exception.
  * @return JVM_INTERFACE_VERSION, JDK8 - 4, JDK11+ - 6.
@@ -5421,7 +5495,7 @@ JVM_GetInterfaceVersion(void)
 
 	return result;
 }
-
+#endif /* JAVA_SPEC_VERSION < 17 */
 
 
 /* jclass parameter 2 is apparently not used */
@@ -5717,17 +5791,9 @@ JVM_DefineClassWithSource(JNIEnv *env, const char * className, jobject classLoad
 	J9InternalVMFunctions *vmFuncs = vm->internalVMFunctions;
 	J9ClassLoader* vmLoader;
 	j9object_t loaderObject;
-	jstring classNameString;
-
-	classNameString = (*env)->NewStringUTF(env,className);
+	jstring classNameString = (*env)->NewStringUTF(env,className);
 
 	vmFuncs->internalEnterVMFromJNI(currentThread);
-
-	if (CLASSNAME_INVALID == vmFuncs->verifyQualifiedName(currentThread, J9_JNI_UNWRAP_REFERENCE(classNameString))) {
-		vmFuncs->setCurrentException(currentThread, J9VMCONSTANTPOOL_JAVALANGNOCLASSDEFFOUNDERROR, (UDATA *)*(j9object_t*)classNameString);
-		vmFuncs->internalExitVMToJNI(currentThread);
-		return NULL;
-	}
 
 	loaderObject = J9_JNI_UNWRAP_REFERENCE(classLoader);
 	vmLoader = J9VMJAVALANGCLASSLOADER_VMREF(currentThread, loaderObject);
@@ -5739,6 +5805,7 @@ JVM_DefineClassWithSource(JNIEnv *env, const char * className, jobject classLoad
 		}
 	}
 	vmFuncs->internalExitVMToJNI(currentThread);
+
 	return jvmDefineClassHelper(env, classLoader, classNameString, (jbyte*)classArray, 0, length, domain, 0);
 }
 
@@ -6083,3 +6150,10 @@ checkZOSThrWeightEnvVar(void)
 	return retVal;
 }
 #endif /* defined(J9ZOS390) */
+
+void JNICALL
+JVM_BeforeHalt()
+{
+	/* To be implemented via https://github.com/eclipse/openj9/issues/1459 */
+}
+

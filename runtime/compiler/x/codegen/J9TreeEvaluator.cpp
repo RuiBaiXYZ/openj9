@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -52,9 +52,11 @@
 #include "control/RecompilationInfo.hpp"
 #include "env/CompilerEnv.hpp"
 #include "env/CHTable.hpp"
-#include "env/PersistentCHTable.hpp"
 #include "env/IO.hpp"
+#include "env/j9method.h"
 #include "env/jittypes.h"
+#include "env/PersistentCHTable.hpp"
+#include "env/VMJ9.h"
 #include "il/Block.hpp"
 #include "il/DataTypes.hpp"
 #include "il/Node.hpp"
@@ -62,8 +64,7 @@
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
 #include "infra/SimpleRegex.hpp"
-#include "env/j9method.h"
-#include "env/VMJ9.h"
+#include "OMR/Bytes.hpp"
 #include "x/codegen/AllocPrefetchSnippet.hpp"
 #include "x/codegen/CheckFailureSnippet.hpp"
 #include "x/codegen/CompareAnalyser.hpp"
@@ -105,12 +106,12 @@ static int32_t maxZeroInitWordsPerIteration = 0;
 static bool getNodeIs64Bit(TR::Node *node, TR::CodeGenerator *cg);
 static TR::Register *intOrLongClobberEvaluate(TR::Node *node, bool nodeIs64Bit, TR::CodeGenerator *cg);
 
-static uint32_t logBase2(uintptrj_t n)
+static uint32_t logBase2(uintptr_t n)
    {
    // Could use leadingZeroes, except we can't call it from here
    //
    uint32_t result = 8*sizeof(n)-1;
-   uintptrj_t mask  = ((uintptrj_t)1) << result;
+   uintptr_t mask  = ((uintptr_t)1) << result;
    while (mask && !(mask & n))
       {
       mask >>= 1;
@@ -131,15 +132,20 @@ inline void generateLoadJ9Class(TR::Node* node, TR::Register* j9class, TR::Regis
       {
       switch (opValue)
          {
+         case TR::monent:
+         case TR::monexit:
+            TR_ASSERT_FATAL(TR::Compiler->om.areValueTypesEnabled() || TR::Compiler->om.areValueBasedMonitorChecksEnabled(),
+                  "monent and monexit are expected for generateLoadJ9Class only when value type or when value based monitor check is enabled");
          case TR::checkcastAndNULLCHK:
             needsNULLCHK = true;
             break;
          case TR::icall: // TR_checkAssignable
             return; // j9class register already holds j9class
+         case TR::checkcast:
+         case TR::instanceof:
+            break;
          default:
-            TR_ASSERT(opValue == TR::checkcast ||
-                      opValue == TR::instanceof,
-                     "Unexpected opCode for generateLoadJ9Class %s.", node->getOpCode().getName());
+            TR_ASSERT_FATAL(false, "Unexpected opCode for generateLoadJ9Class %s.", node->getOpCode().getName());
             break;
          }
       }
@@ -282,7 +288,7 @@ static TR_OutlinedInstructions *generateArrayletReference(
        ((loadOrStoreOrArrayElementNode->getOpCodeValue() == TR::aload ||
          loadOrStoreOrArrayElementNode->getOpCodeValue() == TR::aRegLoad) &&
         node->isSpineCheckWithArrayElementChild()) &&
-       cg->comp()->target().is64Bit() && comp->useCompressedPointers())
+       comp->target().is64Bit() && comp->useCompressedPointers())
       loadNeedsDecompression = true;
 
    TR::Node *actualLoadOrStoreOrArrayElementNode = loadOrStoreOrArrayElementNode;
@@ -311,7 +317,7 @@ static TR_OutlinedInstructions *generateArrayletReference(
       elementSize = TR::Symbol::convertTypeToSize(dt);
       }
 
-   int32_t spinePointerSize = (cg->comp()->target().is64Bit() && !comp->useCompressedPointers()) ? 8 : 4;
+   int32_t spinePointerSize = (comp->target().is64Bit() && !comp->useCompressedPointers()) ? 8 : 4;
    int32_t arrayHeaderSize = TR::Compiler->om.discontiguousArrayHeaderSizeInBytes();
    int32_t arrayletMask = fej9->getArrayletMask(elementSize);
 
@@ -321,7 +327,7 @@ static TR_OutlinedInstructions *generateArrayletReference(
    //
    if (indexReg)
       {
-      TR_X86OpCodes op = cg->comp()->target().is64Bit() ? MOVSXReg8Reg4 : MOVRegReg();
+      TR_X86OpCodes op = comp->target().is64Bit() ? MOVSXReg8Reg4 : MOVRegReg();
       generateRegRegInstruction(op, node, scratchReg, indexReg, cg);
 
       int32_t spineShift = fej9->getArraySpineShift(elementSize);
@@ -347,27 +353,14 @@ static TR_OutlinedInstructions *generateArrayletReference(
    generateRegMemInstruction(op, node, scratchReg, spineMR, cg);
 
    // Decompress the arraylet pointer from the spine.
-   //
-   bool isHB0 = false;
    int32_t shiftOffset = 0;
 
-   if (cg->comp()->target().is64Bit() && comp->useCompressedPointers())
+   if (comp->target().is64Bit() && comp->useCompressedPointers())
       {
-      if (TR::Compiler->vm.heapBaseAddress() == 0)
-         isHB0 = true;
-
       shiftOffset = TR::Compiler->om.compressedReferenceShiftOffset();
-
-      if (isHB0)
+      if (shiftOffset > 0)
          {
-         if (shiftOffset > 0)
-            {
-            generateRegImmInstruction(SHL8RegImm1, node, scratchReg, shiftOffset, cg);
-            }
-         }
-      else
-         {
-         TR_ASSERT(0, "!HB0 not supported yet");
+         generateRegImmInstruction(SHL8RegImm1, node, scratchReg, shiftOffset, cg);
          }
       }
 
@@ -421,7 +414,7 @@ static TR_OutlinedInstructions *generateArrayletReference(
             case TR::Int16:  op = L2RegMem; break;
             case TR::Int32:  op = L4RegMem; break;
             case TR::Int64:
-               if (cg->comp()->target().is64Bit())
+               if (comp->target().is64Bit())
                   op = L8RegMem;
                else
                   {
@@ -438,7 +431,7 @@ static TR_OutlinedInstructions *generateArrayletReference(
             case TR::Double: op = MOVSDRegMem; break;
 
             case TR::Address:
-               if (cg->comp()->target().is32Bit() || comp->useCompressedPointers())
+               if (comp->target().is32Bit() || comp->useCompressedPointers())
                   op = L4RegMem;
                else
                   op = L8RegMem;
@@ -461,19 +454,13 @@ static TR_OutlinedInstructions *generateArrayletReference(
       //
       if (loadNeedsDecompression)
          {
-         if (cg->comp()->target().is64Bit() && comp->useCompressedPointers())
-
-         if (isHB0)
-            {
+		 if (comp->target().is64Bit() && comp->useCompressedPointers())
+		    {
             if (shiftOffset > 0)
                {
                generateRegImmInstruction(SHL8RegImm1, node, loadOrStoreReg, shiftOffset, cg);
                }
-            }
-         else
-            {
-            TR_ASSERT(0, "!HB0 not supported yet");
-            }
+			}
          }
       }
    else
@@ -491,7 +478,7 @@ static TR_OutlinedInstructions *generateArrayletReference(
             case TR::Int16:  op = valueReg ? S2MemReg : S2MemImm2; break;
             case TR::Int32:  op = valueReg ? S4MemReg : S4MemImm4; break;
             case TR::Int64:
-               if (cg->comp()->target().is64Bit())
+               if (comp->target().is64Bit())
                   {
                   // The range of the immediate must be verified before this function to
                   // fall within a signed 32-bit integer.
@@ -566,10 +553,12 @@ static TR::Instruction *generatePrefetchAfterHeaderAccess(TR::Node              
                                                          TR::Register          *objectReg,
                                                          TR::CodeGenerator     *cg)
    {
+   TR::Compilation *comp = cg->comp();
    TR::Instruction *instr = NULL;
 
    static const char *prefetch = feGetEnv("TR_EnableSoftwarePrefetch");
-   if (prefetch && cg->comp()->getMethodHotness()>=scorching && cg->getX86ProcessorInfo().isIntelCore2())
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.is(OMR_PROCESSOR_X86_INTELCORE2) == cg->getX86ProcessorInfo().isIntelCore2(), "isIntelCore2() failed\n");
+   if (prefetch && comp->getMethodHotness()>=scorching && comp->target().cpu.is(OMR_PROCESSOR_X86_INTELCORE2))
       {
       int32_t fieldOffset = 0;
       if (TR::TreeEvaluator::loadLookaheadAfterHeaderAccess(node, fieldOffset, cg))
@@ -678,12 +667,12 @@ static void generateCommonLockNurseryCodes(TR::Node          *node,
       //generateRegMemInstruction(LRegMem(), node, objectClassReg, generateX86MemoryReference(vmThreadReg, offsetOfMonitorLookupCache, cg), cg);
       generateRegRegInstruction(MOVRegReg(), node, lookupOffsetReg, objectReg, cg);
 
-      generateRegImmInstruction(SARRegImm1(cg->comp()->target().is64Bit()), node, lookupOffsetReg, trailingZeroes(TR::Compiler->om.objectAlignmentInBytes()), cg);
+      generateRegImmInstruction(SARRegImm1(comp->target().is64Bit()), node, lookupOffsetReg, trailingZeroes(TR::Compiler->om.objectAlignmentInBytes()), cg);
 
       J9JavaVM * jvm = fej9->getJ9JITConfig()->javaVM;
       generateRegImmInstruction(ANDRegImms(), node, lookupOffsetReg, J9VMTHREAD_OBJECT_MONITOR_CACHE_SIZE - 1, cg);
       generateRegImmInstruction(SHLRegImm1(), node, lookupOffsetReg, trailingZeroes(TR::Compiler->om.sizeofReferenceField()), cg);
-      generateRegMemInstruction((cg->comp()->target().is64Bit() && fej9->generateCompressedLockWord()) ? L4RegMem : LRegMem(), node, objectClassReg, generateX86MemoryReference(vmThreadReg, lookupOffsetReg, 0, offsetOfMonitorLookupCache, cg), cg);
+      generateRegMemInstruction((comp->target().is64Bit() && fej9->generateCompressedLockWord()) ? L4RegMem : LRegMem(), node, objectClassReg, generateX86MemoryReference(vmThreadReg, lookupOffsetReg, 0, offsetOfMonitorLookupCache, cg), cg);
 
       generateRegRegInstruction(TESTRegReg(), node, objectClassReg, objectClassReg, cg);
       generateLabelInstruction(JE4, node, snippetLabel, cg);
@@ -710,7 +699,7 @@ static void generateCommonLockNurseryCodes(TR::Node          *node,
    }
 
 #ifdef TR_TARGET_32BIT
-TR::Register *J9::X86::i386::TreeEvaluator::conditionalHelperEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+TR::Register *J9::X86::I386::TreeEvaluator::conditionalHelperEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    // used by asynccheck, methodEnterhook, and methodExitHook
 
@@ -775,10 +764,6 @@ TR::Register *J9::X86::i386::TreeEvaluator::conditionalHelperEvaluator(TR::Node 
 #endif
 
 #ifdef TR_TARGET_64BIT
-// Hack markers
-#define JVMPI_HOOKS_WITHOUT_SNIPPETS (!debug("enableSnippetsForJVMPI")) // Snippets can't yet do the necessary linkage logic
-
-
 TR::Register *J9::X86::AMD64::TreeEvaluator::conditionalHelperEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    // TODO:AMD64: Try to common this with the IA32 version
@@ -817,19 +802,6 @@ TR::Register *J9::X86::AMD64::TreeEvaluator::conditionalHelperEvaluator(TR::Node
    //          aconst (RAM method)
    //
 
-   // Decrement the reference count on the constant placeholder parameter to
-   // the MethodEnterHook call.  An evaluation isn't necessary because the
-   // constant value isn't used here.
-   //
-   if (node->getOpCodeValue() == TR::MethodEnterHook && !JVMPI_HOOKS_WITHOUT_SNIPPETS)
-      {
-      if (node->getSecondChild()->getOpCode().isCall() &&
-          node->getSecondChild()->getNumChildren() > 1)
-         {
-         cg->decReferenceCount(node->getSecondChild()->getFirstChild());
-         }
-      }
-
    // The child contains an inline test.
    //
    TR::Node *testNode    = node->getFirstChild();
@@ -845,8 +817,7 @@ TR::Register *J9::X86::AMD64::TreeEvaluator::conditionalHelperEvaluator(TR::Node
    //
    // The reference counts will be decremented when the call node is evaluated.
    //
-   if (JVMPI_HOOKS_WITHOUT_SNIPPETS &&
-       (node->getOpCodeValue() == TR::MethodEnterHook || node->getOpCodeValue() == TR::MethodExitHook))
+   if (node->getOpCodeValue() == TR::MethodEnterHook || node->getOpCodeValue() == TR::MethodExitHook)
       {
       TR::Node *callNode = node->getSecondChild();
 
@@ -904,8 +875,7 @@ TR::Register *J9::X86::AMD64::TreeEvaluator::conditionalHelperEvaluator(TR::Node
 
    TR::Instruction *startInstruction = generateLabelInstruction(LABEL, node, startLabel, cg);
 
-   if (JVMPI_HOOKS_WITHOUT_SNIPPETS &&
-       (node->getOpCodeValue() == TR::MethodEnterHook || node->getOpCodeValue() == TR::MethodExitHook))
+   if (node->getOpCodeValue() == TR::MethodEnterHook || node->getOpCodeValue() == TR::MethodExitHook)
       {
       TR::Node *callNode = node->getSecondChild();
 
@@ -922,7 +892,6 @@ TR::Register *J9::X86::AMD64::TreeEvaluator::conditionalHelperEvaluator(TR::Node
       //
       TR::Machine *machine = cg->machine();
       TR::RegisterDependencyConditions  *postConditions = new (cg->trHeapMemory()) TR::RegisterDependencyConditions((uint8_t)0, TR::RealRegister::NumRegisters, cg->trMemory());
-      TR::Compilation *comp = cg->comp();
       if (thisReg)
          postConditions->addPostCondition(thisReg, TR::RealRegister::NoReg, cg);
 
@@ -979,7 +948,8 @@ TR::Register* J9::X86::TreeEvaluator::performHeapLoadWithReadBarrier(TR::Node* n
    TR_ASSERT_FATAL(0, "Concurrent Scavenger not supported.");
    return NULL;
 #else
-   bool use64BitClasses = cg->comp()->target().is64Bit() && !cg->comp()->useCompressedPointers();
+   TR::Compilation *comp = cg->comp();
+   bool use64BitClasses = comp->target().is64Bit() && !comp->useCompressedPointers();
 
    TR::MemoryReference* sourceMR = generateX86MemoryReference(node, cg);
    TR::Register* address = TR::TreeEvaluator::loadMemory(node, sourceMR, TR_RematerializableLoadEffectiveAddress, false, cg);
@@ -1015,16 +985,17 @@ TR::Register* J9::X86::TreeEvaluator::performHeapLoadWithReadBarrier(TR::Node* n
          deps->addPostCondition(address, TR::RealRegister::NoReg, cg);
 
          generateLabelInstruction(LABEL, node, begLabel, cg);
-         generateRegMemInstruction(CMPRegMem(use64BitClasses), node, object, generateX86MemoryReference(cg->getVMThreadRegister(), cg->comp()->fej9()->thisThreadGetEvacuateBaseAddressOffset(), cg), cg);
+         generateRegMemInstruction(CMPRegMem(use64BitClasses), node, object, generateX86MemoryReference(cg->getVMThreadRegister(), comp->fej9()->thisThreadGetEvacuateBaseAddressOffset(), cg), cg);
          generateLabelInstruction(JAE4, node, rdbarLabel, cg);
          {
          TR_OutlinedInstructionsGenerator og(rdbarLabel, node, cg);
-         generateRegMemInstruction(CMPRegMem(use64BitClasses), node, object, generateX86MemoryReference(cg->getVMThreadRegister(), cg->comp()->fej9()->thisThreadGetEvacuateTopAddressOffset(), cg), cg);
+         generateRegMemInstruction(CMPRegMem(use64BitClasses), node, object, generateX86MemoryReference(cg->getVMThreadRegister(), comp->fej9()->thisThreadGetEvacuateTopAddressOffset(), cg), cg);
          generateLabelInstruction(JA4, node, endLabel, cg);
          generateMemRegInstruction(SMemReg(), node, generateX86MemoryReference(cg->getVMThreadRegister(), offsetof(J9VMThread, floatTemp1), cg), address, cg);
          generateHelperCallInstruction(node, TR_softwareReadBarrier, NULL, cg);
          generateRegMemInstruction(LRegMem(use64BitClasses), node, object, generateX86MemoryReference(address, 0, cg), cg);
          generateLabelInstruction(JMP4, node, endLabel, cg);
+         og.endOutlinedInstructionSequence();
          }
          generateLabelInstruction(LABEL, node, endLabel, deps, cg);
          }
@@ -1047,7 +1018,6 @@ TR::Register *J9::X86::TreeEvaluator::writeBarrierEvaluator(TR::Node *node, TR::
    TR::Node               *sourceObject;
    TR::Compilation *comp = cg->comp();
    bool                   usingCompressedPointers = false;
-   bool                   usingLowMemHeap = false;
    bool                   useShiftedOffsets = (TR::Compiler->om.compressedReferenceShiftOffset() != 0);
 
    if (node->getOpCodeValue() == TR::awrtbari)
@@ -1058,50 +1028,17 @@ TR::Register *J9::X86::TreeEvaluator::writeBarrierEvaluator(TR::Node *node, TR::
           (node->getSymbolReference()->getSymbol()->getDataType() == TR::Address) &&
           (node->getSecondChild()->getDataType() != TR::Address))
          {
-         // pattern match the sequence
-         //     iwrtbar f     iwrtbar f         <- node
-         //       aload O       aload O
-         //     value           l2i
-         //                       lshr
-         //                         lsub        <- translatedNode
-         //                           a2l
-         //                             value   <- sourceObject
-         //                           lconst HB
-         //                         iconst shftKonst
-         //
-         // -or- if the field is known to be null or usingLowMemHeap
-         // iwrtbar f
-         //    aload O
-         //    l2i
-         //      a2l
-         //        value  <- sourceObject
-         //
-         TR::Node *translatedNode = sourceObject;
-         if (translatedNode->getOpCode().isConversion())
-            translatedNode = translatedNode->getFirstChild();
-         if (translatedNode->getOpCode().isRightShift()) // optional
-            translatedNode = translatedNode->getFirstChild();
+         usingCompressedPointers = true;
 
-         if (TR::Compiler->vm.heapBaseAddress() == 0 ||
-             sourceObject->isNull())
-            usingLowMemHeap = true;
-
-         if (translatedNode->getOpCode().isSub() || usingLowMemHeap)
-            usingCompressedPointers = true;
-
-         if (usingCompressedPointers)
+         if (useShiftedOffsets)
             {
-            if (!usingLowMemHeap || useShiftedOffsets)
-               {
-               while ((sourceObject->getNumChildren() > 0) &&
-                        (sourceObject->getOpCodeValue() != TR::a2l))
-                  sourceObject = sourceObject->getFirstChild();
-               if (sourceObject->getOpCodeValue() == TR::a2l)
+            while ((sourceObject->getNumChildren() > 0) && (sourceObject->getOpCodeValue() != TR::a2l))
                sourceObject = sourceObject->getFirstChild();
-               // this is required so that different registers are
-               // allocated for the actual store and translated values
-               sourceObject->incReferenceCount();
-               }
+            if (sourceObject->getOpCodeValue() == TR::a2l)
+               sourceObject = sourceObject->getFirstChild();
+            // this is required so that different registers are
+            // allocated for the actual store and translated values
+            sourceObject->incReferenceCount();
             }
          }
       }
@@ -1113,7 +1050,7 @@ TR::Register *J9::X86::TreeEvaluator::writeBarrierEvaluator(TR::Node *node, TR::
       }
 
    TR_X86ScratchRegisterManager *scratchRegisterManager =
-      cg->generateScratchRegisterManager(cg->comp()->target().is64Bit() ? 15 : 7);
+      cg->generateScratchRegisterManager(comp->target().is64Bit() ? 15 : 7);
 
    TR::TreeEvaluator::VMwrtbarWithStoreEvaluator(
       node,
@@ -1172,7 +1109,7 @@ TR::Register *J9::X86::TreeEvaluator::asynccheckEvaluator(TR::Node *node, TR::Co
 
       TR::MemoryReference *mr = generateX86MemoryReference(compareNode->getFirstChild(), cg);
       if ((secondChild->getRegister() != NULL) ||
-          (cg->comp()->target().is64Bit() && !IS_32BIT_SIGNED(secondChild->getLongInt())))
+          (comp->target().is64Bit() && !IS_32BIT_SIGNED(secondChild->getLongInt())))
          {
          TR::Register *valueReg = cg->evaluate(secondChild);
          TR::X86CheckAsyncMessagesMemRegInstruction *ins =
@@ -1204,8 +1141,9 @@ TR::Register *J9::X86::TreeEvaluator::asynccheckEvaluator(TR::Node *node, TR::Co
 
    {
    TR_OutlinedInstructionsGenerator og(snippetLabel, node, cg);
-   generateImmSymInstruction(CALLImm4, node, (uintptrj_t)node->getSymbolReference()->getMethodAddress(), node->getSymbolReference(), cg)->setNeedsGCMap(0xFF00FFFF);
+   generateImmSymInstruction(CALLImm4, node, (uintptr_t)node->getSymbolReference()->getMethodAddress(), node->getSymbolReference(), cg)->setNeedsGCMap(0xFF00FFFF);
    generateLabelInstruction(JMP4, node, endControlFlowLabel, cg);
+   og.endOutlinedInstructionSequence();
    }
 
    endControlFlowLabel->setEndInternalControlFlow();
@@ -1245,23 +1183,25 @@ TR::Register *J9::X86::TreeEvaluator::newEvaluator(TR::Node *node, TR::CodeGener
       bool spillFPRegs = (comp->canAllocateInlineOnStack(node, classInfo) <= 0);
       targetRegister = TR::TreeEvaluator::performHelperCall(node, NULL, TR::acall, spillFPRegs, cg);
       }
+   else if (cg->canEmitBreakOnDFSet())
+      {
+      // Check DF flag after inline new
+      generateBreakOnDFSet(cg);
+      }
+
    return targetRegister;
    }
 
 TR::Register *J9::X86::TreeEvaluator::multianewArrayEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-   static char *useDirectHelperCall = feGetEnv("TR_MultiANewArrayEvaluatorUseDirectCall");
-
    TR::Node *firstChild = node->getFirstChild();
    TR::Node *secondChild = node->getSecondChild();
    TR::Node *thirdChild = node->getThirdChild();
 
-   if (useDirectHelperCall || !secondChild->getOpCode().isLoadConst() || secondChild->getInt()!=2)
-      return TR::TreeEvaluator::performHelperCall(node, NULL, TR::acall, true, cg);
-
    // 2-dimensional MultiANewArray
    TR::Compilation *comp = cg->comp();
-   TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
+   TR_ASSERT_FATAL(comp->target().is64Bit(), "multianewArrayEvaluator is only supported on 64-bit JVMs!");
+   TR_J9VMBase *fej9 = static_cast<TR_J9VMBase *>(comp->fe());
 
    TR::Register *dimsPtrReg       = NULL;
    TR::Register *dimReg      = NULL;
@@ -1290,12 +1230,13 @@ TR::Register *J9::X86::TreeEvaluator::multianewArrayEvaluator(TR::Node *node, TR
    startLabel->setStartInternalControlFlow();
    fallThru->setEndInternalControlFlow();
 
-   TR::LabelSymbol *failLabel = generateLabelSymbol(cg);
+   TR::LabelSymbol *oolFailLabel = generateLabelSymbol(cg);
+   TR::LabelSymbol *oolJumpPoint = generateLabelSymbol(cg);
 
    generateLabelInstruction(LABEL, node, startLabel, cg);
 
    // Generate the heap allocation, and the snippet that will handle heap overflow.
-   TR_OutlinedInstructions *outlinedHelperCall = new (cg->trHeapMemory()) TR_OutlinedInstructions(node, TR::acall, targetReg, failLabel, fallThru, cg);
+   TR_OutlinedInstructions *outlinedHelperCall = new (cg->trHeapMemory()) TR_OutlinedInstructions(node, TR::acall, targetReg, oolFailLabel, fallThru, cg);
    cg->getOutlinedInstructionsList().push_front(outlinedHelperCall);
 
    dimReg = cg->evaluate(secondChild);
@@ -1306,12 +1247,15 @@ TR::Register *J9::X86::TreeEvaluator::multianewArrayEvaluator(TR::Node *node, TR
 
    generateRegMemInstruction(L4RegMem, node, secondDimLenReg,
                              generateX86MemoryReference(dimsPtrReg, 0, cg), cg);
-   generateRegMemInstruction(L4RegMem, node, firstDimLenReg,
+   // Load the 32-bit length value as a 64-bit value so that the top half of the register
+   // can be zeroed out. This will allow us to treat the value as 64-bit when performing
+   // calculations later on.
+   generateRegMemInstruction(MOVSXReg8Mem4, node, firstDimLenReg,
                              generateX86MemoryReference(dimsPtrReg, 4, cg), cg);
 
    generateRegImmInstruction(CMP4RegImm4, node, secondDimLenReg, 0, cg);
 
-   generateLabelInstruction(JNE4, node, failLabel, cg);
+   generateLabelInstruction(JNE4, node, oolJumpPoint, cg);
    // Second Dim length is 0
 
    generateRegImmInstruction(CMP4RegImm4, node, firstDimLenReg, 0, cg);
@@ -1322,11 +1266,11 @@ TR::Register *J9::X86::TreeEvaluator::multianewArrayEvaluator(TR::Node *node, TR
    generateRegMemInstruction(LRegMem(), node, targetReg, generateX86MemoryReference(vmThreadReg, offsetof(J9VMThread, heapAlloc), cg), cg);
    generateRegMemInstruction(LEARegMem(), node, temp1Reg, generateX86MemoryReference(targetReg, zeroArraySize, cg), cg);
    generateRegMemInstruction(CMPRegMem(), node, temp1Reg, generateX86MemoryReference(vmThreadReg, offsetof(J9VMThread, heapTop), cg), cg);
-   generateLabelInstruction(JA4, node, failLabel, cg);
+   generateLabelInstruction(JA4, node, oolJumpPoint, cg);
    generateMemRegInstruction(SMemReg(), node, generateX86MemoryReference(vmThreadReg, offsetof(J9VMThread, heapAlloc), cg), temp1Reg, cg);
 
    // Init class
-   bool use64BitClasses = cg->comp()->target().is64Bit() && !TR::Compiler->om.generateCompressedObjectHeaders();
+   bool use64BitClasses = comp->target().is64Bit() && !TR::Compiler->om.generateCompressedObjectHeaders();
    generateMemRegInstruction(SMemReg(use64BitClasses), node, generateX86MemoryReference(targetReg, TR::Compiler->om.offsetOfObjectVftField(), cg), classReg, cg);
 
    // Init size and '0' fields to 0
@@ -1341,46 +1285,32 @@ TR::Register *J9::X86::TreeEvaluator::multianewArrayEvaluator(TR::Node *node, TR
    generateRegMemInstruction(LRegMem(), node, componentClassReg,
              generateX86MemoryReference(classReg, offsetof(J9ArrayClass, componentType), cg), cg);
 
-   int32_t elementSize;
+   int32_t elementSize = TR::Compiler->om.sizeofReferenceField();
 
-   if (comp->useCompressedPointers())
-      elementSize = TR::Compiler->om.sizeofReferenceField();
-   else
-      elementSize = (int32_t)(TR::Compiler->om.sizeofReferenceAddress());
-
-   uintptrj_t maxObjectSize = cg->getMaxObjectSizeGuaranteedNotToOverflow();
-   uintptrj_t maxObjectSizeInElements = maxObjectSize / elementSize;
-
-   if (cg->comp()->target().is64Bit() && !(maxObjectSizeInElements > 0 && maxObjectSizeInElements <= (uintptrj_t)INT_MAX))
-      {
-      generateRegImm64Instruction(MOV8RegImm64, node, temp1Reg, maxObjectSizeInElements, cg);
-      generateRegRegInstruction(CMP8RegReg, node, firstDimLenReg, temp1Reg, cg);
-      }
-   else
-      {
-      generateRegImmInstruction(CMPRegImm4(), node, firstDimLenReg, (int32_t)maxObjectSizeInElements, cg);
-      }
+   uintptr_t maxObjectSize = cg->getMaxObjectSizeGuaranteedNotToOverflow();
+   uintptr_t maxObjectSizeInElements = maxObjectSize / elementSize;
+   generateRegImmInstruction(CMPRegImm4(), node, firstDimLenReg, static_cast<int32_t>(maxObjectSizeInElements), cg);
 
    // Must be an unsigned comparison on sizes.
-   generateLabelInstruction(JAE4, node, failLabel, cg);
+   generateLabelInstruction(JAE4, node, oolJumpPoint, cg);
 
    generateRegRegInstruction(MOVRegReg(), node, temp1Reg, firstDimLenReg, cg);
 
-   int32_t round = (elementSize >= TR::Compiler->om.objectAlignmentInBytes())? 0 : TR::Compiler->om.objectAlignmentInBytes();
-   int32_t disp32 = round ? (round-1) : 0;
+   int32_t elementSizeAligned = OMR::align(elementSize, TR::Compiler->om.objectAlignmentInBytes());
+   int32_t alignmentCompensation = (elementSize == elementSizeAligned) ? 0 : elementSizeAligned - 1;
 
-   uint8_t shiftVal = TR::MemoryReference::convertMultiplierToStride(elementSize);
-   generateRegImmInstruction(SHLRegImm1(), node, temp1Reg, shiftVal, cg);
-   generateRegImmInstruction(ADDRegImm4(), node, temp1Reg, TR::Compiler->om.contiguousArrayHeaderSizeInBytes()+disp32, cg);
+   TR_ASSERT_FATAL(elementSize <= 8, "multianewArrayEvaluator - elementSize cannot be greater than 8!");
+   generateRegImmInstruction(SHLRegImm1(), node, temp1Reg, TR::MemoryReference::convertMultiplierToStride(elementSize), cg);
+   generateRegImmInstruction(ADDRegImm4(), node, temp1Reg, TR::Compiler->om.contiguousArrayHeaderSizeInBytes()+alignmentCompensation, cg);
 
-   if (round)
+   if (alignmentCompensation != 0)
       {
-      generateRegImmInstruction(ANDRegImm4(), node, temp1Reg, -round, cg);
+      generateRegImmInstruction(ANDRegImm4(), node, temp1Reg, -elementSizeAligned, cg);
       }
 
    // temp2Reg = firstDimLenReg * 16 (discontiguousArrayHeaderSizeInBytes)
-   generateRegRegInstruction(MOVRegReg(),  node, temp2Reg, firstDimLenReg, cg);
-   generateRegImmInstruction(SHLRegImm1(), node, temp2Reg, 4, cg);
+   TR_ASSERT_FATAL(zeroArraySize >= 0 && zeroArraySize <= 127, "discontiguousArrayHeaderSizeInBytes cannot be > 127 for IMulRegRegImms instruction");
+   generateRegRegImmInstruction(IMULRegRegImm4(), node, temp2Reg, firstDimLenReg, zeroArraySize, cg);
 
    // temp2Reg = temp2Reg + temp1Reg
    generateRegRegInstruction(ADDRegReg(), node, temp2Reg, temp1Reg, cg);
@@ -1390,7 +1320,7 @@ TR::Register *J9::X86::TreeEvaluator::multianewArrayEvaluator(TR::Node *node, TR
    generateRegRegInstruction(ADDRegReg(), node, temp2Reg, targetReg, cg);
 
    generateRegMemInstruction(CMPRegMem(), node, temp2Reg, generateX86MemoryReference(vmThreadReg, offsetof(J9VMThread, heapTop), cg), cg);
-   generateLabelInstruction(JA4, node, failLabel, cg);
+   generateLabelInstruction(JA4, node, oolJumpPoint, cg);
    generateMemRegInstruction(SMemReg(), node, generateX86MemoryReference(vmThreadReg, offsetof(J9VMThread, heapAlloc), cg), temp2Reg, cg);
 
    //init 1st dim array class field
@@ -1404,13 +1334,6 @@ TR::Register *J9::X86::TreeEvaluator::multianewArrayEvaluator(TR::Node *node, TR
    // temp1 points to 1st dim array past header
    generateRegMemInstruction(LEARegMem(), node, temp1Reg, generateX86MemoryReference(targetReg, TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), cg), cg);
 
-
-   uintptrj_t heapBase = TR::Compiler->vm.heapBaseAddress();
-   bool useRegForHeapBase = cg->comp()->target().is64Bit() && comp->useCompressedPointers() &&
-                           (heapBase != 0) && (!IS_32BIT_SIGNED(heapBase) || TR::Compiler->om.nativeAddressesCanChangeSize());
-   if (useRegForHeapBase)
-      generateRegImm64Instruction(MOV8RegImm64, node, secondDimLenReg, heapBase, cg);
-
    //loop start
    generateLabelInstruction(LABEL, node, loopLabel, cg);
    // Init 2nd dim element's class
@@ -1419,21 +1342,10 @@ TR::Register *J9::X86::TreeEvaluator::multianewArrayEvaluator(TR::Node *node, TR
    generateMemImmInstruction(S4MemImm4, node, generateX86MemoryReference(temp2Reg, fej9->getOffsetOfContiguousArraySizeField(), cg), 0, cg);
    generateMemImmInstruction(S4MemImm4, node, generateX86MemoryReference(temp2Reg, fej9->getOffsetOfDiscontiguousArraySizeField(), cg), 0, cg);
    // Store 2nd dim element into 1st dim array slot, compress temp2 if needed
-   if (cg->comp()->target().is64Bit() && comp->useCompressedPointers())
+   if (comp->target().is64Bit() && comp->useCompressedPointers())
       {
       int32_t shiftAmount = TR::Compiler->om.compressedReferenceShift();
       generateRegRegInstruction(MOVRegReg(), node, temp3Reg, temp2Reg, cg);
-      if (heapBase != 0)
-         {
-         if (useRegForHeapBase)
-            {
-            generateRegRegInstruction(SUBRegReg(), node, temp3Reg, secondDimLenReg, cg);
-            }
-         else
-            {
-            generateRegImmInstruction(SUBRegImm4(), node, temp3Reg, (int32_t)heapBase, cg);
-            }
-         }
       if (shiftAmount != 0)
          {
          generateRegImmInstruction(SHRRegImm1(), node, temp3Reg, shiftAmount, cg);
@@ -1451,6 +1363,7 @@ TR::Register *J9::X86::TreeEvaluator::multianewArrayEvaluator(TR::Node *node, TR
 
    generateRegInstruction(DEC4Reg, node, firstDimLenReg, cg);
    generateLabelInstruction(JA4, node, loopLabel, cg);
+   generateLabelInstruction(JMP4, node, fallThru, cg);
 
    TR::RegisterDependencyConditions  *deps = generateRegisterDependencyConditions((uint8_t)0, 13, cg);
 
@@ -1485,6 +1398,9 @@ TR::Register *J9::X86::TreeEvaluator::multianewArrayEvaluator(TR::Node *node, TR
 
    deps->stopAddingConditions();
 
+   generateLabelInstruction(LABEL, node, oolJumpPoint, cg);
+   generateLabelInstruction(JMP4, node, oolFailLabel, cg);
+
    generateLabelInstruction(LABEL, node, fallThru, deps, cg);
 
    // Copy the newly allocated object into a collected reference register now that it is a valid object.
@@ -1515,6 +1431,11 @@ TR::Register *J9::X86::TreeEvaluator::multianewArrayEvaluator(TR::Node *node, TR
 
 TR::Register *J9::X86::TreeEvaluator::arraycopyEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
+   if (cg->canEmitBreakOnDFSet())
+      generateBreakOnDFSet(cg);
+
+   TR::Compilation *comp = cg->comp();
+
    if (!node->isReferenceArrayCopy())
       {
       return OMR::TreeEvaluatorConnector::arraycopyEvaluator(node, cg);
@@ -1526,7 +1447,7 @@ TR::Register *J9::X86::TreeEvaluator::arraycopyEvaluator(TR::Node *node, TR::Cod
    auto dstReg    = cg->evaluate(node->getChild(3));
    auto sizeReg   = cg->evaluate(node->getChild(4));
 
-   if (cg->comp()->target().is64Bit() && !TR::TreeEvaluator::getNodeIs64Bit(node->getChild(4), cg))
+   if (comp->target().is64Bit() && !TR::TreeEvaluator::getNodeIs64Bit(node->getChild(4), cg))
       {
       generateRegRegInstruction(MOVZXReg8Reg4, node, sizeReg, sizeReg, cg);
       }
@@ -1548,13 +1469,13 @@ TR::Register *J9::X86::TreeEvaluator::arraycopyEvaluator(TR::Node *node, TR::Cod
 
       auto snippetLabel = generateLabelSymbol(cg);
       auto instr = generateLabelInstruction(JNE4, node, snippetLabel, cg); // ReferenceArrayCopy set ZF when succeed.
-      auto snippet = new (cg->trHeapMemory()) TR::X86CheckFailureSnippet(cg, cg->symRefTab()->findOrCreateRuntimeHelper(TR_arrayStoreException, false, false, false),
+      auto snippet = new (cg->trHeapMemory()) TR::X86CheckFailureSnippet(cg, cg->symRefTab()->findOrCreateRuntimeHelper(TR_arrayStoreException),
                                                                          snippetLabel, instr, false);
       cg->addSnippet(snippet);
       }
    else
       {
-      bool use64BitClasses = cg->comp()->target().is64Bit() && !TR::Compiler->om.generateCompressedObjectHeaders();
+      bool use64BitClasses = comp->target().is64Bit() && !TR::Compiler->om.generateCompressedObjectHeaders();
 
       auto RSI = cg->allocateRegister();
       auto RDI = cg->allocateRegister();
@@ -1585,11 +1506,11 @@ TR::Register *J9::X86::TreeEvaluator::arraycopyEvaluator(TR::Node *node, TR::Cod
 
       if (TR::Compiler->om.readBarrierType() != gc_modron_readbar_none)
          {
-         bool use64BitClasses = cg->comp()->target().is64Bit() && !cg->comp()->useCompressedPointers();
+         bool use64BitClasses = comp->target().is64Bit() && !comp->useCompressedPointers();
 
          TR::LabelSymbol* rdbarLabel = generateLabelSymbol(cg);
          // EvacuateTopAddress == 0 means Concurrent Scavenge is inactive
-         generateMemImmInstruction(CMPMemImms(use64BitClasses), node, generateX86MemoryReference(cg->getVMThreadRegister(), cg->comp()->fej9()->thisThreadGetEvacuateTopAddressOffset(), cg), 0, cg);
+         generateMemImmInstruction(CMPMemImms(use64BitClasses), node, generateX86MemoryReference(cg->getVMThreadRegister(), comp->fej9()->thisThreadGetEvacuateTopAddressOffset(), cg), 0, cg);
          generateLabelInstruction(JNE4, node, rdbarLabel, cg);
 
          TR_OutlinedInstructionsGenerator og(rdbarLabel, node, cg);
@@ -1597,6 +1518,7 @@ TR::Register *J9::X86::TreeEvaluator::arraycopyEvaluator(TR::Node *node, TR::Cod
          generateMemRegInstruction(SMemReg(), node, generateX86MemoryReference(cg->getVMThreadRegister(), offsetof(J9VMThread, floatTemp2), cg), dstObjReg, cg);
          generateHelperCallInstruction(node, TR_referenceArrayCopy, NULL, cg)->setNeedsGCMap(0xFF00FFFF);
          generateLabelInstruction(JMP4, node, endLabel, cg);
+         og.endOutlinedInstructionSequence();
          }
       if (!node->isForwardArrayCopy())
          {
@@ -1615,6 +1537,7 @@ TR::Register *J9::X86::TreeEvaluator::arraycopyEvaluator(TR::Node *node, TR::Cod
          generateInstruction(use64BitClasses ? REPMOVSQ : REPMOVSD, node, cg);
          generateInstruction(CLD, node, cg);
          generateLabelInstruction(JMP4, node, endLabel, cg);
+         og.endOutlinedInstructionSequence();
          }
       generateRegImmInstruction(SHRRegImm1(), node, RCX, use64BitClasses ? 3 : 2, cg);
       generateInstruction(use64BitClasses ? REPMOVSQ : REPMOVSD, node, cg);
@@ -1731,7 +1654,7 @@ TR::Register *J9::X86::TreeEvaluator::evaluateNULLCHKWithPossibleResolve(
    //
    TR::Instruction *appendTo = 0;
 
-   if (opCode.isLoadVar() || (cg->comp()->target().is64Bit() && opCode.getOpCodeValue()==TR::l2i))
+   if (opCode.isLoadVar() || (comp->target().is64Bit() && opCode.getOpCodeValue()==TR::l2i))
       {
       TR::SymbolReference *symRef = NULL;
 
@@ -1868,7 +1791,7 @@ TR::Register *J9::X86::TreeEvaluator::evaluateNULLCHKWithPossibleResolve(
             {
             needExplicitCheck = false;
             TR::MemoryReference *memRef = NULL;
-            if (TR::Compiler->om.compressedReferenceShift() > 0 
+            if (TR::Compiler->om.compressedReferenceShift() > 0
                 && firstChild->getType() == TR::Address
                 && firstChild->getOpCode().hasSymbolReference()
                 && firstChild->getSymbol()->isCollectedReference())
@@ -1932,7 +1855,7 @@ TR::Register *J9::X86::TreeEvaluator::evaluateNULLCHKWithPossibleResolve(
       appendTo->setLiveLocals(cg->getLiveLocals());
 
       TR::Snippet *snippet;
-      if (opCode.isCall() || !needResolution || cg->comp()->target().is64Bit()) //TODO:AMD64: Implement the "withresolve" version
+      if (opCode.isCall() || !needResolution || comp->target().is64Bit()) //TODO:AMD64: Implement the "withresolve" version
          {
          snippet = new (cg->trHeapMemory()) TR::X86CheckFailureSnippet(cg, node->getSymbolReference(),
                                                                  snippetLabel, appendTo);
@@ -1999,25 +1922,7 @@ TR::Register *J9::X86::TreeEvaluator::evaluateNULLCHKWithPossibleResolve(
    //
    if (needLateEvaluation)
       {
-      if (comp->useCompressedPointers())
-         {
-         // for stores under NULLCHKs, artificially bump
-         // down the reference count before evaluation (since stores
-         // return null as registers)
-         //
-         bool fixRefCount = false;
-         if (node->getFirstChild()->getOpCode().isStoreIndirect() &&
-               node->getFirstChild()->getReferenceCount() > 1)
-            {
-            node->getFirstChild()->decReferenceCount();
-            fixRefCount = true;
-            }
-         cg->evaluate(node->getFirstChild());
-         if (fixRefCount)
-            node->getFirstChild()->incReferenceCount();
-         }
-      else
-         cg->evaluate(firstChild);
+      cg->evaluate(node->getFirstChild());
       }
    else if (needExplicitCheck)
       {
@@ -2103,8 +2008,8 @@ TR::Register *J9::X86::TreeEvaluator::DIVCHKEvaluator(TR::Node *node, TR::CodeGe
    else
       hasConversion = false;
 
-   bool use64BitRegisters =  cg->comp()->target().is64Bit() && divisionNode->getOpCode().isLong();
-   bool useRegisterPairs  = cg->comp()->target().is32Bit() && divisionNode->getOpCode().isLong();
+   bool use64BitRegisters =  comp->target().is64Bit() && divisionNode->getOpCode().isLong();
+   bool useRegisterPairs  = comp->target().is32Bit() && divisionNode->getOpCode().isLong();
 
    // Not all targets support implicit division checks, so we generate explicit
    // tests and snippets to jump to.
@@ -2600,50 +2505,18 @@ TR::Register *J9::X86::TreeEvaluator::ArrayStoreCHKEvaluator(TR::Node *node, TR:
 
    if (comp->useCompressedPointers() && firstChild->getOpCode().isIndirect())
       {
-      // pattern match the sequence
-      //     iistore f     iistore f         <- node
-      //       aload O       aload O
-      //     value           l2i
-      //                       lshr
-      //                         lsub
-      //                           a2l
-      //                             value   <- sourceChild
-      //                           lconst HB
-      //                         iconst shftKonst
-      //
-      // -or- if the field is known to be null or usingLowMemHeap
-      // iistore f
-      //    aload O
-      //    l2i
-      //      a2l
-      //        value  <- valueChild
-      //
-      TR::Node *translatedNode = sourceChild;
-      if (translatedNode->getOpCode().isConversion())
-         translatedNode = translatedNode->getFirstChild();
-      if (translatedNode->getOpCode().isRightShift()) //optional
-         translatedNode = translatedNode->getFirstChild();
+      usingLowMemHeap = true;
+      usingCompressedPointers = true;
 
-      if ((TR::Compiler->vm.heapBaseAddress() == 0) ||
-            sourceChild->isNull())
-         usingLowMemHeap = true;
-
-      if (translatedNode->getOpCode().isSub() || usingLowMemHeap)
-         usingCompressedPointers = true;
-
-      if (usingCompressedPointers)
+      if (useShiftedOffsets)
          {
-         if (!usingLowMemHeap || useShiftedOffsets)
-            {
-            while ((sourceChild->getNumChildren() > 0) &&
-                     (sourceChild->getOpCodeValue() != TR::a2l))
-               sourceChild = sourceChild->getFirstChild();
-            if (sourceChild->getOpCodeValue() == TR::a2l)
-               sourceChild = sourceChild->getFirstChild();
-            // this is required so that different registers are
-            // allocated for the actual store and translated values
-            sourceChild->incReferenceCount();
-            }
+         while ((sourceChild->getNumChildren() > 0) && (sourceChild->getOpCodeValue() != TR::a2l))
+            sourceChild = sourceChild->getFirstChild();
+         if (sourceChild->getOpCodeValue() == TR::a2l)
+            sourceChild = sourceChild->getFirstChild();
+         // this is required so that different registers are
+         // allocated for the actual store and translated values
+         sourceChild->incReferenceCount();
          }
       }
 
@@ -2666,7 +2539,7 @@ TR::Register *J9::X86::TreeEvaluator::ArrayStoreCHKEvaluator(TR::Node *node, TR:
    TR::Register *sourceRegister = cg->evaluate(sourceChild);
 
    TR_X86ScratchRegisterManager *scratchRegisterManager =
-      cg->generateScratchRegisterManager(cg->comp()->target().is64Bit() ? 15 : 7);
+      cg->generateScratchRegisterManager(comp->target().is64Bit() ? 15 : 7);
 
    TR::Register *compressedRegister = NULL;
    if (usingCompressedPointers)
@@ -2837,6 +2710,7 @@ TR::Register *J9::X86::TreeEvaluator::ArrayStoreCHKEvaluator(TR::Node *node, TR:
             generateMemRegInstruction(SMemReg(), node, tempMR2, sourceRegister, cg);
 
          generateLabelInstruction(JMP4, node, doneLabel, cg);
+         og.endOutlinedInstructionSequence();
          }
       else
          {
@@ -2898,7 +2772,7 @@ TR::Register *J9::X86::TreeEvaluator::ArrayStoreCHKEvaluator(TR::Node *node, TR:
          deps->unionPostCondition(tempMR->getIndexRegister(), TR::RealRegister::NoReg, cg);
          }
 
-      if (cg->comp()->target().is64Bit())
+      if (comp->target().is64Bit())
          {
          TR::Register *addressRegister =tempMR->getAddressRegister();
          if (addressRegister && addressRegister != destinationRegister)
@@ -2908,7 +2782,7 @@ TR::Register *J9::X86::TreeEvaluator::ArrayStoreCHKEvaluator(TR::Node *node, TR:
          }
       }
 
-   if (tempMR2 && cg->comp()->target().is64Bit())
+   if (tempMR2 && comp->target().is64Bit())
       {
       TR::Register *addressRegister = tempMR2->getAddressRegister();
       if (addressRegister && addressRegister != destinationRegister)
@@ -2954,6 +2828,7 @@ TR::Register *J9::X86::TreeEvaluator::ArrayCHKEvaluator(TR::Node *node, TR::Code
 //
 TR::Register *J9::X86::TreeEvaluator::BNDCHKwithSpineCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
+   TR::Compilation *comp = cg->comp();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg->fe());
    bool needsBoundCheck = (node->getOpCodeValue() == TR::BNDCHKwithSpineCHK) ? true : false;
 
@@ -2993,7 +2868,7 @@ TR::Register *J9::X86::TreeEvaluator::BNDCHKwithSpineCHKEvaluator(TR::Node *node
       if (!valueChild->getOpCode().isLoadConst() ||
           (valueChild->getOpCode().isLoadConst() &&
           ((valueChild->getDataType() == TR::Float) || (valueChild->getDataType() == TR::Double) ||
-           (cg->comp()->target().is64Bit() && !IS_32BIT_SIGNED(valueChild->getLongInt())))))
+           (comp->target().is64Bit() && !IS_32BIT_SIGNED(valueChild->getLongInt())))))
          {
          cg->evaluate(valueChild);
          }
@@ -3249,7 +3124,7 @@ TR::Register *J9::X86::TreeEvaluator::barrierFenceEvaluator(TR::Node *node, TR::
    else
       {
       TR::RealRegister *stackReg = cg->machine()->getRealRegister(TR::RealRegister::esp);
-      TR::MemoryReference *mr = generateX86MemoryReference(stackReg, intptrj_t(0), cg);
+      TR::MemoryReference *mr = generateX86MemoryReference(stackReg, intptr_t(0), cg);
 
       mr->setRequiresLockPrefix();
       generateMemImmInstruction(OR4MemImms, node, mr, 0, cg);
@@ -3311,56 +3186,6 @@ TR::Register *J9::X86::TreeEvaluator::readbarEvaluator(TR::Node *node, TR::CodeG
    cg->decReferenceCount(handleNode);
 
    return handleRegister;
-   }
-
-
-TR::Register *J9::X86::TreeEvaluator::ScopeCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-   {
-   TR_ASSERT(node->getNumChildren() == 1, "ScopeCHK node should have one child");
-   TR::Node *child = node->getChild(0);
-   cg->evaluate(child);
-   cg->decReferenceCount(child);
-   return NULL;
-   }
-
-TR::Register *J9::X86::TreeEvaluator::atccheckEvaluator(TR::Node *node, TR::CodeGenerator *cg)
-   {
-   TR_ASSERT(node->getNumChildren() == 1, "atccheck nodes should have 1 children");
-
-   TR::Node *pendingAIELoad = node->getChild(0);
-   TR_ASSERT(pendingAIELoad->getOpCodeValue() == TR::aload, "atccheck first child should be a compare test");
-
-   TR::LabelSymbol *startLabel = generateLabelSymbol(cg);
-   TR::LabelSymbol *doneLabel  = generateLabelSymbol(cg);
-
-   startLabel->setStartInternalControlFlow();
-   doneLabel->setEndInternalControlFlow();
-
-   generateLabelInstruction(LABEL, node, startLabel, cg);
-
-   // if there is no pending AIE, then just branch around the throw
-   TR::Register *pendingAIERegister = cg->evaluate(pendingAIELoad);
-
-   generateRegRegInstruction(TESTRegReg(), node, pendingAIERegister, pendingAIERegister, cg);
-   generateLabelInstruction(JE4, node, doneLabel, cg);
-
-   // here, we've got a pending AIE so that means we're interruptible
-   // so throw the pending AIE here
-   TR::Node *throwCallNode = TR::Node::createWithSymRef(TR::call, 1, 1, pendingAIELoad, node->getSymbolReference());
-   cg->evaluate(throwCallNode);
-
-   TR::Register *vmThreadRegister = cg->getVMThreadRegister();
-
-   TR::RegisterDependencyConditions  *deps = generateRegisterDependencyConditions((uint8_t) 0, 2, cg);
-   deps->addPostCondition(pendingAIERegister, TR::RealRegister::NoReg, cg);
-   deps->addPostCondition(vmThreadRegister, (TR::RealRegister::RegNum)vmThreadRegister->getAssociation(), cg);
-
-   // and we're done
-   generateLabelInstruction(LABEL, node, doneLabel, deps, cg);
-
-   cg->decReferenceCount(pendingAIELoad);
-
-   return NULL;
    }
 
 static
@@ -3695,9 +3520,10 @@ TR::Register *J9::X86::TreeEvaluator::longBitCount(TR::Node *node, TR::CodeGener
 
 inline void generateInlinedCheckCastForDynamicCastClass(TR::Node* node, TR::CodeGenerator* cg)
    {
-   auto use64BitClasses = cg->comp()->target().is64Bit() &&
+   TR::Compilation *comp = cg->comp();
+   auto use64BitClasses = comp->target().is64Bit() &&
                (!TR::Compiler->om.generateCompressedObjectHeaders() ||
-               (cg->comp()->compileRelocatableCode() && cg->comp()->getOption(TR_UseSymbolValidationManager)));
+               (comp->compileRelocatableCode() && comp->getOption(TR_UseSymbolValidationManager)));
    TR::Register *ObjReg = cg->evaluate(node->getFirstChild());
    TR::Register *castClassReg = cg->evaluate(node->getSecondChild());
    TR::Register *temp1Reg = cg->allocateRegister();
@@ -3772,7 +3598,7 @@ inline void generateInlinedCheckCastForDynamicCastClass(TR::Node* node, TR::Code
    // temp2 holds cast class depth
    // class depth mask must be low 16 bits to safely load without the mask.
    static_assert(J9AccClassDepthMask == 0xffff, "J9_JAVA_CLASS_DEPTH_MASK must be 0xffff");
-   generateRegMemInstruction(cg->comp()->target().is64Bit()? MOVZXReg8Mem2 : MOVZXReg4Mem2, node,
+   generateRegMemInstruction(comp->target().is64Bit()? MOVZXReg8Mem2 : MOVZXReg4Mem2, node,
             temp2Reg, generateX86MemoryReference(castClassReg, offsetof(J9Class, classDepthAndFlags), cg), cg);
 
    // cast class depth >= obj class depth, throw
@@ -3790,7 +3616,7 @@ inline void generateInlinedCheckCastForDynamicCastClass(TR::Node* node, TR::Code
    // Since 64-bit is more prevalent, we opt to optimize for 64bit in this case
    generateRegMemInstruction(LRegMem(), node, temp1Reg, generateX86MemoryReference(objClassReg, offsetof(J9Class, superclasses), cg), cg);
    generateRegMemInstruction(CMPRegMem(use64BitClasses), node, castClassReg,
-       generateX86MemoryReference(temp1Reg, temp2Reg, cg->comp()->target().is64Bit()?3:2, cg), cg);
+       generateX86MemoryReference(temp1Reg, temp2Reg, comp->target().is64Bit()?3:2, cg), cg);
    generateLabelInstruction(JNE4, node, throwLabel, cg);
 
    // throw classCastException
@@ -3801,6 +3627,7 @@ inline void generateInlinedCheckCastForDynamicCastClass(TR::Node* node, TR::Code
       auto call = generateHelperCallInstruction(node, TR_throwClassCastException, NULL, cg);
       call->setNeedsGCMap(0xFF00FFFF);
       call->setAdjustsFramePointerBy(-2*(int32_t)sizeof(J9Class*));
+      og.endOutlinedInstructionSequence();
    }
 
    TR::RegisterDependencyConditions  *deps = generateRegisterDependencyConditions((uint8_t)0, 8, cg);
@@ -3838,11 +3665,12 @@ inline void generateInlinedCheckCastForDynamicCastClass(TR::Node* node, TR::Code
 
 inline void generateInlinedCheckCastOrInstanceOfForInterface(TR::Node* node, TR_OpaqueClassBlock* clazz, TR::CodeGenerator* cg, bool isCheckCast)
    {
-   TR_ASSERT(clazz && TR::Compiler->cls.isInterfaceClass(cg->comp(), clazz), "Not a compile-time known Interface.");
+   TR::Compilation *comp = cg->comp();
+   TR_ASSERT(clazz && TR::Compiler->cls.isInterfaceClass(comp, clazz), "Not a compile-time known Interface.");
 
-   auto use64BitClasses = cg->comp()->target().is64Bit() &&
+   auto use64BitClasses = comp->target().is64Bit() &&
                              (!TR::Compiler->om.generateCompressedObjectHeaders() ||
-                              (cg->comp()->compileRelocatableCode() && cg->comp()->getOption(TR_UseSymbolValidationManager)));
+                              (comp->compileRelocatableCode() && comp->getOption(TR_UseSymbolValidationManager)));
 
    auto j9class = cg->allocateRegister();
    auto tmp     = use64BitClasses ? cg->allocateRegister() : NULL;
@@ -3881,20 +3709,20 @@ inline void generateInlinedCheckCastOrInstanceOfForInterface(TR::Node* node, TR_
    generateLoadJ9Class(node, j9class, j9class, cg);
 
    // Profiled call site cache
-   uintptrj_t guessClass = 0;
+   uintptr_t guessClass = 0;
    TR_OpaqueClassBlock* guessClassArray[NUM_PICS];
    auto num_PICs = TR::TreeEvaluator::interpreterProfilingInstanceOfOrCheckCastInfo(cg, node, guessClassArray);
-   auto fej9 = (TR_J9VMBase *)(cg->comp()->fe());
+   auto fej9 = (TR_J9VMBase *)(comp->fe());
    for (uint8_t i = 0; i < num_PICs; i++)
       {
       if (fej9->instanceOfOrCheckCast((J9Class*)guessClassArray[i], (J9Class*)clazz))
          {
-         guessClass = (uintptrj_t)guessClassArray[i];
+         guessClass = (uintptr_t)guessClassArray[i];
          }
       }
 
-   if (cg->comp()->compileRelocatableCode() && cg->comp()->getOption(TR_UseSymbolValidationManager))
-      if (!cg->comp()->getSymbolValidationManager()->addProfiledClassRecord((TR_OpaqueClassBlock *)guessClass))
+   if (comp->compileRelocatableCode() && comp->getOption(TR_UseSymbolValidationManager))
+      if (!comp->getSymbolValidationManager()->addProfiledClassRecord((TR_OpaqueClassBlock *)guessClass))
          guessClass = 0;
 
    // Call site cache
@@ -3917,7 +3745,7 @@ inline void generateInlinedCheckCastOrInstanceOfForInterface(TR::Node* node, TR_
       generateRegMemInstruction(LRegMem(), node, itable, generateX86MemoryReference(j9class, offsetof(J9Class, iTable), cg), cg);
       if (tmp)
          {
-         generateRegImm64Instruction(MOV8RegImm64, node, tmp, (uintptrj_t)clazz, cg, TR_ClassAddress);
+         generateRegImm64Instruction(MOV8RegImm64, node, tmp, (uintptr_t)clazz, cg, TR_ClassAddress);
          }
 
       // Loop through I-Table
@@ -3931,7 +3759,7 @@ inline void generateInlinedCheckCastOrInstanceOfForInterface(TR::Node* node, TR_
          }
       else
          {
-         generateMemImmSymInstruction(CMP4MemImm4, node, interfaceMR, (uintptrj_t)clazz, node->getChild(1)->getSymbolReference(), cg);
+         generateMemImmSymInstruction(CMP4MemImm4, node, interfaceMR, (uintptr_t)clazz, node->getChild(1)->getSymbolReference(), cg);
          }
       generateRegMemInstruction(LRegMem(), node, itable, generateX86MemoryReference(itable, offsetof(J9ITable, next), cg), cg);
       generateLabelInstruction(JNE4, node, iTableLoopLabel, cg);
@@ -3966,6 +3794,8 @@ inline void generateInlinedCheckCastOrInstanceOfForInterface(TR::Node* node, TR_
          generateRegInstruction(POPReg, node, j9class, cg);
          generateLabelInstruction(JMP4, node, endLabel, cg);
          }
+
+      og.endOutlinedInstructionSequence();
       }
 
    // Succeed
@@ -3984,10 +3814,11 @@ inline void generateInlinedCheckCastOrInstanceOfForInterface(TR::Node* node, TR_
 
 inline void generateInlinedCheckCastOrInstanceOfForClass(TR::Node* node, TR_OpaqueClassBlock* clazz, TR::CodeGenerator* cg, bool isCheckCast)
    {
+   TR::Compilation *comp = cg->comp();
    auto fej9 = (TR_J9VMBase*)(cg->fe());
 
    bool use64BitClasses = false;
-   if (cg->comp()->target().is64Bit())
+   if (comp->target().is64Bit())
       {
       // When running 64 bit compressed refs, if clazz is an address above the 2G
       // boundary then we can't use a push 32bit immediate instruction to pass it
@@ -3998,7 +3829,7 @@ inline void generateInlinedCheckCastOrInstanceOfForClass(TR::Node* node, TR_Opaq
 
       use64BitClasses = !TR::Compiler->om.generateCompressedObjectHeaders() ||
                         highClass ||
-                        (cg->comp()->compileRelocatableCode() && cg->comp()->getOption(TR_UseSymbolValidationManager));
+                        (comp->compileRelocatableCode() && comp->getOption(TR_UseSymbolValidationManager));
       }
 
    auto clazzData = use64BitClasses ? cg->create8ByteData(node, (uint64_t)(uintptr_t)clazz) : NULL;
@@ -4051,7 +3882,7 @@ inline void generateInlinedCheckCastOrInstanceOfForClass(TR::Node* node, TR_Opaq
          }
       else
          {
-         generateRegImmInstruction(CMP4RegImm4, node, j9class, (uintptrj_t)clazz, cg);
+         generateRegImmInstruction(CMP4RegImm4, node, j9class, (uintptr_t)clazz, cg);
          }
       if (!fej9->isClassFinal(clazz))
          {
@@ -4064,7 +3895,7 @@ inline void generateInlinedCheckCastOrInstanceOfForClass(TR::Node* node, TR_Opaq
    if (!fej9->isClassFinal(clazz))
       {
       auto depth = TR::Compiler->cls.classDepthOf(clazz);
-      if (depth >= cg->comp()->getOptions()->_minimumSuperclassArraySize)
+      if (depth >= comp->getOptions()->_minimumSuperclassArraySize)
          {
          static_assert(J9AccClassDepthMask == 0xffff, "J9AccClassDepthMask must be 0xffff");
          auto depthMR = generateX86MemoryReference(j9class, offsetof(J9Class, classDepthAndFlags), cg);
@@ -4078,6 +3909,7 @@ inline void generateInlinedCheckCastOrInstanceOfForClass(TR::Node* node, TR_Opaq
             TR_OutlinedInstructionsGenerator og(outlineLabel, node, cg);
             generateInstruction(CLC, node, cg);
             generateLabelInstruction(JMP4, node, failLabel, cg);
+            og.endOutlinedInstructionSequence();
             }
          else
             {
@@ -4132,6 +3964,8 @@ inline void generateInlinedCheckCastOrInstanceOfForClass(TR::Node* node, TR_Opaq
       auto call = generateHelperCallInstruction(node, TR_throwClassCastException, NULL, cg);
       call->setNeedsGCMap(0xFF00FFFF);
       call->setAdjustsFramePointerBy(-2*(int32_t)sizeof(J9Class*));
+
+      og.endOutlinedInstructionSequence();
       }
 
    // Succeed
@@ -4143,6 +3977,8 @@ inline void generateInlinedCheckCastOrInstanceOfForClass(TR::Node* node, TR_Opaq
 
 TR::Register *J9::X86::TreeEvaluator::checkcastinstanceofEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
+   TR::Compilation *comp = cg->comp();
+
    bool isCheckCast = false;
    switch (node->getOpCodeValue())
       {
@@ -4158,18 +3994,18 @@ TR::Register *J9::X86::TreeEvaluator::checkcastinstanceofEvaluator(TR::Node *nod
          break;
       }
    auto clazz = TR::TreeEvaluator::getCastClassAddress(node->getChild(1));
-   if (isCheckCast && !clazz && !cg->comp()->getOption(TR_DisableInlineCheckCast) && (!cg->comp()->compileRelocatableCode() || cg->comp()->getOption(TR_UseSymbolValidationManager)))
+   if (isCheckCast && !clazz && !comp->getOption(TR_DisableInlineCheckCast) && (!comp->compileRelocatableCode() || comp->getOption(TR_UseSymbolValidationManager)))
       {
       generateInlinedCheckCastForDynamicCastClass(node, cg);
       }
    else if (clazz &&
-       !TR::Compiler->cls.isClassArray(cg->comp(), clazz) && // not yet optimized
-       (!cg->comp()->compileRelocatableCode() || cg->comp()->getOption(TR_UseSymbolValidationManager)) &&
-       !cg->comp()->getOption(TR_DisableInlineCheckCast)  &&
-       !cg->comp()->getOption(TR_DisableInlineInstanceOf))
+       !TR::Compiler->cls.isClassArray(comp, clazz) && // not yet optimized
+       (!comp->compileRelocatableCode() || comp->getOption(TR_UseSymbolValidationManager)) &&
+       !comp->getOption(TR_DisableInlineCheckCast)  &&
+       !comp->getOption(TR_DisableInlineInstanceOf))
       {
       cg->evaluate(node->getChild(0));
-      if (TR::Compiler->cls.isInterfaceClass(cg->comp(), clazz))
+      if (TR::Compiler->cls.isInterfaceClass(comp, clazz))
          {
          generateInlinedCheckCastOrInstanceOfForInterface(node, clazz, cg, isCheckCast);
          }
@@ -4198,7 +4034,7 @@ TR::Register *J9::X86::TreeEvaluator::checkcastinstanceofEvaluator(TR::Node *nod
          auto instr = generateMemImmInstruction(TEST1MemImm1, node, generateX86MemoryReference(object, TR::Compiler->om.offsetOfObjectVftField(), cg), 0, cg);
          cg->setImplicitExceptionPoint(instr);
          instr->setNeedsGCMap(0xFF00FFFF);
-         instr->setNode(cg->comp()->findNullChkInfo(node));
+         instr->setNode(comp->findNullChkInfo(node));
          }
       TR::TreeEvaluator::performHelperCall(node, NULL, isCheckCast ? TR::call : TR::icall, false, cg);
       }
@@ -4312,6 +4148,8 @@ void J9::X86::TreeEvaluator::asyncGCMapCheckPatching(TR::Node *node, TR::CodeGen
       cg->stopUsingRegister(patchValReg);
       cg->stopUsingRegister(tempReg);
       generateLabelInstruction(LABEL, node, outlinedEndLabel, cg);
+
+      og.endOutlinedInstructionSequence();
       }
   else
       {
@@ -4401,6 +4239,8 @@ void J9::X86::TreeEvaluator::asyncGCMapCheckPatching(TR::Node *node, TR::CodeGen
       cg->stopUsingRegister(lowExistingValReg);
       cg->stopUsingRegister(highExistingValReg);
       generateLabelInstruction(LABEL, node, outlinedEndLabel, cg);
+
+      og.endOutlinedInstructionSequence();
      }
   }
 
@@ -4467,6 +4307,8 @@ void J9::X86::TreeEvaluator::inlineRecursiveMonitor(TR::Node          *node,
    deps->addPostCondition(vmThreadReg, TR::RealRegister::ebp, cg);
    deps->stopAddingConditions();
    generateLabelInstruction(LABEL, node, outlinedEndLabel, deps, cg);
+
+   og.endOutlinedInstructionSequence();
    }
 
 void J9::X86::TreeEvaluator::transactionalMemoryJITMonitorEntry(TR::Node           *node,
@@ -4506,6 +4348,31 @@ void J9::X86::TreeEvaluator::transactionalMemoryJITMonitorEntry(TR::Node        
       generateLabelInstruction(LABEL, node, outlinedEndLabel, cg);
 
       cg->stopUsingRegister(counterReg);
+
+      og.endOutlinedInstructionSequence();
+   }
+
+void
+J9::X86::TreeEvaluator::generateCheckForValueMonitorEnterOrExit(
+      TR::Node *node,
+      int32_t classFlag,
+      TR::LabelSymbol *snippetLabel,
+      TR::CodeGenerator *cg)
+   {
+   TR::Register *objectReg = cg->evaluate(node->getFirstChild());
+   TR::Register *j9classReg = cg->allocateRegister();
+   generateLoadJ9Class(node, j9classReg, objectReg, cg);
+   auto fej9 = (TR_J9VMBase *)(cg->fe());
+   TR::MemoryReference *classFlagsMR = generateX86MemoryReference(j9classReg, (uintptr_t)(fej9->getOffsetOfClassFlags()), cg);
+
+   TR_X86OpCodes testOpCode;
+   if ((uint32_t)classFlag <= USHRT_MAX)
+      testOpCode = TEST2MemImm2;
+   else
+      testOpCode = TEST4MemImm4;
+
+   generateMemImmInstruction(testOpCode, node, classFlagsMR, classFlag, cg);
+   generateLabelInstruction(JNE4, node, snippetLabel, cg);
    }
 
 TR::Register *
@@ -4518,20 +4385,22 @@ J9::X86::TreeEvaluator::VMmonentEvaluator(
    // appropriate excepting instruction we must make sure to reset the
    // excepting instruction since our children may have set it.
    //
+   TR::Compilation *comp = cg->comp();
+   TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg->fe());
    static const char *noInline = feGetEnv("TR_NoInlineMonitor");
-   static int32_t monEntCount = 0;
    static const char *firstMonEnt = feGetEnv("TR_FirstMonEnt");
-   static const char *doCmpFirst = feGetEnv("TR_AddCMPBeforeCMPXCHG");
+   static int32_t monEntCount = 0;
    bool reservingLock = false;
    bool normalLockPreservingReservation = false;
    bool dummyMethodMonitor = false;
-   TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg->fe());
-   TR::Compilation *comp = cg->comp();
+   TR_YesNoMaybe isMonitorValueBasedOrValueType = cg->isMonitorValueBasedOrValueType(node);
+   static const char *doCmpFirst = feGetEnv("TR_AddCMPBeforeCMPXCHG");
 
    int lwOffset = fej9->getByteOffsetToLockword((TR_OpaqueClassBlock *) cg->getMonClass(node));
    if (comp->getOption(TR_MimicInterpreterFrameShape) ||
        (comp->getOption(TR_FullSpeedDebug) && node->isSyncMethodMonitor()) ||
        noInline ||
+       (isMonitorValueBasedOrValueType == TR_yes) ||
        comp->getOption(TR_DisableInlineMonEnt) ||
        (firstMonEnt && (*firstMonEnt-'0') > monEntCount++))
       {
@@ -4596,6 +4465,10 @@ J9::X86::TreeEvaluator::VMmonentEvaluator(
    TR::SymbolReference *originalNodeSymRef = NULL;
 
    TR::Node *helperCallNode = node;
+
+   if (isMonitorValueBasedOrValueType == TR_maybe)
+      TR::TreeEvaluator::generateCheckForValueMonitorEnterOrExit(node, J9_CLASS_DISALLOWS_LOCKING_FLAGS, snippetLabel, cg);
+
    if (comp->getOption(TR_ReservingLocks))
       {
       // About to change the node's symref... store the original.
@@ -4647,7 +4520,7 @@ J9::X86::TreeEvaluator::VMmonentEvaluator(
          }
       }
 
-   if (cg->comp()->target().is64Bit() && cg->getX86ProcessorInfo().supportsHLE() && comp->getOption(TR_X86HLE))
+   if (cg->comp()->target().is64Bit() && cg->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_HLE) && comp->getOption(TR_X86HLE))
       {
       TR::LabelSymbol *JITMonitorEntrySnippetLabel = generateLabelSymbol(cg);
       TR::TreeEvaluator::transactionalMemoryJITMonitorEntry(node, cg, startLabel, snippetLabel, JITMonitorEntrySnippetLabel, objectReg, lwOffset);
@@ -4702,13 +4575,13 @@ J9::X86::TreeEvaluator::VMmonentEvaluator(
    if (cg->comp()->target().is64Bit() && !fej9->generateCompressedLockWord())
       {
       op = cg->comp()->target().isSMP() ? LCMPXCHG8MemReg : CMPXCHG8MemReg;
-      if (cg->getX86ProcessorInfo().supportsHLE() && comp->getOption(TR_X86HLE))
+      if (cg->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_HLE) && comp->getOption(TR_X86HLE))
          op = cg->comp()->target().isSMP() ? XALCMPXCHG8MemReg : XACMPXCHG8MemReg;
       }
    else
       {
       op = cg->comp()->target().isSMP() ? LCMPXCHG4MemReg : CMPXCHG4MemReg;
-      if (cg->getX86ProcessorInfo().supportsHLE() && comp->getOption(TR_X86HLE))
+      if (cg->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_HLE) && comp->getOption(TR_X86HLE))
          op = cg->comp()->target().isSMP() ? XALCMPXCHG4MemReg : XACMPXCHG4MemReg;
       }
 
@@ -5124,8 +4997,10 @@ void J9::X86::TreeEvaluator::generateValueTracingCode(
    generateMemRegInstruction(SMemReg(), node, generateX86MemoryReference(vmThreadReg, vmThreadCursor, cg), scratchReg, cg);
    }
 
-TR::Register *J9::X86::TreeEvaluator::VMmonexitEvaluator(TR::Node          *node,
-                                                     TR::CodeGenerator *cg)
+TR::Register
+*J9::X86::TreeEvaluator::VMmonexitEvaluator(
+      TR::Node          *node,
+      TR::CodeGenerator *cg)
    {
    // If there is a NULLCHK above this node it will be expecting us to set
    // up the excepting instruction.  If we are not going to inline an
@@ -5135,16 +5010,18 @@ TR::Register *J9::X86::TreeEvaluator::VMmonexitEvaluator(TR::Node          *node
    TR::Compilation *comp = cg->comp();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg->fe());
    static const char *noInline = feGetEnv("TR_NoInlineMonitor");
-   static int32_t monExitCount = 0;
    static const char *firstMonExit = feGetEnv("TR_FirstMonExit");
+   static int32_t monExitCount = 0;
    bool reservingLock = false;
    bool normalLockPreservingReservation = false;
    bool dummyMethodMonitor = false;
    bool gen64BitInstr = cg->comp()->target().is64Bit() && !fej9->generateCompressedLockWord();
-
    int lwOffset = fej9->getByteOffsetToLockword((TR_OpaqueClassBlock *) cg->getMonClass(node));
+   TR_YesNoMaybe isMonitorValueBasedOrValueType = cg->isMonitorValueBasedOrValueType(node);
+
    if ((comp->getOption(TR_MimicInterpreterFrameShape) /*&& !comp->getOption(TR_EnableLiveMonitorMetadata)*/) ||
        noInline ||
+       (isMonitorValueBasedOrValueType == TR_yes) ||
        comp->getOption(TR_DisableInlineMonExit) ||
        (firstMonExit && (*firstMonExit-'0') > monExitCount++))
       {
@@ -5192,6 +5069,11 @@ TR::Register *J9::X86::TreeEvaluator::VMmonexitEvaluator(TR::Node          *node
 
    TR::LabelSymbol *startLabel = generateLabelSymbol(cg);
    TR::LabelSymbol *fallThru   = generateLabelSymbol(cg);
+   // Create the monitor exit snippet
+   TR::LabelSymbol *snippetLabel = generateLabelSymbol(cg);
+
+   if (isMonitorValueBasedOrValueType == TR_maybe)
+      TR::TreeEvaluator::generateCheckForValueMonitorEnterOrExit(node, J9_CLASS_DISALLOWS_LOCKING_FLAGS, snippetLabel, cg);
 
 #if !defined(J9VM_OPT_REAL_TIME_LOCKING_SUPPORT)
    // Now that the object reference has been generated, see if this is the end
@@ -5245,7 +5127,6 @@ TR::Register *J9::X86::TreeEvaluator::VMmonexitEvaluator(TR::Node          *node
    TR::LabelSymbol *fallThruFromMonitorLookupCacheLabel = generateLabelSymbol(cg);
 
 #if defined(J9VM_OPT_REAL_TIME_LOCKING_SUPPORT)
-   TR::LabelSymbol *snippetLabel = generateLabelSymbol(cg);
    TR::LabelSymbol *decCountLabel = generateLabelSymbol(cg);
 
    unlockedReg = cg->allocateRegister();
@@ -5307,6 +5188,8 @@ TR::Register *J9::X86::TreeEvaluator::VMmonexitEvaluator(TR::Node          *node
       TR_OutlinedInstructionsGenerator og(decCountLabel, node, cg);
       generateMemInstruction(  DECMem(cg), node, generateX86MemoryReference(unlockedReg, fej9->getMonitorEntryCountOffset(), cg), cg);
       generateLabelInstruction(JMP4,       node, fallThru, cg);
+
+      og.endOutlinedInstructionSequence();
       }
 
    // back to main-line code path
@@ -5342,10 +5225,6 @@ TR::Register *J9::X86::TreeEvaluator::VMmonexitEvaluator(TR::Node          *node
       1, TR::DebugCounter::Cheap);
 
 #else
-
-   // Create the monitor exit snippet
-   //
-   TR::LabelSymbol *snippetLabel = generateLabelSymbol(cg);
 
    if (lwOffset <= 0)
       {
@@ -5470,7 +5349,7 @@ TR::Register *J9::X86::TreeEvaluator::VMmonexitEvaluator(TR::Node          *node
          TR::LabelSymbol *doneTestLabel = generateLabelSymbol(cg);
 
          //generateLabelInstruction(LABEL, node, doneTestLabel, cg);
-         //generateImmSymInstruction(PUSHImm4, node, (uintptrj_t)doneTestLabel->getStaticSymbol()->getStaticAddress(), node->getSymbolReference(), cg);
+         //generateImmSymInstruction(PUSHImm4, node, (uintptr_t)doneTestLabel->getStaticSymbol()->getStaticAddress(), node->getSymbolReference(), cg);
          //generateRegInstruction(POPReg, node, scratchReg, cg);
 
 	 TR::TreeEvaluator::generateValueTracingCode (node, vmThreadReg, scratchReg, objectReg, tempReg, cg);
@@ -5531,7 +5410,7 @@ TR::Register *J9::X86::TreeEvaluator::VMmonexitEvaluator(TR::Node          *node
 
    if (!node->isReadMonitor() && !reservingLock)
       {
-      if (cg->getX86ProcessorInfo().supportsHLE() && comp->getOption(TR_X86HLE))
+      if (cg->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_HLE) && comp->getOption(TR_X86HLE))
          generateMemImmInstruction(XRSMemImm4(gen64BitInstr),
             node, getMemoryReference(objectClassReg, objectReg, lwOffset, cg), 0, cg);
       else
@@ -5737,7 +5616,7 @@ static void genHeapAlloc(
 
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg->fe());
 
-   if (TR::Options::getCmdLineOptions()->realTimeGC())
+   if (comp->getOptions()->realTimeGC())
       {
 #if defined(J9VM_GC_REALTIME)
       // this will be bogus for variable length allocations because it only includes the header size (+ arraylet ptr for arrays)
@@ -5969,11 +5848,11 @@ static void genHeapAlloc(
          uint32_t *globalAllocationDataPointer = fej9->getGlobalAllocationDataPointer();
          if (globalAllocationDataPointer)
             {
-            TR::MemoryReference *gmr = generateX86MemoryReference((uintptrj_t)globalAllocationDataPointer, cg);
+            TR::MemoryReference *gmr = generateX86MemoryReference((uintptr_t)globalAllocationDataPointer, cg);
 
             generateMemImmInstruction(CMP4MemImm4,
                                       node,
-                                      generateX86MemoryReference((uint32_t)(uintptrj_t)globalAllocationDataPointer, cg),
+                                      generateX86MemoryReference((uint32_t)(uintptr_t)globalAllocationDataPointer, cg),
                                       0x07ffffff,
                                       cg);
             generateLabelInstruction(JAE4, node, doneProfilingLabel, cg);
@@ -5982,7 +5861,7 @@ static void genHeapAlloc(
             uint32_t *dataPointer = fej9->getAllocationProfilingDataPointer(node->getByteCodeInfo(), clazz, node->getOwningMethod(), comp);
             if (dataPointer)
                {
-               TR::MemoryReference *mr = generateX86MemoryReference((uint32_t)(uintptrj_t)dataPointer, cg);
+               TR::MemoryReference *mr = generateX86MemoryReference((uint32_t)(uintptr_t)dataPointer, cg);
                generateMemInstruction(INC4Mem, node, mr, cg);
                }
 
@@ -6047,10 +5926,10 @@ static void genHeapAlloc(
          // The GC will guarantee that at least 'maxObjectSizeGuaranteedNotToOverflow' bytes
          // of slush will exist between the top of the heap and the end of the address space.
          //
-         uintptrj_t maxObjectSize = cg->getMaxObjectSizeGuaranteedNotToOverflow();
-         uintptrj_t maxObjectSizeInElements = maxObjectSize / elementSize;
+         uintptr_t maxObjectSize = cg->getMaxObjectSizeGuaranteedNotToOverflow();
+         uintptr_t maxObjectSizeInElements = maxObjectSize / elementSize;
 
-         if (cg->comp()->target().is64Bit() && !(maxObjectSizeInElements > 0 && maxObjectSizeInElements <= (uintptrj_t)INT_MAX))
+         if (cg->comp()->target().is64Bit() && !(maxObjectSizeInElements > 0 && maxObjectSizeInElements <= (uintptr_t)INT_MAX))
             {
             generateRegImm64Instruction(MOV8RegImm64, node, tempReg, maxObjectSizeInElements, cg);
             generateRegRegInstruction(CMP8RegReg, node, sizeReg, tempReg, cg);
@@ -6074,7 +5953,7 @@ static void genHeapAlloc(
 
       if (sizeReg)
          {
-         // calculate variable size, rounding up if necessary to a intptrj_t multiple boundary
+         // calculate variable size, rounding up if necessary to a intptr_t multiple boundary
          //
          int32_t round; // zero indicates no rounding is necessary
 
@@ -6090,12 +5969,12 @@ static void genHeapAlloc(
 #ifdef J9VM_INTERP_FLAGS_IN_CLASS_SLOT
          if ( (node->getOpCodeValue() == TR::anewarray || node->getOpCodeValue() == TR::newarray))
             {
-            // All arrays in combo builds will always be at least 12 bytes in size in all specs:
+            // All arrays in combo builds will always be at least 20 bytes in size in all specs:
             //
-            // 1)  class pointer + contig length + one or more elements
-            // 2)  class pointer + 0 + 0 (for zero length arrays)
+            // 1)  class pointer + contig length + dataAddr + one or more elements
+            // 2)  class pointer + 0 + 0 (for zero length arrays) + dataAddr
             //
-            TR_ASSERT(J9_GC_MINIMUM_OBJECT_SIZE >= 8, "Expecting a minimum object size >= 8 (actual minimum is %d)\n", J9_GC_MINIMUM_OBJECT_SIZE);
+            TR_ASSERT(J9_GC_MINIMUM_INDEXABLE_OBJECT_SIZE >= 8, "Expecting a minimum indexable object size >= 8 (actual minimum is %d)\n", J9_GC_MINIMUM_INDEXABLE_OBJECT_SIZE);
 
             generateRegMemInstruction(
                LEARegMem(),
@@ -6253,7 +6132,7 @@ static void genHeapAlloc(
          TR::LabelSymbol *doneAlignLabel = generateLabelSymbol(cg);
          TR::LabelSymbol *multiSlotGapLabel = generateLabelSymbol(cg);
 
-         generateRegImmInstruction(CMPRegImms(), node, eaxReal, sizeof(uintptrj_t), cg);
+         generateRegImmInstruction(CMPRegImms(), node, eaxReal, sizeof(uintptr_t), cg);
          generateLabelInstruction(JB4, node, doneAlignLabel, cg);
          generateLabelInstruction(JA4, node, multiSlotGapLabel, cg);
 
@@ -6289,7 +6168,7 @@ static void genHeapAlloc(
 
          generateMemRegInstruction(
                                    SMemReg(), node,
-                                   generateX86MemoryReference(tempReg, sizeof(uintptrj_t), cg),
+                                   generateX86MemoryReference(tempReg, sizeof(uintptr_t), cg),
                                    eaxReal, cg);
 
          generateLabelInstruction(LABEL, node, doneAlignLabel, cg);
@@ -6352,7 +6231,7 @@ static void genHeapAlloc(
             else
                {
                generateLabelInstruction(JG4, node, restartLabel, cg);
-               TR::SymbolReference * helperSymRef = cg->getSymRefTab()->findOrCreateRuntimeHelper(TR_X86CodeCachePrefetchHelper, false, false, false);
+               TR::SymbolReference * helperSymRef = cg->getSymRefTab()->findOrCreateRuntimeHelper(TR_X86CodeCachePrefetchHelper);
                TR::MethodSymbol *helperSymbol = helperSymRef->getSymbol()->castToMethodSymbol();
 #ifdef J9VM_GC_NON_ZERO_TLH
                if (!comp->getOption(TR_DisableDualTLH) && node->canSkipZeroInitialization())
@@ -6441,10 +6320,10 @@ static void genHeapAlloc2(
          // The GC will guarantee that at least 'maxObjectSizeGuaranteedNotToOverflow' bytes
          // of slush will exist between the top of the heap and the end of the address space.
          //
-         uintptrj_t maxObjectSize = cg->getMaxObjectSizeGuaranteedNotToOverflow();
-         uintptrj_t maxObjectSizeInElements = maxObjectSize / elementSize;
+         uintptr_t maxObjectSize = cg->getMaxObjectSizeGuaranteedNotToOverflow();
+         uintptr_t maxObjectSizeInElements = maxObjectSize / elementSize;
 
-         if (cg->comp()->target().is64Bit() && !(maxObjectSizeInElements > 0 && maxObjectSizeInElements <= (uintptrj_t)INT_MAX))
+         if (cg->comp()->target().is64Bit() && !(maxObjectSizeInElements > 0 && maxObjectSizeInElements <= (uintptr_t)INT_MAX))
             {
             generateRegImm64Instruction(MOV8RegImm64, node, segmentReg, maxObjectSizeInElements, cg);
             generateRegRegInstruction(CMP8RegReg, node, sizeReg, segmentReg, cg);
@@ -6466,7 +6345,7 @@ static void genHeapAlloc2(
                                                               offsetof(J9VMThread, heapAlloc), cg), cg);
 
 
-         // calculate variable size, rounding up if necessary to a intptrj_t multiple boundary
+         // calculate variable size, rounding up if necessary to a intptr_t multiple boundary
          //
          int32_t round; // zero indicates no rounding is necessary
 
@@ -6653,7 +6532,7 @@ static void genHeapAlloc2(
          TR::LabelSymbol *doneAlignLabel = generateLabelSymbol(cg);
          TR::LabelSymbol *multiSlotGapLabel = generateLabelSymbol(cg);
 
-         generateRegImmInstruction(CMPRegImms(), node, eaxReal, sizeof(uintptrj_t), cg);
+         generateRegImmInstruction(CMPRegImms(), node, eaxReal, sizeof(uintptr_t), cg);
          generateLabelInstruction(JB4, node, doneAlignLabel, cg);
          generateLabelInstruction(JA4, node, multiSlotGapLabel, cg);
 
@@ -6689,7 +6568,7 @@ static void genHeapAlloc2(
 
          generateMemRegInstruction(
                                    SMemReg(), node,
-                                   generateX86MemoryReference(segmentReg, sizeof(uintptrj_t), cg),
+                                   generateX86MemoryReference(segmentReg, sizeof(uintptr_t), cg),
                                    eaxReal, cg);
 
          generateLabelInstruction(LABEL, node, doneAlignLabel, cg);
@@ -6748,9 +6627,9 @@ static void genInitObjectHeader(TR::Node             *node,
    TR::Compilation *comp = cg->comp();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg->fe());
 
-   bool use64BitClasses = cg->comp()->target().is64Bit() &&
+   bool use64BitClasses = comp->target().is64Bit() &&
                            (!TR::Compiler->om.generateCompressedObjectHeaders() ||
-                            (cg->comp()->compileRelocatableCode() && cg->comp()->getOption(TR_UseSymbolValidationManager)));
+                            (comp->compileRelocatableCode() && comp->getOption(TR_UseSymbolValidationManager)));
 
    TR_ASSERT((isDynamicAllocation || clazz), "Cannot have a null clazz while not doing dynamic array allocation\n");
 
@@ -6808,9 +6687,9 @@ static void genInitObjectHeader(TR::Node             *node,
       if (use64BitClasses)
          {
          if (cg->needClassAndMethodPointerRelocations() && comp->getOption(TR_UseSymbolValidationManager))
-            instr = generateRegImm64Instruction(MOV8RegImm64, node, tempReg, ((intptrj_t)clazz|orFlagsClass), cg, TR_ClassPointer);
+            instr = generateRegImm64Instruction(MOV8RegImm64, node, tempReg, ((intptr_t)clazz|orFlagsClass), cg, TR_ClassPointer);
          else
-            instr = generateRegImm64Instruction(MOV8RegImm64, node, tempReg, ((intptrj_t)clazz|orFlagsClass), cg);
+            instr = generateRegImm64Instruction(MOV8RegImm64, node, tempReg, ((intptr_t)clazz|orFlagsClass), cg);
          generateMemRegInstruction(S8MemReg, node, generateX86MemoryReference(objectReg, TR::Compiler->om.offsetOfObjectVftField(), cg), tempReg, cg);
          }
       else
@@ -6873,7 +6752,7 @@ static void genInitObjectHeader(TR::Node             *node,
       generateRegMemInstruction(LRegMem(), node, tempReg, generateX86MemoryReference(clzReg, offsetof(J9ArrayClass, lockOffset), cg), cg);
       generateRegImmInstruction(CMPRegImm4(), node, tempReg, (int32_t)-1, cg);
       generateLabelInstruction (JE4, node, doneLabel, cg);
-      generateMemImmInstruction(SMemImm4(cg->comp()->target().is64Bit() && !fej9->generateCompressedLockWord()),
+      generateMemImmInstruction(SMemImm4(comp->target().is64Bit() && !fej9->generateCompressedLockWord()),
             node, generateX86MemoryReference(objectReg, tempReg, 0, cg), 0, cg);
       generateLabelInstruction(LABEL, node, doneLabel, cg);
       }
@@ -6893,7 +6772,7 @@ static void genInitObjectHeader(TR::Node             *node,
             if (initReservable)
                initialLwValue = OBJECT_HEADER_LOCK_RESERVED;
 
-            generateMemImmInstruction(SMemImm4(cg->comp()->target().is64Bit() && !fej9->generateCompressedLockWord()),
+            generateMemImmInstruction(SMemImm4(comp->target().is64Bit() && !fej9->generateCompressedLockWord()),
                   node, generateX86MemoryReference(objectReg, lwOffset, cg), initialLwValue, cg);
             }
          }
@@ -6914,6 +6793,7 @@ static void genInitArrayHeader(
       TR::Register *tempReg,
       bool isZeroInitialized,
       bool isDynamicAllocation,
+      bool shouldInitZeroSizedArrayHeader,
       TR::CodeGenerator *cg)
    {
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg->fe());
@@ -6925,11 +6805,25 @@ static void genInitArrayHeader(
    int32_t arraySizeOffset = fej9->getOffsetOfContiguousArraySizeField();
 
    TR::MemoryReference *arraySizeMR = generateX86MemoryReference(objectReg, arraySizeOffset, cg);
+   // Special handling of zero sized arrays.
+   // Zero length arrays are discontiguous (i.e. they also need the discontiguous length field to be 0) because
+   // they are indistinguishable from non-zero length discontiguous arrays. But instead of explicitly checking
+   // for zero sized arrays we unconditionally store 0 in the third dword of the array object header. That is
+   // safe because the 3rd dword is either array size of a zero sized array or will contain the first elements
+   // of an array:
+   // - Zero sized arrays have the following layout:
+   // - The smallest array possible is a byte array with 1 element which would have a layout:
+   //   #bits per section (compressed refs): | 32 bits |  32 bits   | 32 bits | 32 bits |   32 bits   |   32 bits    |
+   //   zero sized arrays:                   |  class  | mustBeZero |  size   | padding |          dataAddr          |
+   //   smallest contiguous array:           |  class  |    size    |      dataAddr     | 1 byte + padding |  other  |
+   //   This also reflects the minimum object size which is 16 bytes.
+   int32_t arrayDiscontiguousSizeOffset = fej9->getOffsetOfDiscontiguousArraySizeField();
+   TR::MemoryReference *arrayDiscontiguousSizeMR = generateX86MemoryReference(objectReg, arrayDiscontiguousSizeOffset, cg);
 
    TR::Compilation *comp = cg->comp();
 
    bool canUseFastInlineAllocation =
-      (!TR::Options::getCmdLineOptions()->realTimeGC() &&
+      (!comp->getOptions()->realTimeGC() &&
        !comp->generateArraylets()) ? true : false;
 
    // Initialize the array size
@@ -6942,12 +6836,17 @@ static void genInitArrayHeader(
          {
          // Native 64-bit needs to cover the discontiguous size field
          //
-         TR_X86OpCodes storeOp = (cg->comp()->target().is64Bit() && !comp->useCompressedPointers()) ? S8MemReg : S4MemReg;
+         TR_X86OpCodes storeOp = (comp->target().is64Bit() && !comp->useCompressedPointers()) ? S8MemReg : S4MemReg;
          generateMemRegInstruction(storeOp, node, arraySizeMR, sizeReg, cg);
          }
       else
          {
          generateMemRegInstruction(S4MemReg, node, arraySizeMR, sizeReg, cg);
+         }
+      // Take care of zero sized arrays as they are discontiguous and not contiguous
+      if (shouldInitZeroSizedArrayHeader)
+         {
+         generateMemImmInstruction(S4MemImm4, node, arrayDiscontiguousSizeMR, 0, cg);
          }
       }
    else
@@ -6959,14 +6858,19 @@ static void genInitArrayHeader(
          {
          // Native 64-bit needs to cover the discontiguous size field
          //
-         TR_X86OpCodes storeOp = (cg->comp()->target().is64Bit() && !comp->useCompressedPointers()) ? S8MemImm4 : S4MemImm4;
-         int32_t instanceSize = node->getFirstChild()->getInt();
+         TR_X86OpCodes storeOp = (comp->target().is64Bit() && !comp->useCompressedPointers()) ? S8MemImm4 : S4MemImm4;
+         instanceSize = node->getFirstChild()->getInt();
          generateMemImmInstruction(storeOp, node, arraySizeMR, instanceSize, cg);
          }
       else
          {
-         int32_t instanceSize = node->getFirstChild()->getInt();
+         instanceSize = node->getFirstChild()->getInt();
          generateMemImmInstruction(S4MemImm4, node, arraySizeMR, instanceSize, cg);
+         }
+      // Take care of zero sized arrays as they are discontiguous and not contiguous
+      if (shouldInitZeroSizedArrayHeader && (instanceSize == 0))
+         {
+         generateMemImmInstruction(S4MemImm4, node, arrayDiscontiguousSizeMR, 0, cg);
          }
       }
 
@@ -6988,9 +6892,7 @@ static void genInitArrayHeader(
 
          // Compress the arraylet pointer.
          //
-         if (TR::Compiler->vm.heapBaseAddress() != 0)
-            generateRegImmInstruction(SUB8RegImm4, node, tempReg, TR::Compiler->vm.heapBaseAddress(), cg);
-         else if (TR::Compiler->om.compressedReferenceShiftOffset() > 0)
+         if (TR::Compiler->om.compressedReferenceShiftOffset() > 0)
             generateRegImmInstruction(SHR8RegImm1, node, tempReg, TR::Compiler->om.compressedReferenceShiftOffset(), cg);
          }
       else
@@ -7020,10 +6922,29 @@ static bool genZeroInitObject2(
       TR::Register *&scratchReg,
       TR::CodeGenerator *cg)
    {
+   TR::Compilation *comp = cg->comp();
+
    // set up clazz value here
    TR_OpaqueClassBlock *clazz = NULL;
-   cg->comp()->canAllocateInline(node, clazz);
-   auto headerSize = node->getOpCodeValue() != TR::New ? TR::Compiler->om.contiguousArrayHeaderSizeInBytes() : TR::Compiler->om.objectHeaderSizeInBytes();
+   bool isArrayNew = (node->getOpCodeValue() != TR::New);
+   comp->canAllocateInline(node, clazz);
+   auto headerSize = isArrayNew ? TR::Compiler->om.contiguousArrayHeaderSizeInBytes() : TR::Compiler->om.objectHeaderSizeInBytes();
+   // If we are using full refs both contiguous and discontiguous array header have the same size, in which case we must adjust header size
+   // slightly so that rep stosb can initialize the size field of zero sized arrays appropriately
+   //   #bits per section (compressed refs): | 32 bits |  32 bits   | 32 bits | 32 bits |   32 bits   |   32 bits    |
+   //   zero sized arrays:                   |  class  | mustBeZero |   size  | padding |          dataAddr          |
+   //   smallest contiguous array:           |  class  |    size    |      dataAddr     | 1 byte + padding |  other  |
+   //   In order for us to successfully initialize the size field of a zero sized array in compressed refs
+   //   we must subtract 8 bytes (sizeof(dataAddr)) from header size. And in case of full refs we must
+   //   subtract 16 bytes from the header in order to properly initialize the zero sized field. We can
+   //   accomplish that by simply subtracting the offset of dataAddr field, which is 8 for compressed refs
+   //   and 16 for full refs.
+#if defined(TR_TARGET_64BIT)
+   if (!cg->comp()->target().is32Bit() && isArrayNew)
+      {
+      headerSize -= static_cast<TR_J9VMBase *>(cg->fe())->getOffsetOfContiguousDataAddrField();
+      }
+#endif /* TR_TARGET_64BIT */
    TR_ASSERT(headerSize >= 4, "Object/Array header must be >= 4.");
    objectSize -= headerSize;
 
@@ -7056,7 +6977,7 @@ static bool genZeroInitObject2(
          // ----------
          // FIXED SIZE
          // ----------
-         if (cg->comp()->target().is64Bit() && !IS_32BIT_SIGNED(objectSize))
+         if (comp->target().is64Bit() && !IS_32BIT_SIGNED(objectSize))
             {
             generateRegImm64Instruction(MOV8RegImm64, node, tempReg, objectSize, cg);
             }
@@ -7070,7 +6991,7 @@ static bool genZeroInitObject2(
       // Destination
       // -----------
       generateRegMemInstruction(LEARegMem(), node, segmentReg, generateX86MemoryReference(targetReg, headerSize, cg), cg);
-      if (cg->comp()->target().is64Bit())
+      if (comp->target().is64Bit())
          {
          scratchReg = cg->allocateRegister();
          generateRegRegInstruction(MOVRegReg(), node, scratchReg, targetReg, cg);
@@ -7081,7 +7002,7 @@ static bool genZeroInitObject2(
          }
       generateRegRegInstruction(XORRegReg(), node, targetReg, targetReg, cg);
       generateInstruction(REPSTOSB, node, cg);
-      if (cg->comp()->target().is64Bit())
+      if (comp->target().is64Bit())
          {
          generateRegRegInstruction(MOVRegReg(), node, targetReg, scratchReg, cg);
          }
@@ -7161,7 +7082,7 @@ static bool genZeroInitObject(
    int32_t numSlots = 0;
    int32_t startOfZeroInits = isArrayNew ? TR::Compiler->om.contiguousArrayHeaderSizeInBytes() : TR::Compiler->om.objectHeaderSizeInBytes();
 
-   if (cg->comp()->target().is64Bit())
+   if (comp->target().is64Bit())
       {
       // round down to the nearest word size
       TR_ASSERT(startOfZeroInits < 0xF8, "expecting start of zero inits to be the size of the header");
@@ -7261,7 +7182,7 @@ static bool genZeroInitObject(
             // adding in partialHeaderSize.adding in partialHeaderSize.
             //
             case 1:
-               if (cg->comp()->target().is64Bit())
+               if (comp->target().is64Bit())
                   {
                   generateRegMemInstruction(LEA8RegMem, node, tempReg, generateX86MemoryReference(sizeReg, (additionalSlots*8)+7, cg), cg);
                   generateRegImmInstruction(SHR8RegImm1, node, tempReg, 3, cg);
@@ -7273,7 +7194,7 @@ static bool genZeroInitObject(
                   }
                break;
             case 2:
-               if (cg->comp()->target().is64Bit())
+               if (comp->target().is64Bit())
                   {
                   generateRegMemInstruction(LEA8RegMem, node, tempReg, generateX86MemoryReference(sizeReg, (additionalSlots*4)+3, cg), cg);
                   generateRegImmInstruction(SHR8RegImm1, node, tempReg, 2, cg);
@@ -7285,7 +7206,7 @@ static bool genZeroInitObject(
                   }
                break;
             case 4:
-               if (cg->comp()->target().is64Bit())
+               if (comp->target().is64Bit())
                   {
                   generateRegMemInstruction(LEA8RegMem, node, tempReg, generateX86MemoryReference(sizeReg, (additionalSlots*2)+1, cg), cg);
                   generateRegImmInstruction(SHR8RegImm1, node, tempReg, 1, cg);
@@ -7297,7 +7218,7 @@ static bool genZeroInitObject(
                   }
                break;
             case 8:
-               if (cg->comp()->target().is64Bit())
+               if (comp->target().is64Bit())
                   {
                   generateRegMemInstruction(LEA8RegMem, node, tempReg,
                                             generateX86MemoryReference(sizeReg, additionalSlots, cg), cg);
@@ -7317,7 +7238,7 @@ static bool genZeroInitObject(
          // Fixed size
          //
          generateRegImmInstruction(MOVRegImm4(), node, tempReg, numSlots + alignmentDelta, cg);
-         if (cg->comp()->target().is64Bit())
+         if (comp->target().is64Bit())
             {
             // TODO AMD64: replace both instructions with a LEA tempReg, [disp32]
             //
@@ -7325,7 +7246,7 @@ static bool genZeroInitObject(
             }
          }
 
-      if (cg->comp()->target().is64Bit())
+      if (comp->target().is64Bit())
          {
          scratchReg = cg->allocateRegister();
          generateRegRegInstruction(MOVRegReg(), node, scratchReg, targetReg, cg);
@@ -7339,7 +7260,7 @@ static bool genZeroInitObject(
 
       // We just pushed targetReg on the stack and zeroed it out. targetReg contained the address of the
       // beginning of the header. We want to use the 0-reg to initialize the monitor slot, so we use
-      // segmentReg, which points to to targetReg+startOfZeroInits and subtract the extra offset.
+      // segmentReg, which points to targetReg+startOfZeroInits and subtract the extra offset.
 
       bool initLw = (node->getOpCodeValue() != TR::New);
       int lwOffset = fej9->getByteOffsetToLockword(clazz);
@@ -7347,14 +7268,14 @@ static bool genZeroInitObject(
 
       if (initLw)
          {
-         TR_X86OpCodes op = (cg->comp()->target().is64Bit() && fej9->generateCompressedLockWord()) ? S4MemReg : SMemReg();
+         TR_X86OpCodes op = (comp->target().is64Bit() && fej9->generateCompressedLockWord()) ? S4MemReg : SMemReg();
          generateMemRegInstruction(op, node, generateX86MemoryReference(segmentReg, lwOffset-startOfZeroInits, cg), targetReg, cg);
          }
 
-      TR_X86OpCodes op = cg->comp()->target().is64Bit() ? REPSTOSQ : REPSTOSD;
+      TR_X86OpCodes op = comp->target().is64Bit() ? REPSTOSQ : REPSTOSD;
       generateInstruction(op, node, cg);
 
-      if (cg->comp()->target().is64Bit())
+      if (comp->target().is64Bit())
          {
          generateRegRegInstruction(MOVRegReg(), node, targetReg, scratchReg, cg);
          }
@@ -7376,7 +7297,7 @@ static bool genZeroInitObject(
 
       if (initLw)
          {
-         TR_X86OpCodes op = (cg->comp()->target().is64Bit() && fej9->generateCompressedLockWord()) ? S4MemReg : SMemReg();
+         TR_X86OpCodes op = (comp->target().is64Bit() && fej9->generateCompressedLockWord()) ? S4MemReg : SMemReg();
          generateMemRegInstruction(op, node, generateX86MemoryReference(targetReg, lwOffset, cg), tempReg, cg);
          }
       }
@@ -7388,7 +7309,7 @@ static bool genZeroInitObject(
 
       if (initLw)
          {
-         TR_X86OpCodes op = (cg->comp()->target().is64Bit() && fej9->generateCompressedLockWord()) ? S4MemImm4 : SMemImm4();
+         TR_X86OpCodes op = (comp->target().is64Bit() && fej9->generateCompressedLockWord()) ? S4MemImm4 : SMemImm4();
          generateMemImmInstruction(op, node, generateX86MemoryReference(targetReg, lwOffset, cg), 0, cg);
          }
       return false;
@@ -7406,7 +7327,7 @@ static bool genZeroInitObject(
 
       generateRegImmInstruction(MOVRegImm4(), node, segmentReg, -((numIterations-1)*maxZeroInitWordsPerIteration), cg);
 
-      if (cg->comp()->target().is64Bit())
+      if (comp->target().is64Bit())
          generateRegRegInstruction(MOVSXReg8Reg4, node, segmentReg, segmentReg, cg);
 
       TR::LabelSymbol *loopLabel = generateLabelSymbol(cg);
@@ -7674,7 +7595,7 @@ J9::X86::TreeEvaluator::VMnewEvaluator(
    // --------------------------------------------------------------------------------
 
    bool canUseFastInlineAllocation =
-      (!TR::Options::getCmdLineOptions()->realTimeGC() &&
+      (!comp->getOptions()->realTimeGC() &&
        !comp->generateArraylets()) ? true : false;
 
    bool useRepInstruction;
@@ -7723,6 +7644,7 @@ J9::X86::TreeEvaluator::VMnewEvaluator(
    // --------------------------------------------------------------------------------
 
    TR::Register *scratchReg = NULL;
+   bool shouldInitZeroSizedArrayHeader = true;
 
 #ifdef J9VM_GC_NON_ZERO_TLH
    if (comp->getOption(TR_DisableDualTLH) || comp->getOptions()->realTimeGC())
@@ -7839,6 +7761,7 @@ J9::X86::TreeEvaluator::VMnewEvaluator(
          if (canUseFastInlineAllocation)
             {
             useRepInstruction = genZeroInitObject2(node, objectSize, elementSize, sizeReg, targetReg, tempReg, segmentReg, scratchReg, cg);
+            shouldInitZeroSizedArrayHeader = false;
             }
          else
             {
@@ -7864,11 +7787,12 @@ J9::X86::TreeEvaluator::VMnewEvaluator(
             // via the contiguous length slot.
             //
             if (node->getOpCodeValue() != TR::New &&
-                (cg->comp()->target().is32Bit() || comp->useCompressedPointers()))
+                (comp->target().is32Bit() || comp->useCompressedPointers()))
                {
                generateMemImmInstruction(SMemImm4(), node,
-                  generateX86MemoryReference(targetReg, TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), cg),
+                  generateX86MemoryReference(targetReg, fej9->getOffsetOfDiscontiguousArraySizeField(), cg),
                   0, cg);
+               shouldInitZeroSizedArrayHeader = false;
                }
             }
 
@@ -7901,6 +7825,7 @@ J9::X86::TreeEvaluator::VMnewEvaluator(
             tempReg,
             monitorSlotIsInitialized,
             true,
+            shouldInitZeroSizedArrayHeader,
             cg);
       }
    else if (isArrayNew)
@@ -7916,6 +7841,7 @@ J9::X86::TreeEvaluator::VMnewEvaluator(
             tempReg,
             monitorSlotIsInitialized,
             false,
+            shouldInitZeroSizedArrayHeader,
             cg);
       }
    else
@@ -8193,7 +8119,7 @@ J9::X86::TreeEvaluator::VMarrayStoreCHKEvaluator(
 
       TR_OpaqueClassBlock *objectClass = fej9->getSystemClassFromClassName("java/lang/Object", 16);
 
-      if (cg->comp()->target().is64Bit())
+      if (comp->target().is64Bit())
          {
             if (TR::Compiler->om.compressObjectReferences())
                {
@@ -8202,7 +8128,7 @@ J9::X86::TreeEvaluator::VMarrayStoreCHKEvaluator(
                }
             else // 64 bit but no class pointer compression
                {
-               if ((uintptrj_t)objectClass <= (uintptrj_t)0x7fffffff)
+               if ((uintptr_t)objectClass <= (uintptr_t)0x7fffffff)
                   {
                   instr = generateRegImmInstruction(CMP8RegImm4, node, destComponentClassReg, (uintptr_t) objectClass, cg);
                   }
@@ -8239,7 +8165,7 @@ J9::X86::TreeEvaluator::VMarrayStoreCHKEvaluator(
       if (!(comp->getOption(TR_DisableArrayStoreCheckOpts)) && node->getArrayComponentClassInNode() )
          {
          TR_OpaqueClassBlock *arrayComponentClass = (TR_OpaqueClassBlock *) node->getArrayComponentClassInNode();
-         if (cg->comp()->target().is64Bit())
+         if (comp->target().is64Bit())
             {
             if (TR::Compiler->om.compressObjectReferences())
                {
@@ -8252,7 +8178,7 @@ J9::X86::TreeEvaluator::VMarrayStoreCHKEvaluator(
                }
             else // 64 bit but no class pointer compression
                {
-               if ((uintptrj_t)arrayComponentClass <= (uintptrj_t)0x7fffffff)
+               if ((uintptr_t)arrayComponentClass <= (uintptr_t)0x7fffffff)
                   {
                   instr = generateRegImmInstruction(CMP8RegImm4, node, destComponentClassReg, (uintptr_t) arrayComponentClass, cg);
                   if (fej9->isUnloadAssumptionRequired(arrayComponentClass, comp->getCurrentMethod()))
@@ -8304,7 +8230,7 @@ J9::X86::TreeEvaluator::VMarrayStoreCHKEvaluator(
          generateX86MemoryReference(destComponentClassReg, offsetof(J9Class,classDepthAndFlags), cg);
 
       // DMDM  32-bit only???
-      if (cg->comp()->target().is32Bit())
+      if (comp->target().is32Bit())
          {
          scratchRegisterManager->reclaimScratchRegister(destComponentClassReg);
          }
@@ -8313,7 +8239,7 @@ J9::X86::TreeEvaluator::VMarrayStoreCHKEvaluator(
 
       if (eliminateDepthMask)
          {
-         if (cg->comp()->target().is64Bit())
+         if (comp->target().is64Bit())
             generateRegMemInstruction(MOVZXReg8Mem2, node, destComponentClassDepthReg, destComponentClassDepthMR, cg);
          else
             generateRegMemInstruction(MOVZXReg4Mem2, node, destComponentClassDepthReg, destComponentClassDepthMR, cg);
@@ -8329,7 +8255,7 @@ J9::X86::TreeEvaluator::VMarrayStoreCHKEvaluator(
 
       if (!eliminateDepthMask)
          {
-         if (cg->comp()->target().is64Bit())
+         if (comp->target().is64Bit())
             {
             TR_ASSERT(!(J9AccClassDepthMask & 0x80000000), "AMD64: need to use a second register for AND mask");
             if (!(J9AccClassDepthMask & 0x80000000))
@@ -8354,7 +8280,7 @@ J9::X86::TreeEvaluator::VMarrayStoreCHKEvaluator(
       // control flow region.  Give one back and manually and force the source
       // class to be rematerialized later.
       //
-      if (cg->comp()->target().is32Bit())
+      if (comp->target().is32Bit())
          {
          scratchRegisterManager->reclaimScratchRegister(sourceClassReg);
          }
@@ -8373,7 +8299,7 @@ J9::X86::TreeEvaluator::VMarrayStoreCHKEvaluator(
             sourceClassDepthReg,
             mr, cg);
 
-         if (cg->comp()->target().is64Bit())
+         if (comp->target().is64Bit())
             {
             TR_ASSERT(!(J9AccClassDepthMask & 0x80000000), "AMD64: need to use a second register for AND mask");
             if (!(J9AccClassDepthMask & 0x80000000))
@@ -8393,7 +8319,7 @@ J9::X86::TreeEvaluator::VMarrayStoreCHKEvaluator(
          sourceClassDepthReg,
          mr, cg);
 
-      if (cg->comp()->target().is64Bit())
+      if (comp->target().is64Bit())
          {
          TR_ASSERT(!(J9AccClassDepthMask & 0x80000000), "AMD64: need to use a second register for AND mask");
          if (!(J9AccClassDepthMask & 0x80000000))
@@ -8415,7 +8341,7 @@ J9::X86::TreeEvaluator::VMarrayStoreCHKEvaluator(
    // destComponentClassReg contains the class offset so we may need to generate code
    // to convert from class offset to real J9Class pointer
 
-      if (cg->comp()->target().is32Bit())
+      if (comp->target().is32Bit())
          {
          // Rematerialize the source class.
          //
@@ -8427,7 +8353,7 @@ J9::X86::TreeEvaluator::VMarrayStoreCHKEvaluator(
 
       TR::MemoryReference *tempMR = generateX86MemoryReference(sourceClassReg, offsetof(J9Class,superclasses), cg);
 
-      if (cg->comp()->target().is32Bit())
+      if (comp->target().is32Bit())
          {
          scratchRegisterManager->reclaimScratchRegister(sourceClassReg);
          }
@@ -8442,14 +8368,14 @@ J9::X86::TreeEvaluator::VMarrayStoreCHKEvaluator(
          cg);
 
       TR::MemoryReference *leaMR =
-         generateX86MemoryReference(sourceSuperClassReg, destComponentClassDepthReg, logBase2(sizeof(uintptrj_t)), 0, cg);
+         generateX86MemoryReference(sourceSuperClassReg, destComponentClassDepthReg, logBase2(sizeof(uintptr_t)), 0, cg);
 
       // For compressed references:
       // leaMR is a memory reference to a J9Class
       // destComponentClassReg contains a TR_OpaqueClassBlock
       // We may need to convert superClass to a class offset before doing the comparison
 
-      if (cg->comp()->target().is32Bit())
+      if (comp->target().is32Bit())
          {
 
          generateRegMemInstruction(LRegMem(), node, sourceSuperClassReg, leaMR, cg);
@@ -8727,7 +8653,7 @@ inlineNanoTime(
          resultAddress = NULL;
          }
 
-      TR::SymbolReference *gtod = comp->getSymRefTab()->findOrCreateRuntimeHelper(TR_AMD64clockGetTime,false,false,false);
+      TR::SymbolReference *gtod = comp->getSymRefTab()->findOrCreateRuntimeHelper(TR_AMD64clockGetTime);
       TR::Node *timevalNode = TR::Node::createWithSymRef(node, TR::loadaddr, 0, cg->getNanoTimeTemp());
       TR::Node *clockSourceNode = TR::Node::create(node, TR::iconst, 0, CLOCK_MONOTONIC);
       TR::Node *callNode    = TR::Node::createWithSymRef(TR::call, 2, 2, clockSourceNode, timevalNode, gtod);
@@ -9090,13 +9016,15 @@ static TR::Register* inlineStringHashCode(TR::Node* node, bool isCompressed, TR:
 
       // Prepend zeros
       {
+      TR::Compilation *comp = cg->comp();
+
       static uint64_t MASKDECOMPRESSED[] = { 0x0000000000000000ULL, 0xffffffffffffffffULL };
       static uint64_t MASKCOMPRESSED[]   = { 0xffffffff00000000ULL, 0x0000000000000000ULL };
       generateRegMemInstruction(isCompressed ? MOVDRegMem : MOVQRegMem, node, hashXMM, generateX86MemoryReference(address, index, shift, -(size << shift) + TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), cg), cg);
       generateRegMemInstruction(LEARegMem(), node, tmp, generateX86MemoryReference(cg->findOrCreate16ByteConstant(node, isCompressed ? MASKCOMPRESSED : MASKDECOMPRESSED), cg), cg);
 
       auto mr = generateX86MemoryReference(tmp, index, shift, 0, cg);
-      if (cg->getX86ProcessorInfo().supportsAVX())
+      if (comp->target().cpu.supportsAVX())
          {
          generateRegMemInstruction(PANDRegMem, node, hashXMM, mr, cg);
          }
@@ -9346,6 +9274,8 @@ static TR::Register* inlineIntrinsicIndexOf(TR::Node* node, TR::CodeGenerator* c
  */
 static TR::Register* inlineCompareAndSwapObjectNative(TR::Node* node, TR::CodeGenerator* cg)
    {
+   TR::Compilation *comp = cg->comp();
+
    TR_ASSERT(!TR::Compiler->om.canGenerateArraylets() || node->isUnsafeGetPutCASCallOnNonArray(), "This evaluator does not support arraylets.");
 
    cg->recursivelyDecReferenceCount(node->getChild(0)); // The Unsafe
@@ -9362,9 +9292,9 @@ static TR::Register* inlineCompareAndSwapObjectNative(TR::Node* node, TR::CodeGe
    TR::Register* EAX      = cg->allocateRegister();
    TR::Register* tmp      = cg->allocateRegister();
 
-   bool use64BitClasses = cg->comp()->target().is64Bit() && !cg->comp()->useCompressedPointers();
+   bool use64BitClasses = comp->target().is64Bit() && !comp->useCompressedPointers();
 
-   if (cg->comp()->target().is32Bit())
+   if (comp->target().is32Bit())
       {
       // Assume that the offset is positive and not pathologically large (i.e., > 2^31).
       offset = offset->getLowOrder();
@@ -9396,17 +9326,19 @@ static TR::Register* inlineCompareAndSwapObjectNative(TR::Node* node, TR::CodeGe
 
          generateLabelInstruction(LABEL, node, begLabel, cg);
 
-         generateRegMemInstruction(CMPRegMem(use64BitClasses), node, tmp, generateX86MemoryReference(cg->getVMThreadRegister(), cg->comp()->fej9()->thisThreadGetEvacuateBaseAddressOffset(), cg), cg);
+         generateRegMemInstruction(CMPRegMem(use64BitClasses), node, tmp, generateX86MemoryReference(cg->getVMThreadRegister(), comp->fej9()->thisThreadGetEvacuateBaseAddressOffset(), cg), cg);
          generateLabelInstruction(JAE4, node, rdbarLabel, cg);
 
          {
          TR_OutlinedInstructionsGenerator og(rdbarLabel, node, cg);
-         generateRegMemInstruction(CMPRegMem(use64BitClasses), node, tmp, generateX86MemoryReference(cg->getVMThreadRegister(), cg->comp()->fej9()->thisThreadGetEvacuateTopAddressOffset(), cg), cg);
+         generateRegMemInstruction(CMPRegMem(use64BitClasses), node, tmp, generateX86MemoryReference(cg->getVMThreadRegister(), comp->fej9()->thisThreadGetEvacuateTopAddressOffset(), cg), cg);
          generateLabelInstruction(JA4, node, endLabel, cg);
          generateRegMemInstruction(LEARegMem(), node, tmp, generateX86MemoryReference(object, offset, 0, cg), cg);
          generateMemRegInstruction(SMemReg(), node, generateX86MemoryReference(cg->getVMThreadRegister(), offsetof(J9VMThread, floatTemp1), cg), tmp, cg);
          generateHelperCallInstruction(node, TR_softwareReadBarrier, NULL, cg);
          generateLabelInstruction(JMP4, node, endLabel, cg);
+
+         og.endOutlinedInstructionSequence();
          }
 
          generateLabelInstruction(LABEL, node, endLabel, deps, cg);
@@ -9497,13 +9429,13 @@ inlineCompareAndSwapNative(
       {
       op = LCMPXCHG4MemReg;
       }
-   else if (size == 8 && cg->comp()->target().is64Bit())
+   else if (size == 8 && comp->target().is64Bit())
       {
       op = LCMPXCHG8MemReg;
       }
    else
       {
-      if (!cg->getX86ProcessorInfo().supportsCMPXCHG8BInstruction())
+      if (!comp->target().cpu.supportsFeature(OMR_FEATURE_X86_CX8))
          return false;
 
       op = LCMPXCHG8BMem;
@@ -9538,7 +9470,7 @@ inlineCompareAndSwapNative(
 
       // Assume that the offset is positive and not pathologically large (i.e., > 2^31).
       //
-      if (cg->comp()->target().is32Bit())
+      if (comp->target().is32Bit())
          offsetReg = offsetReg->getLowOrder();
       }
    cg->decReferenceCount(offsetChild);
@@ -9556,13 +9488,7 @@ inlineCompareAndSwapNative(
        isObject &&
        (newValueChild->getDataType() != TR::Address))
       {
-      bool usingLowMemHeap = false;
       bool useShiftedOffsets = (TR::Compiler->om.compressedReferenceShiftOffset() != 0);
-      bool usingCompressedPointers = false;
-
-      if (TR::Compiler->vm.heapBaseAddress() == 0 ||
-          newValueChild->isNull())
-         usingLowMemHeap = true;
 
       translatedNode = newValueChild;
       if (translatedNode->getOpCode().isConversion())
@@ -9570,26 +9496,20 @@ inlineCompareAndSwapNative(
       if (translatedNode->getOpCode().isRightShift()) // optional
          translatedNode = translatedNode->getFirstChild();
 
-      if (translatedNode->getOpCode().isSub() || usingLowMemHeap)
-         usingCompressedPointers = true;
-
       translatedNode = newValueChild;
-      if (usingCompressedPointers)
+      if (useShiftedOffsets)
          {
-         if (!usingLowMemHeap || useShiftedOffsets)
-            {
-            while ((translatedNode->getNumChildren() > 0) &&
-                   (translatedNode->getOpCodeValue() != TR::a2l))
-               translatedNode = translatedNode->getFirstChild();
+         while ((translatedNode->getNumChildren() > 0) &&
+                 (translatedNode->getOpCodeValue() != TR::a2l))
+            translatedNode = translatedNode->getFirstChild();
 
-            if (translatedNode->getOpCodeValue() == TR::a2l)
-               translatedNode = translatedNode->getFirstChild();
+         if (translatedNode->getOpCodeValue() == TR::a2l)
+            translatedNode = translatedNode->getFirstChild();
 
-            // this is required so that different registers are
-            // allocated for the actual store and translated values
-            bumpedRefCount = true;
-            translatedNode->incReferenceCount();
-            }
+         // this is required so that different registers are
+         // allocated for the actual store and translated values
+         bumpedRefCount = true;
+         translatedNode->incReferenceCount();
          }
       }
 
@@ -9770,7 +9690,7 @@ bool J9::X86::TreeEvaluator::VMinlineCallEvaluator(
                TR::Register *vmThreadReg = cg->getVMThreadRegister();
                int32_t numDeps = 2;
 
-               if (cg->comp()->target().is32Bit())
+               if (comp->target().is32Bit())
                   {
                   nativeThreadRegHigh = cg->allocateRegister();
                   numDeps ++;
@@ -9778,13 +9698,13 @@ bool J9::X86::TreeEvaluator::VMinlineCallEvaluator(
 
                TR::RegisterDependencyConditions  *deps = generateRegisterDependencyConditions((uint8_t)0, (uint8_t)numDeps, cg);
                deps->addPostCondition(nativeThreadReg, TR::RealRegister::NoReg, cg);
-               if (cg->comp()->target().is32Bit())
+               if (comp->target().is32Bit())
                   {
                   deps->addPostCondition(nativeThreadRegHigh, TR::RealRegister::NoReg, cg);
                   }
                deps->addPostCondition(vmThreadReg, TR::RealRegister::ebp, cg);
 
-               if (cg->comp()->target().is64Bit())
+               if (comp->target().is64Bit())
                   {
                   TR::LabelSymbol *startLabel = generateLabelSymbol(cg);
                   TR::LabelSymbol *doneLabel = generateLabelSymbol(cg);
@@ -9821,7 +9741,7 @@ bool J9::X86::TreeEvaluator::VMinlineCallEvaluator(
                   generateLabelInstruction(LABEL, node, doneLabel, deps, cg);
                   }
 
-               if (cg->comp()->target().is32Bit())
+               if (comp->target().is32Bit())
                   {
                   TR::RegisterPair *longRegister = cg->allocateRegisterPair(nativeThreadReg, nativeThreadRegHigh);
                   node->setRegister(longRegister);
@@ -9834,11 +9754,12 @@ bool J9::X86::TreeEvaluator::VMinlineCallEvaluator(
                return true;
                }
             return false; // Call the native version of NativeThread.current()
-
+         case TR::jdk_internal_misc_Unsafe_copyMemory0:
          case TR::sun_misc_Unsafe_copyMemory:
             {
-            if (comp->canTransformUnsafeCopyToArrayCopy() &&
-                performTransformation(comp, "O^O Call arraycopy instead of Unsafe.copyMemory: %s\n", cg->getDebug()->getName(node)))
+            if (comp->canTransformUnsafeCopyToArrayCopy()
+               && methodSymbol->isNative()
+               && performTransformation(comp, "O^O Call arraycopy instead of Unsafe.copyMemory: %s\n", cg->getDebug()->getName(node)))
                {
                TR::Node *src = node->getChild(1);
                TR::Node *srcOffset = node->getChild(2);
@@ -9846,7 +9767,7 @@ bool J9::X86::TreeEvaluator::VMinlineCallEvaluator(
                TR::Node *destOffset = node->getChild(4);
                TR::Node *len = node->getChild(5);
 
-               if (cg->comp()->target().is32Bit())
+               if (comp->target().is32Bit())
                   {
                   srcOffset = TR::Node::create(TR::l2i, 1, srcOffset);
                   destOffset = TR::Node::create(TR::l2i, 1, destOffset);
@@ -9896,7 +9817,7 @@ bool J9::X86::TreeEvaluator::VMinlineCallEvaluator(
             if(node->isSafeForCGToFastPathUnsafeCall())
                {
                if (UseOldCompareAndSwapObject)
-                  return inlineCompareAndSwapNative(node, (cg->comp()->target().is64Bit() && !comp->useCompressedPointers()) ? 8 : 4, true, cg);
+                  return inlineCompareAndSwapNative(node, (comp->target().is64Bit() && !comp->useCompressedPointers()) ? 8 : 4, true, cg);
                else
                   {
                   inlineCompareAndSwapObjectNative(node, cg);
@@ -9906,16 +9827,6 @@ bool J9::X86::TreeEvaluator::VMinlineCallEvaluator(
             }
             break;
 
-         case TR::java_lang_Long_reverseBytes:
-         case TR::java_lang_Integer_reverseBytes:
-         case TR::java_lang_Short_reverseBytes:
-            {
-            if(comp->getOption(TR_EnableJCLInline)
-               && performTransformation(comp, "O^O Enable JCL Integer/Long methods inline for: %s\n", cg->getDebug()->getName(node)) )
-               return TR::TreeEvaluator::sbyteswapEvaluator(node, cg) != NULL;
-            break;
-            }
-
          case TR::java_util_concurrent_atomic_Fences_reachabilityFence:
             {
             cg->decReferenceCount(node->getChild(0));
@@ -9924,7 +9835,7 @@ bool J9::X86::TreeEvaluator::VMinlineCallEvaluator(
 
          case TR::java_util_concurrent_atomic_Fences_orderAccesses:
             {
-            if (cg->getX86ProcessorInfo().supportsMFence())
+            if (comp->target().cpu.supportsMFence())
                {
                TR_X86OpCode fenceOp;
                fenceOp.setOpCodeValue(MFENCE);
@@ -9937,8 +9848,8 @@ bool J9::X86::TreeEvaluator::VMinlineCallEvaluator(
 
          case TR::java_util_concurrent_atomic_Fences_orderReads:
             {
-            if (cg->getX86ProcessorInfo().requiresLFENCE() &&
-                cg->getX86ProcessorInfo().supportsLFence())
+            if (comp->target().cpu.requiresLFence() &&
+                comp->target().cpu.supportsLFence())
                {
                TR_X86OpCode fenceOp;
                fenceOp.setOpCodeValue(LFENCE);
@@ -9951,7 +9862,7 @@ bool J9::X86::TreeEvaluator::VMinlineCallEvaluator(
 
          case TR::java_util_concurrent_atomic_Fences_orderWrites:
             {
-            if (cg->getX86ProcessorInfo().supportsSFence())
+            if (comp->target().cpu.supportsSFence())
                {
                TR_X86OpCode fenceOp;
                fenceOp.setOpCodeValue(SFENCE);
@@ -10032,9 +9943,9 @@ static void generateWriteBarrierCall(
    TR::LabelSymbol*       doneLabel,
    TR::CodeGenerator*     cg)
    {
-   TR_ASSERT(gcMode != gc_modron_wrtbar_satb && !TR::Options::getCmdLineOptions()->realTimeGC(), "This helper is not for RealTimeGC.");
-
    TR::Compilation *comp = cg->comp();
+   TR_ASSERT(gcMode != gc_modron_wrtbar_satb && !comp->getOptions()->realTimeGC(), "This helper is not for RealTimeGC.");
+
    uint8_t helperArgCount = 0;  // Number of arguments passed on the runtime helper.
    TR::SymbolReference *wrtBarSymRef = NULL;
 
@@ -10077,8 +9988,10 @@ static void generateWriteBarrierCall(
       {
       generateMemRegInstruction(SMemReg(), node, generateX86MemoryReference(cg->getVMThreadRegister(), offsetof(J9VMThread, floatTemp2), cg), sourceReg, cg);
       }
-   generateImmSymInstruction(CALLImm4, node, (uintptrj_t)wrtBarSymRef->getMethodAddress(), wrtBarSymRef, cg);
+   generateImmSymInstruction(CALLImm4, node, (uintptr_t)wrtBarSymRef->getMethodAddress(), wrtBarSymRef, cg);
    generateLabelInstruction(JMP4, node, doneLabel, cg);
+
+   og.endOutlinedInstructionSequence();
    }
 
 static void reportFlag(bool value, char *name, TR::CodeGenerator *cg)
@@ -10119,7 +10032,7 @@ void J9::X86::TreeEvaluator::VMwrtbarRealTimeWithoutStoreEvaluator(
    {
    TR::Compilation *comp = cg->comp();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg->fe());
-   TR_ASSERT(TR::Options::getCmdLineOptions()->realTimeGC(),"Call the non real-time barrier");
+   TR_ASSERT(comp->getOptions()->realTimeGC(),"Call the non real-time barrier");
    auto gcMode = TR::Compiler->om.writeBarrierType();
 
    if (node->getOpCode().isWrtBar() && node->skipWrtBar())
@@ -10244,14 +10157,14 @@ void J9::X86::TreeEvaluator::VMwrtbarRealTimeWithoutStoreEvaluator(
       if (comp->getOption(TR_CountWriteBarriersRT))
          {
          TR::MemoryReference *barrierCountMR = generateX86MemoryReference(cg->getVMThreadRegister(), offsetof(J9VMThread, debugEventData6), cg);
-         generateMemInstruction(INCMem(cg->comp()->target().is64Bit()), node, barrierCountMR, cg);
+         generateMemInstruction(INCMem(comp->target().is64Bit()), node, barrierCountMR, cg);
          }
 
       tempReg = srm->findOrCreateScratchRegister();
 
       // if barrier not enabled, nothing to do
       TR::MemoryReference *fragmentParentMR = generateX86MemoryReference(cg->getVMThreadRegister(), fej9->thisThreadRememberedSetFragmentOffset() + fej9->getFragmentParentOffset(), cg);
-      generateRegMemInstruction(LRegMem(cg->comp()->target().is64Bit()), node, tempReg, fragmentParentMR, cg);
+      generateRegMemInstruction(LRegMem(comp->target().is64Bit()), node, tempReg, fragmentParentMR, cg);
       TR::MemoryReference *globalFragmentIDMR = generateX86MemoryReference(tempReg, fej9->getRememberedSetGlobalFragmentOffset(), cg);
       generateMemImmInstruction(CMPMemImms(), node, globalFragmentIDMR, 0, cg);
       generateLabelInstruction(JE4, node, doneLabel, cg);
@@ -10265,7 +10178,7 @@ void J9::X86::TreeEvaluator::VMwrtbarRealTimeWithoutStoreEvaluator(
       // null test on the reference we're about to store over: if it is null goto doneLabel
       // if (destObject->field == null) goto doneLabel
       TR::MemoryReference *nullTestMR = generateX86MemoryReference(storeAddressRegForRealTime, 0, cg);
-      if (cg->comp()->target().is64Bit() && comp->useCompressedPointers())
+      if (comp->target().is64Bit() && comp->useCompressedPointers())
          generateMemImmInstruction(CMP4MemImms, node, nullTestMR, 0, cg);
       else
          generateMemImmInstruction(CMPMemImms(), node, nullTestMR, 0, cg);
@@ -10346,7 +10259,7 @@ void J9::X86::TreeEvaluator::VMwrtbarWithoutStoreEvaluator(
    {
    TR::Compilation *comp = cg->comp();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg->fe());
-   TR_ASSERT(!(TR::Options::getCmdLineOptions()->realTimeGC()),"Call the real-time barrier");
+   TR_ASSERT(!(comp->getOptions()->realTimeGC()),"Call the real-time barrier");
    auto gcMode = TR::Compiler->om.writeBarrierType();
 
    if (node->getOpCode().isWrtBar() && node->skipWrtBar())
@@ -10568,7 +10481,7 @@ void J9::X86::TreeEvaluator::VMwrtbarWithoutStoreEvaluator(
          {
          uintptr_t chb = comp->getOptions()->getHeapBaseForBarrierRange0();
 
-         if (cg->comp()->target().is64Bit() && (!IS_32BIT_SIGNED(chb) || TR::Compiler->om.nativeAddressesCanChangeSize()))
+         if (comp->target().is64Bit() && (!IS_32BIT_SIGNED(chb) || TR::Compiler->om.nativeAddressesCanChangeSize()))
             {
             TR::Register *chbReg = srm->findOrCreateScratchRegister();
             generateRegImm64Instruction(MOV8RegImm64, node, chbReg, chb, cg, TR_HEAP_BASE_FOR_BARRIER_RANGE);
@@ -10595,7 +10508,7 @@ void J9::X86::TreeEvaluator::VMwrtbarWithoutStoreEvaluator(
             {
             uintptr_t chs = comp->getOptions()->getHeapSizeForBarrierRange0();
 
-            if (cg->comp()->target().is64Bit() && (!IS_32BIT_SIGNED(chs) || TR::Compiler->om.nativeAddressesCanChangeSize()))
+            if (comp->target().is64Bit() && (!IS_32BIT_SIGNED(chs) || TR::Compiler->om.nativeAddressesCanChangeSize()))
                {
                TR::Register *chsReg = srm->findOrCreateScratchRegister();
                generateRegImm64Instruction(MOV8RegImm64, node, chsReg, chs, cg, TR_HEAP_SIZE_FOR_BARRIER_RANGE);
@@ -10630,7 +10543,7 @@ void J9::X86::TreeEvaluator::VMwrtbarWithoutStoreEvaluator(
          {
          uintptr_t actb = comp->getOptions()->getActiveCardTableBase();
 
-         if (cg->comp()->target().is64Bit() && (!IS_32BIT_SIGNED(actb) || TR::Compiler->om.nativeAddressesCanChangeSize()))
+         if (comp->target().is64Bit() && (!IS_32BIT_SIGNED(actb) || TR::Compiler->om.nativeAddressesCanChangeSize()))
             {
             TR::Register *tempReg3 = srm->findOrCreateScratchRegister();
                generateRegImm64Instruction(MOV8RegImm64, node, tempReg3, actb, cg, TR_ACTIVE_CARD_TABLE_BASE);
@@ -10647,6 +10560,8 @@ void J9::X86::TreeEvaluator::VMwrtbarWithoutStoreEvaluator(
       generateMemImmInstruction(S1MemImm1, node, cardTableMR, dirtyCard, cg);
       srm->reclaimScratchRegister(tempReg);
       generateLabelInstruction(JMP4, node, doneLabel, cg);
+
+      og.endOutlinedInstructionSequence();
       }
    else if (doInlineCardMarkingWithoutOldSpaceCheck && !dirtyCardTableOutOfLine)
       {
@@ -10666,7 +10581,7 @@ void J9::X86::TreeEvaluator::VMwrtbarWithoutStoreEvaluator(
          {
          uintptr_t chb = comp->getOptions()->getHeapBaseForBarrierRange0();
 
-         if (cg->comp()->target().is64Bit() && (!IS_32BIT_SIGNED(chb) || TR::Compiler->om.nativeAddressesCanChangeSize()))
+         if (comp->target().is64Bit() && (!IS_32BIT_SIGNED(chb) || TR::Compiler->om.nativeAddressesCanChangeSize()))
             {
             TR::Register *chbReg = srm->findOrCreateScratchRegister();
             generateRegImm64Instruction(MOV8RegImm64, node, chbReg, chb, cg, TR_HEAP_BASE_FOR_BARRIER_RANGE);
@@ -10693,7 +10608,7 @@ void J9::X86::TreeEvaluator::VMwrtbarWithoutStoreEvaluator(
             {
             uintptr_t chs = comp->getOptions()->getHeapSizeForBarrierRange0();
 
-            if (cg->comp()->target().is64Bit() && (!IS_32BIT_SIGNED(chs) || TR::Compiler->om.nativeAddressesCanChangeSize()))
+            if (comp->target().is64Bit() && (!IS_32BIT_SIGNED(chs) || TR::Compiler->om.nativeAddressesCanChangeSize()))
                {
                TR::Register *chsReg = srm->findOrCreateScratchRegister();
                generateRegImm64Instruction(MOV8RegImm64, node, chsReg, chs, cg, TR_HEAP_SIZE_FOR_BARRIER_RANGE);
@@ -10728,7 +10643,7 @@ void J9::X86::TreeEvaluator::VMwrtbarWithoutStoreEvaluator(
          {
          uintptr_t actb = comp->getOptions()->getActiveCardTableBase();
 
-         if (cg->comp()->target().is64Bit() && (!IS_32BIT_SIGNED(actb) || TR::Compiler->om.nativeAddressesCanChangeSize()))
+         if (comp->target().is64Bit() && (!IS_32BIT_SIGNED(actb) || TR::Compiler->om.nativeAddressesCanChangeSize()))
             {
             TR::Register *tempReg3 = srm->findOrCreateScratchRegister();
                generateRegImm64Instruction(MOV8RegImm64, node, tempReg3, actb, cg, TR_ACTIVE_CARD_TABLE_BASE);
@@ -10793,13 +10708,13 @@ void J9::X86::TreeEvaluator::VMwrtbarWithoutStoreEvaluator(
              && (node->getOpCodeValue() == TR::awrtbari)
              && doInternalControlFlow)
             {
-            bool is64Bit = cg->comp()->target().is64Bit(); // On compressed refs, owningObjectReg is already uncompressed, and the vmthread fields are 64 bits
+            bool is64Bit = comp->target().is64Bit(); // On compressed refs, owningObjectReg is already uncompressed, and the vmthread fields are 64 bits
             labelAfterBranchToSnippet = generateLabelSymbol(cg);
             // AOT support to be implemented in another PR
-            if (!comp->getOptions()->isVariableHeapSizeForBarrierRange0() && !cg->comp()->compileRelocatableCode() && !disableWrtbarOpt)
+            if (!comp->getOptions()->isVariableHeapSizeForBarrierRange0() && !comp->compileRelocatableCode() && !disableWrtbarOpt)
                {
                uintptr_t che = comp->getOptions()->getHeapBaseForBarrierRange0() + comp->getOptions()->getHeapSizeForBarrierRange0();
-               if (cg->comp()->target().is64Bit() && !IS_32BIT_SIGNED(che))
+               if (comp->target().is64Bit() && !IS_32BIT_SIGNED(che))
                   {
                   generateRegMemInstruction(CMP8RegMem, node, owningObjectReg, generateX86MemoryReference(cg->findOrCreate8ByteConstant(node, che), cg), cg);
                   }
@@ -10813,7 +10728,7 @@ void J9::X86::TreeEvaluator::VMwrtbarWithoutStoreEvaluator(
                uintptr_t chb = comp->getOptions()->getHeapBaseForBarrierRange0();
                TR::Register *tempOwningObjReg = srm->findOrCreateScratchRegister();
                generateRegRegInstruction(MOVRegReg(),  node, tempOwningObjReg, owningObjectReg, cg);
-               if (cg->comp()->target().is64Bit() && (!IS_32BIT_SIGNED(chb) || TR::Compiler->om.nativeAddressesCanChangeSize()))
+               if (comp->target().is64Bit() && (!IS_32BIT_SIGNED(chb) || TR::Compiler->om.nativeAddressesCanChangeSize()))
                   {
                   TR::Register *chbReg = srm->findOrCreateScratchRegister();
                   generateRegImm64Instruction(MOV8RegImm64, node, chbReg, chb, cg, TR_HEAP_BASE_FOR_BARRIER_RANGE);
@@ -10880,15 +10795,15 @@ void J9::X86::TreeEvaluator::VMwrtbarWithoutStoreEvaluator(
          TR_ASSERT((!skipSnippetIfSrcNotOld || !skipSnippetIfDestOld), "At most one of skipSnippetIfSrcNotOld and skipSnippetIfDestOld can be true");
          TR_ASSERT(skipSnippetIfDestOld || (srcReg != NULL), "Expected to have a source register for wrtbari");
 
-         bool is64Bit = cg->comp()->target().is64Bit(); // On compressed refs, owningObjectReg is already uncompressed, and the vmthread fields are 64 bits
+         bool is64Bit = comp->target().is64Bit(); // On compressed refs, owningObjectReg is already uncompressed, and the vmthread fields are 64 bits
          bool checkDest = skipSnippetIfDestOld;   // Otherwise, check the src value
          bool skipSnippetIfOld = skipSnippetIfDestOld;   // Otherwise, skip if the checked value (source or destination) is not old
          labelAfterBranchToSnippet = generateLabelSymbol(cg);
          // AOT support to be implemented in another PR
-         if (!comp->getOptions()->isVariableHeapSizeForBarrierRange0() && !cg->comp()->compileRelocatableCode() && !disableWrtbarOpt)
+         if (!comp->getOptions()->isVariableHeapSizeForBarrierRange0() && !comp->compileRelocatableCode() && !disableWrtbarOpt)
             {
             uintptr_t che = comp->getOptions()->getHeapBaseForBarrierRange0() + comp->getOptions()->getHeapSizeForBarrierRange0();
-            if (cg->comp()->target().is64Bit() && !IS_32BIT_SIGNED(che))
+            if (comp->target().is64Bit() && !IS_32BIT_SIGNED(che))
                {
                generateRegMemInstruction(CMP8RegMem, node, checkDest ? owningObjectReg : srcReg, generateX86MemoryReference(cg->findOrCreate8ByteConstant(node, che), cg), cg);
                }
@@ -10902,7 +10817,7 @@ void J9::X86::TreeEvaluator::VMwrtbarWithoutStoreEvaluator(
             uintptr_t chb = comp->getOptions()->getHeapBaseForBarrierRange0();
             TR::Register *tempReg = srm->findOrCreateScratchRegister();
             generateRegRegInstruction(MOVRegReg(),  node, tempReg, checkDest ? owningObjectReg : srcReg, cg);
-            if (cg->comp()->target().is64Bit() && (!IS_32BIT_SIGNED(chb) || TR::Compiler->om.nativeAddressesCanChangeSize()))
+            if (comp->target().is64Bit() && (!IS_32BIT_SIGNED(chb) || TR::Compiler->om.nativeAddressesCanChangeSize()))
                {
                TR::Register *chbReg = srm->findOrCreateScratchRegister();
                generateRegImm64Instruction(MOV8RegImm64, node, chbReg, chb, cg, TR_HEAP_BASE_FOR_BARRIER_RANGE);
@@ -11017,7 +10932,7 @@ void J9::X86::TreeEvaluator::VMwrtbarWithStoreEvaluator(
    TR::Register *sourceRegister = cg->evaluate(sourceObject);
 
    auto gcMode = TR::Compiler->om.writeBarrierType();
-   bool isRealTimeGC = (TR::Options::getCmdLineOptions()->realTimeGC())? true:false;
+   bool isRealTimeGC = (comp->getOptions()->realTimeGC())? true:false;
 
    bool usingCompressedPointers = false;
    bool usingLowMemHeap = false;
@@ -11038,36 +10953,8 @@ void J9::X86::TreeEvaluator::VMwrtbarWithStoreEvaluator(
       else
          translatedStore = node;
 
-      // pattern match the sequence
-      //     iwrtbar f     iwrtbar f         <- node
-      //       aload O       aload O
-      //     value           l2i
-      //                       lshr
-      //                         lsub        <- translatedNode
-      //                           a2l
-      //                             value   <- sourceObject
-      //                           lconst HB
-      //                         iconst shftKonst
-      //
-      // -or- if the field is known to be null
-      // iwrtbar f
-      //    aload O
-      //    l2i
-      //      a2l
-      //        value  <- sourceObject
-      //
-      TR::Node *translatedNode = translatedStore->getSecondChild();
-      if (translatedNode->getOpCode().isConversion())
-         translatedNode = translatedNode->getFirstChild();
-      if (translatedNode->getOpCode().isRightShift()) // optional
-         translatedNode = translatedNode->getFirstChild();
-
-      if ((TR::Compiler->vm.heapBaseAddress() == 0) ||
-            translatedStore->getSecondChild()->isNull())
-         usingLowMemHeap = true;
-
-      if (translatedNode->getOpCode().isSub() || usingLowMemHeap)
-         usingCompressedPointers = true;
+      usingLowMemHeap = true;
+      usingCompressedPointers = true;
       }
 
    TR::Register *translatedSourceReg = sourceRegister;
@@ -11126,7 +11013,7 @@ void J9::X86::TreeEvaluator::VMwrtbarWithStoreEvaluator(
       TR::RegisterDependencyConditions *deps = NULL;
       TR::LabelSymbol *doneWrtBarLabel = generateLabelSymbol(cg);
 
-      if (cg->comp()->target().is32Bit() && sourceObject->isNonNull() == false)
+      if (comp->target().is32Bit() && sourceObject->isNonNull() == false)
          {
          TR::LabelSymbol *startLabel = generateLabelSymbol(cg);
          startLabel->setStartInternalControlFlow();
@@ -11147,7 +11034,7 @@ void J9::X86::TreeEvaluator::VMwrtbarWithStoreEvaluator(
       generateMemRegInstruction(SMemReg(), node, generateX86MemoryReference(cg->getVMThreadRegister(), offsetof(J9VMThread, floatTemp2), cg), sourceRegister, cg);
 
       TR::SymbolReference* wrtBarSymRef = comp->getSymRefTab()->findOrCreateWriteBarrierStoreSymbolRef();
-      generateImmSymInstruction(CALLImm4, node, (uintptrj_t)wrtBarSymRef->getMethodAddress(), wrtBarSymRef, cg);
+      generateImmSymInstruction(CALLImm4, node, (uintptr_t)wrtBarSymRef->getMethodAddress(), wrtBarSymRef, cg);
 
       generateLabelInstruction(LABEL, node, doneWrtBarLabel, deps, cg);
       }
@@ -11201,7 +11088,7 @@ void J9::X86::TreeEvaluator::VMwrtbarWithStoreEvaluator(
 void J9::X86::TreeEvaluator::generateVFTMaskInstruction(TR::Node *node, TR::Register *reg, TR::CodeGenerator *cg)
    {
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg->fe());
-   uintptrj_t mask = TR::Compiler->om.maskOfObjectVftField();
+   uintptr_t mask = TR::Compiler->om.maskOfObjectVftField();
    bool is64Bit = cg->comp()->target().is64Bit(); // even with compressed object headers, a 64-bit mask operation is safe, though it may waste 1 byte because of the rex prefix
    if (~mask == 0)
       {
@@ -11239,7 +11126,7 @@ VMgenerateCatchBlockBBStartPrologue(
       TR::LabelSymbol *snippetLabel = generateLabelSymbol(cg);
       TR::LabelSymbol *restartLabel = generateLabelSymbol(cg);
 
-      generateMemInstruction(DEC4Mem, node, generateX86MemoryReference((intptrj_t)comp->getRecompilationInfo()->getCounterAddress(), cg), cg);
+      generateMemInstruction(DEC4Mem, node, generateX86MemoryReference((intptr_t)comp->getRecompilationInfo()->getCounterAddress(), cg), cg);
       generateLabelInstruction(JE4, node, snippetLabel, cg);
       generateLabelInstruction(LABEL, node, restartLabel, cg);
       cg->addSnippet(new (cg->trHeapMemory()) TR::X86ForceRecompilationSnippet(cg, node, restartLabel, snippetLabel));
@@ -11274,6 +11161,7 @@ J9::X86::TreeEvaluator::tstartEvaluator(TR::Node *node, TR::CodeGenerator *cg)
       jne spinLabel
       jmp TransientFailureNodeLabel
    */
+   TR::Compilation *comp = cg->comp();
    TR::Node *persistentFailureNode = node->getFirstChild();
    TR::Node *transientFailureNode  = node->getSecondChild();
    TR::Node *fallThroughNode = node->getThirdChild();
@@ -11344,7 +11232,7 @@ J9::X86::TreeEvaluator::tstartEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    //mov monReg, obj+offset
    int32_t lwOffset = cg->fej9()->getByteOffsetToLockword((TR_OpaqueClassBlock *) cg->getMonClass(node));
    TR::MemoryReference *objLockRef = generateX86MemoryReference(objReg, lwOffset, cg);
-   if (cg->comp()->target().is64Bit() && cg->fej9()->generateCompressedLockWord())
+   if (comp->target().is64Bit() && cg->fej9()->generateCompressedLockWord())
       {
       generateRegMemInstruction(L4RegMem, node, monReg, objLockRef, cg);
       }
@@ -11353,7 +11241,7 @@ J9::X86::TreeEvaluator::tstartEvaluator(TR::Node *node, TR::CodeGenerator *cg)
       generateRegMemInstruction(LRegMem(), node, monReg, objLockRef, cg);
       }
 
-   if (cg->comp()->target().is64Bit() && cg->fej9()->generateCompressedLockWord())
+   if (comp->target().is64Bit() && cg->fej9()->generateCompressedLockWord())
       {
       generateRegImmInstruction(CMP4RegImm4, node, monReg, 0, cg);
       }
@@ -11368,7 +11256,7 @@ J9::X86::TreeEvaluator::tstartEvaluator(TR::Node *node, TR::CodeGenerator *cg)
       generateLabelInstruction(JE4, node, fallThroughLabel, cg);
 
    TR::Register *vmThreadReg = cg->getVMThreadRegister();
-   if (cg->comp()->target().is64Bit() && cg->fej9()->generateCompressedLockWord())
+   if (comp->target().is64Bit() && cg->fej9()->generateCompressedLockWord())
       {
       generateRegRegInstruction(CMP4RegReg, node, monReg, vmThreadReg, cg);
       }
@@ -11466,7 +11354,6 @@ J9::X86::TreeEvaluator::tabortEvaluator(TR::Node *node, TR::CodeGenerator *cg)
 TR::Register *
 J9::X86::TreeEvaluator::directCallEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
-
    static bool useJapaneseCompression = (feGetEnv("TR_JapaneseComp") != NULL);
    TR::Compilation *comp = cg->comp();
    TR::SymbolReference *symRef = node->getSymbolReference();
@@ -11588,9 +11475,6 @@ J9::X86::TreeEvaluator::directCallEvaluator(TR::Node *node, TR::CodeGenerator *c
 
       case TR::java_lang_Math_sqrt:
       case TR::java_lang_StrictMath_sqrt:
-      case TR::java_lang_Long_reverseBytes:
-      case TR::java_lang_Integer_reverseBytes:
-      case TR::java_lang_Short_reverseBytes:
       case TR::java_lang_System_nanoTime:
       case TR::java_util_concurrent_atomic_Fences_orderAccesses:
       case TR::java_util_concurrent_atomic_Fences_orderReads:
@@ -11758,7 +11642,7 @@ J9::X86::TreeEvaluator::compressStringEvaluator(
    stopUsingCopyReg3 = TR::TreeEvaluator::stopUsingCopyRegInteger(startNode, startReg, cg);
    stopUsingCopyReg4 = TR::TreeEvaluator::stopUsingCopyRegInteger(lengthNode, lengthReg, cg);
 
-   uintptrj_t hdrSize = TR::Compiler->om.contiguousArrayHeaderSizeInBytes();
+   uintptr_t hdrSize = TR::Compiler->om.contiguousArrayHeaderSizeInBytes();
    generateRegImmInstruction(ADDRegImms(), node, srcObjReg, hdrSize, cg);
    generateRegImmInstruction(ADDRegImms(), node, dstObjReg, hdrSize, cg);
 
@@ -12029,7 +11913,7 @@ J9::X86::TreeEvaluator::stringCaseConversionHelper(TR::Node *node, TR::CodeGener
    TR::Instruction * cursor = NULL;
 
    uint32_t strideSize = 16;
-   uintptrj_t headerSize = TR::Compiler->om.contiguousArrayHeaderSizeInBytes();
+   uintptr_t headerSize = TR::Compiler->om.contiguousArrayHeaderSizeInBytes();
 
    static uint16_t MINUS1[] =
       {
@@ -12204,7 +12088,7 @@ J9::X86::TreeEvaluator::compressStringNoCheckEvaluator(
    stopUsingCopyReg3 = TR::TreeEvaluator::stopUsingCopyRegInteger(startNode, startReg, cg);
    stopUsingCopyReg4 = TR::TreeEvaluator::stopUsingCopyRegInteger(lengthNode, lengthReg, cg);
 
-   uintptrj_t hdrSize = TR::Compiler->om.contiguousArrayHeaderSizeInBytes();
+   uintptr_t hdrSize = TR::Compiler->om.contiguousArrayHeaderSizeInBytes();
    generateRegImmInstruction(ADDRegImms(), node, srcObjReg, hdrSize, cg);
    generateRegImmInstruction(ADDRegImms(), node, dstObjReg, hdrSize, cg);
 
@@ -12259,7 +12143,7 @@ J9::X86::TreeEvaluator::andORStringEvaluator(TR::Node *node, TR::CodeGenerator *
    stopUsingCopyReg2 = TR::TreeEvaluator::stopUsingCopyRegInteger(startNode, startReg, cg);
    stopUsingCopyReg3 = TR::TreeEvaluator::stopUsingCopyRegInteger(lengthNode, lengthReg, cg);
 
-   uintptrj_t hdrSize = TR::Compiler->om.contiguousArrayHeaderSizeInBytes();
+   uintptr_t hdrSize = TR::Compiler->om.contiguousArrayHeaderSizeInBytes();
    generateRegImmInstruction(ADDRegImms(), node, srcObjReg, hdrSize, cg);
 
    // Now that we have all the registers, set up the dependencies
@@ -12313,8 +12197,9 @@ J9::X86::TreeEvaluator::andORStringEvaluator(TR::Node *node, TR::CodeGenerator *
 void
 J9::X86::TreeEvaluator::generateFillInDataBlockSequenceForUnresolvedField (TR::CodeGenerator *cg, TR::Node *node, TR::Snippet *dataSnippet, bool isWrite, TR::Register *sideEffectRegister, TR::Register *dataSnippetRegister)
    {
+   TR::Compilation *comp = cg->comp();
    TR::SymbolReference *symRef = node->getSymbolReference();
-   bool is64Bit = cg->comp()->target().is64Bit();
+   bool is64Bit = comp->target().is64Bit();
    bool isStatic = symRef->getSymbol()->getKind() == TR::Symbol::IsStatic;
    TR_RuntimeHelper helperIndex = isWrite? (isStatic ?  TR_jitResolveStaticFieldSetterDirect: TR_jitResolveFieldSetterDirect):
                                            (isStatic ?  TR_jitResolveStaticFieldDirect: TR_jitResolveFieldDirect);
@@ -12356,13 +12241,13 @@ J9::X86::TreeEvaluator::generateFillInDataBlockSequenceForUnresolvedField (TR::C
          if (isWrite)
             {
             fieldClassReg = cg->allocateRegister();
-            generateRegMemInstruction(LRegMem(), node, fieldClassReg, generateX86MemoryReference(sideEffectRegister, cg->comp()->fej9()->getOffsetOfClassFromJavaLangClassField(), cg), cg);
+            generateRegMemInstruction(LRegMem(), node, fieldClassReg, generateX86MemoryReference(sideEffectRegister, comp->fej9()->getOffsetOfClassFromJavaLangClassField(), cg), cg);
             }
          else
             {
             fieldClassReg = sideEffectRegister;
             }
-         generateMemRegInstruction(SMemReg(is64Bit), node, generateX86MemoryReference(dataBlockReg, (intptrj_t)(offsetof(J9JITWatchedStaticFieldData, fieldClass)), cg), fieldClassReg, cg);
+         generateMemRegInstruction(SMemReg(is64Bit), node, generateX86MemoryReference(dataBlockReg, (intptr_t)(offsetof(J9JITWatchedStaticFieldData, fieldClass)), cg), fieldClassReg, cg);
          deps->addPreCondition(fieldClassReg, TR::RealRegister::NoReg, cg);
          deps->addPostCondition(fieldClassReg, TR::RealRegister::NoReg, cg);
          if (isWrite)
@@ -12371,12 +12256,12 @@ J9::X86::TreeEvaluator::generateFillInDataBlockSequenceForUnresolvedField (TR::C
             }
          }
 
-      TR::ResolvedMethodSymbol *methodSymbol = node->getByteCodeInfo().getCallerIndex() == -1 ? cg->comp()->getMethodSymbol(): cg->comp()->getInlinedResolvedMethodSymbol(node->getByteCodeInfo().getCallerIndex());
+      TR::ResolvedMethodSymbol *methodSymbol = node->getByteCodeInfo().getCallerIndex() == -1 ? comp->getMethodSymbol(): comp->getInlinedResolvedMethodSymbol(node->getByteCodeInfo().getCallerIndex());
       if (is64Bit)
          {
          TR::Register *cpAddressReg = cg->allocateRegister();
          TR::Register *cpIndexReg = cg->allocateRegister();
-         generateRegImm64SymInstruction(MOV8RegImm64, node, cpAddressReg, (uintptrj_t) methodSymbol->getResolvedMethod()->constantPool(), cg->comp()->getSymRefTab()->findOrCreateConstantPoolAddressSymbolRef(methodSymbol), cg);
+         generateRegImm64SymInstruction(MOV8RegImm64, node, cpAddressReg, (uintptr_t) methodSymbol->getResolvedMethod()->constantPool(), comp->getSymRefTab()->findOrCreateConstantPoolAddressSymbolRef(methodSymbol), cg);
          generateRegImmInstruction(MOV8RegImm4, node, cpIndexReg, symRef->getCPIndex(), cg);
          deps->addPreCondition(cpAddressReg, linkageProperties.getArgumentRegister(0, false /* isFloat */), cg);
          deps->addPostCondition(cpAddressReg, linkageProperties.getArgumentRegister(0, false /* isFloat */), cg);
@@ -12388,7 +12273,7 @@ J9::X86::TreeEvaluator::generateFillInDataBlockSequenceForUnresolvedField (TR::C
       else
          {
          generateImmInstruction(PUSHImm4, node, symRef->getCPIndex(), cg);
-         generateImmSymInstruction(PUSHImm4, node, (uintptrj_t) methodSymbol->getResolvedMethod()->constantPool(), cg->comp()->getSymRefTab()->findOrCreateConstantPoolAddressSymbolRef(methodSymbol), cg);
+         generateImmSymInstruction(PUSHImm4, node, (uintptr_t) methodSymbol->getResolvedMethod()->constantPool(), comp->getSymRefTab()->findOrCreateConstantPoolAddressSymbolRef(methodSymbol), cg);
          resultReg = cg->allocateRegister();
          deps->addPreCondition(resultReg, linkageProperties.getIntegerReturnRegister(), cg);
          deps->addPostCondition(resultReg, linkageProperties.getIntegerReturnRegister(), cg);
@@ -12408,6 +12293,8 @@ J9::X86::TreeEvaluator::generateFillInDataBlockSequenceForUnresolvedField (TR::C
       //store result into J9JITWatchedStaticFieldData.fieldAddress / J9JITWatchedInstanceFieldData.offset
       generateMemRegInstruction(SMemReg(is64Bit), node, generateX86MemoryReference(dataBlockReg, offsetInDataBlock, cg), resultReg, cg);
       generateLabelInstruction(JMP4, node, endLabel, cg);
+
+      og.endOutlinedInstructionSequence();
       }
 
    deps->stopAddingConditions();
@@ -12598,7 +12485,7 @@ J9::X86::TreeEvaluator::generateTestAndReportFieldWatchInstructions(TR::CodeGene
       TR::Register *objReg = sideEffectRegister;
       fieldClassReg = cg->allocateRegister();
       generateLoadJ9Class(node, fieldClassReg, objReg, cg);
-      classFlagsMemRef = generateX86MemoryReference(fieldClassReg, (uintptrj_t)(fej9->getOffsetOfClassFlags()), cg);
+      classFlagsMemRef = generateX86MemoryReference(fieldClassReg, (uintptr_t)(fej9->getOffsetOfClassFlags()), cg);
       }
    else
       {
@@ -12608,7 +12495,7 @@ J9::X86::TreeEvaluator::generateTestAndReportFieldWatchInstructions(TR::CodeGene
             {
             // For non-AOT (JIT and JITServer) compiles we don't need to use sideEffectRegister here as the class information is available to us at compile time.
             J9Class *fieldClass = static_cast<TR::J9WatchedStaticFieldSnippet *>(dataSnippet)->getFieldClass();
-            classFlagsMemRef = generateX86MemoryReference((uintptrj_t)fieldClass + fej9->getOffsetOfClassFlags(), cg);
+            classFlagsMemRef = generateX86MemoryReference((uintptr_t)fieldClass + fej9->getOffsetOfClassFlags(), cg);
             }
          else
             {
@@ -12649,6 +12536,7 @@ J9::X86::TreeEvaluator::generateTestAndReportFieldWatchInstructions(TR::CodeGene
       {
       TR_OutlinedInstructionsGenerator og(fieldReportLabel, node ,cg);
       generateReportFieldAccessOutlinedInstructions(node, endLabel, dataSnippet, isWrite, deps, cg, sideEffectRegister, valueReg);
+      og.endOutlinedInstructionSequence();
       }
    deps->stopAddingConditions();
    generateLabelInstruction(LABEL, node, endLabel, deps, cg);
@@ -12663,7 +12551,7 @@ TR::Register *
 J9::X86::TreeEvaluator::generateConcurrentScavengeSequence(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::Register* object = TR::TreeEvaluator::performHeapLoadWithReadBarrier(node, cg);
-   
+
    if (!node->getSymbolReference()->isUnresolved() &&
        (node->getSymbolReference()->getSymbol()->getKind() == TR::Symbol::IsShadow) &&
        (node->getSymbolReference()->getCPIndex() >= 0) &&
@@ -12712,7 +12600,7 @@ J9::X86::TreeEvaluator::irdbariEvaluator(TR::Node *node, TR::CodeGenerator *cg)
          }
       }
 
-   // Note: For indirect rdbar nodes, the first child (sideEffectNode) is also used by the 
+   // Note: For indirect rdbar nodes, the first child (sideEffectNode) is also used by the
    // load evaluator. The load evaluator will also evaluate+decrement it. In order to avoid double
    // decrementing the node we skip doing it here and let the load evaluator do it.
    return resultReg;
@@ -12780,7 +12668,7 @@ J9::X86::TreeEvaluator::ardbariEvaluator(TR::Node *node, TR::CodeGenerator *cg)
       node->setRegister(resultReg);
       }
 
-   // Note: For indirect rdbar nodes, the first child (sideEffectNode) is also used by the 
+   // Note: For indirect rdbar nodes, the first child (sideEffectNode) is also used by the
    // load evaluator. The load evaluator will also evaluate+decrement it. In order to avoid double
    // decrementing the node we skip doing it here and let the load evaluator do it.
    return resultReg;
@@ -12800,7 +12688,7 @@ TR::Register *J9::X86::TreeEvaluator::fwrtbarEvaluator(TR::Node *node, TR::CodeG
       TR::TreeEvaluator::rdWrtbarHelperForFieldWatch(node, cg, sideEffectRegister, valueReg);
       }
 
-   // Note: The reference count for valueReg's node is not decremented here because the 
+   // Note: The reference count for valueReg's node is not decremented here because the
    // store evaluator also uses it and so it will evaluate+decrement it. Thus we must skip decrementing here
    // to avoid double decrementing.
    cg->decReferenceCount(sideEffectNode);
@@ -12821,7 +12709,7 @@ TR::Register *J9::X86::TreeEvaluator::fwrtbariEvaluator(TR::Node *node, TR::Code
       TR::TreeEvaluator::rdWrtbarHelperForFieldWatch(node, cg, sideEffectRegister, valueReg);
       }
 
-   // Note: The reference count for valueReg's node is not decremented here because the 
+   // Note: The reference count for valueReg's node is not decremented here because the
    // store evaluator also uses it and so it will evaluate+decrement it. Thus we must skip decrementing here
    // to avoid double decrementing.
    cg->decReferenceCount(sideEffectNode);
@@ -12829,7 +12717,7 @@ TR::Register *J9::X86::TreeEvaluator::fwrtbariEvaluator(TR::Node *node, TR::Code
    }
 
 #ifdef TR_TARGET_32BIT
-TR::Register *J9::X86::i386::TreeEvaluator::dwrtbarEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+TR::Register *J9::X86::I386::TreeEvaluator::dwrtbarEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    // For rdbar and wrtbar nodes we first evaluate the children we need to
    // handle the side effects. Then we delegate the evaluation of the remaining
@@ -12843,14 +12731,14 @@ TR::Register *J9::X86::i386::TreeEvaluator::dwrtbarEvaluator(TR::Node *node, TR:
       TR::TreeEvaluator::rdWrtbarHelperForFieldWatch(node, cg, sideEffectRegister, valueReg);
       }
 
-   // Note: The reference count for valueReg's node is not decremented here because the 
+   // Note: The reference count for valueReg's node is not decremented here because the
    // store evaluator also uses it and so it will evaluate+decrement it. Thus we must skip decrementing here
    // to avoid double decrementing.
    cg->decReferenceCount(sideEffectNode);
    return TR::TreeEvaluator::dstoreEvaluator(node, cg);
    }
 
-TR::Register *J9::X86::i386::TreeEvaluator::dwrtbariEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+TR::Register *J9::X86::I386::TreeEvaluator::dwrtbariEvaluator(TR::Node *node, TR::CodeGenerator *cg)
    {
    // For rdbar and wrtbar nodes we first evaluate the children we need to
    // handle the side effects. Then we delegate the evaluation of the remaining
@@ -12864,7 +12752,7 @@ TR::Register *J9::X86::i386::TreeEvaluator::dwrtbariEvaluator(TR::Node *node, TR
       TR::TreeEvaluator::rdWrtbarHelperForFieldWatch(node, cg, sideEffectRegister, valueReg);
       }
 
-   // Note: The reference count for valueReg's node is not decremented here because the 
+   // Note: The reference count for valueReg's node is not decremented here because the
    // store evaluator also uses it and so it will evaluate+decrement it. Thus we must skip decrementing here
    // to avoid double decrementing.
    cg->decReferenceCount(sideEffectNode);
@@ -12887,7 +12775,7 @@ TR::Register *J9::X86::AMD64::TreeEvaluator::dwrtbarEvaluator(TR::Node *node, TR
       TR::TreeEvaluator::rdWrtbarHelperForFieldWatch(node, cg, sideEffectRegister, valueReg);
       }
 
-   // Note: The reference count for valueReg's node is not decremented here because the 
+   // Note: The reference count for valueReg's node is not decremented here because the
    // store evaluator also uses it and so it will evaluate+decrement it. Thus we must skip decrementing here
    // to avoid double decrementing.
    cg->decReferenceCount(sideEffectNode);
@@ -12908,7 +12796,7 @@ TR::Register *J9::X86::AMD64::TreeEvaluator::dwrtbariEvaluator(TR::Node *node, T
       TR::TreeEvaluator::rdWrtbarHelperForFieldWatch(node, cg, sideEffectRegister, valueReg);
       }
 
-   // Note: The reference count for valueReg's node is not decremented here because the 
+   // Note: The reference count for valueReg's node is not decremented here because the
    // store evaluator also uses it and so it will evaluate+decrement it. Thus we must skip decrementing here
    // to avoid double decrementing.
    cg->decReferenceCount(sideEffectNode);
@@ -12954,4 +12842,3 @@ TR::Register *J9::X86::TreeEvaluator::awrtbarEvaluator(TR::Node *node, TR::CodeG
    // counts of the children evaluated here and let this helper handle it.
    return TR::TreeEvaluator::writeBarrierEvaluator(node, cg);
    }
-

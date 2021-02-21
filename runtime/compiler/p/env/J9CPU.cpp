@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2018 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,136 +20,73 @@
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
+#include "compile/Compilation.hpp"
 #include "env/CompilerEnv.hpp"
 #include "env/CPU.hpp"
 #include "j9.h"
 #include "j9port.h"
 
-namespace J9
-{
-
-namespace Power
-{
-
-bool
-CPU::getPPCSupportsVMX()
+TR::CPU
+J9::Power::CPU::detectRelocatable(OMRPortLibrary * const omrPortLib)
    {
-#if defined(J9OS_I5) && defined(J9OS_I5_V5R4)
-   return FALSE;
-#else
-   J9ProcessorDesc   *processorDesc       = TR::Compiler->target.cpu.TO_PORTLIB_getJ9ProcessorDesc();
-   J9PortLibrary     *privatePortLibrary  = TR::Compiler->portLib;
-   BOOLEAN feature = j9sysinfo_processor_has_feature(processorDesc, J9PORT_PPC_FEATURE_HAS_ALTIVEC);
-   return (TRUE == feature);
-#endif
-   }
+   if (omrPortLib == NULL)
+      return TR::CPU();
 
-bool
-CPU::getPPCSupportsVSX()
-   {
-#if defined(J9OS_I5) && defined(J9OS_I5_V5R4)
-   return FALSE;
-#else
-   J9ProcessorDesc   *processorDesc       = TR::Compiler->target.cpu.TO_PORTLIB_getJ9ProcessorDesc();
-   J9PortLibrary     *privatePortLibrary  = TR::Compiler->portLib;
-   BOOLEAN feature = j9sysinfo_processor_has_feature(processorDesc, J9PORT_PPC_FEATURE_HAS_VSX);
-   return (TRUE == feature);
-#endif
-   }
-
-bool
-CPU::getPPCSupportsAES()
-   {
-#if defined(J9OS_I5) && defined(J9OS_I5_V5R4)
-   return FALSE;
-#else
-   J9ProcessorDesc   *processorDesc       = TR::Compiler->target.cpu.TO_PORTLIB_getJ9ProcessorDesc();
-   J9PortLibrary     *privatePortLibrary  = TR::Compiler->portLib;
-   BOOLEAN hasVMX  = j9sysinfo_processor_has_feature(processorDesc, J9PORT_PPC_FEATURE_HAS_ALTIVEC);
-   BOOLEAN hasVSX  = j9sysinfo_processor_has_feature(processorDesc, J9PORT_PPC_FEATURE_HAS_VSX);
-   BOOLEAN isP8    = (processorDesc->processor >= PROCESSOR_PPC_P8);
-   return (isP8 && hasVMX && hasVSX);
-#endif
-   }
-
-bool
-CPU::getPPCSupportsTM()
-   {
-#if defined(J9OS_I5) && defined(J9OS_I5_V5R4)
-   return FALSE;
-#else
-   J9ProcessorDesc   *processorDesc       = TR::Compiler->target.cpu.TO_PORTLIB_getJ9ProcessorDesc();
-   J9PortLibrary     *privatePortLibrary  = TR::Compiler->portLib;
-   BOOLEAN feature = j9sysinfo_processor_has_feature(processorDesc, J9PORT_PPC_FEATURE_HTM);
-   return (TRUE == feature);
-#endif
-   }
+   OMRPORT_ACCESS_FROM_OMRPORT(omrPortLib);
+   OMRProcessorDesc portableProcessorDescription;
+   omrsysinfo_get_processor_description(&portableProcessorDescription);
    
-bool
-CPU::getPPCSupportsLM()
-  {
-#if defined(J9OS_I5) && defined(J9OS_I5_V5R4)
-  return FALSE;
-#else
-  J9ProcessorDesc   *processorDesc       = TR::Compiler->target.cpu.TO_PORTLIB_getJ9ProcessorDesc();
-  BOOLEAN isP9    = (processorDesc->processor >= PROCESSOR_PPC_P9);
-  return FALSE;
-#endif
-   }
+   if (portableProcessorDescription.processor > OMR_PROCESSOR_PPC_P8)
+      {
+      portableProcessorDescription.processor = OMR_PROCESSOR_PPC_P8;
+      portableProcessorDescription.physicalProcessor = OMR_PROCESSOR_PPC_P8;
+      }
 
-// Double check with os400 team to see if we can enable popcnt on I
-//
-bool 
-CPU::hasPopulationCountInstruction()
-   {
-#if defined(J9OS_I5)
-   return false;
-#else
-   return TR::Compiler->target.cpu.isAtLeast(TR_PPCp7);
-#endif
-   }
-
-
-bool
-CPU::supportsDecimalFloatingPoint()
-   {
-#if !defined(TR_HOST_POWER) || (defined(J9OS_I5) && defined(J9OS_I5_V5R4))
-   return FALSE;
-#else
-   J9ProcessorDesc *processorDesc = TR::Compiler->target.cpu.TO_PORTLIB_getJ9ProcessorDesc();
-   J9PortLibrary *privatePortLibrary = TR::Compiler->portLib;
-   BOOLEAN feature = j9sysinfo_processor_has_feature(processorDesc, J9PORT_PPC_FEATURE_HAS_DFP);
-   return (TRUE == feature);
-#endif
-   }
-
-TR_ProcessorFeatureFlags
-CPU::getProcessorFeatureFlags()
-   {
-   TR_ProcessorFeatureFlags processorFeatureFlags = { {0} };
-   return processorFeatureFlags;
+   return TR::CPU::customize(portableProcessorDescription);
    }
 
 bool
-CPU::isCompatible(TR_Processor processorSignature, TR_ProcessorFeatureFlags processorFeatureFlags)
+J9::Power::CPU::isCompatible(const OMRProcessorDesc& processorDescription)
    {
-   TR_Processor targetProcessor = self()->id();
+   const OMRProcessorArchitecture& targetProcessor = self()->getProcessorDescription().processor;
+   const OMRProcessorArchitecture& processor = processorDescription.processor;
+
+   for (int i = 0; i < OMRPORT_SYSINFO_FEATURES_SIZE; i++)
+      {
+      if ((processorDescription.features[i] & self()->getProcessorDescription().features[i]) != processorDescription.features[i])
+         return false;
+      }
+
    // Backwards compatibility only applies to p4,p5,p6,p7 and onwards
    // Looks for equality otherwise
-   if ((processorSignature == TR_PPCgp 
-       || processorSignature == TR_PPCgr 
-       || processorSignature == TR_PPCp6 
-       || (processorSignature >= TR_PPCp7 && processorSignature <= TR_LastPPCProcessor))
-       && (targetProcessor == TR_PPCgp 
-        || targetProcessor == TR_PPCgr 
-        || targetProcessor == TR_PPCp6 
-        || targetProcessor >= TR_PPCp7 && targetProcessor <= TR_LastPPCProcessor))
+   if ((processor == OMR_PROCESSOR_PPC_GP
+       || processor == OMR_PROCESSOR_PPC_GR 
+       || processor == OMR_PROCESSOR_PPC_P6 
+       || (processor >= OMR_PROCESSOR_PPC_P7 && processor <= OMR_PROCESSOR_PPC_LAST))
+       && (targetProcessor == OMR_PROCESSOR_PPC_GP 
+        || targetProcessor == OMR_PROCESSOR_PPC_GR 
+        || targetProcessor == OMR_PROCESSOR_PPC_P6 
+        || targetProcessor >= OMR_PROCESSOR_PPC_P7 && targetProcessor <= OMR_PROCESSOR_PPC_LAST))
       {
-      return self()->isAtLeast(processorSignature);
+      return targetProcessor >= processor;
       }
-   return self()->is(processorSignature);
+   return targetProcessor == processor;
    }
-   
-}
 
-}
+void
+J9::Power::CPU::enableFeatureMasks()
+   {
+   // Only enable the features that compiler currently uses
+   const uint32_t utilizedFeatures [] = {OMR_FEATURE_PPC_HAS_ALTIVEC, OMR_FEATURE_PPC_HAS_DFP,
+                                        OMR_FEATURE_PPC_HTM, OMR_FEATURE_PPC_HAS_VSX};
+
+
+   memset(_supportedFeatureMasks.features, 0, OMRPORT_SYSINFO_FEATURES_SIZE*sizeof(uint32_t));
+   OMRPORT_ACCESS_FROM_OMRPORT(TR::Compiler->omrPortLib);
+   for (size_t i = 0; i < sizeof(utilizedFeatures)/sizeof(uint32_t); i++)
+      {
+      omrsysinfo_processor_set_feature(&_supportedFeatureMasks, utilizedFeatures[i], TRUE);
+      }
+   
+   _isSupportedFeatureMasksEnabled = true;
+   }

@@ -71,9 +71,22 @@ TR_J9ByteCodeIterator::isThisChanged()
       {
       switch (bc)
          {
+         case J9BCistore0:
+         case J9BClstore0:
+         case J9BCfstore0:
+         case J9BCdstore0:
          case J9BCastore0:
             return true;
+         case J9BCistore:
+         case J9BClstore:
+         case J9BCfstore:
+         case J9BCdstore:
          case J9BCastore:
+         case J9BCistorew:
+         case J9BClstorew:
+         case J9BCfstorew:
+         case J9BCdstorew:
+         case J9BCastorew:
             if (nextByte() == 0)
                return true;
          default:
@@ -358,14 +371,8 @@ const TR_J9ByteCode TR_J9ByteCodeIterator::_opCodeToByteCodeEnum[] =
    /* 198 */ J9BCifnull, J9BCifnonnull,
    /* 200 */ J9BCgotow, J9BCunknown,
    /* 202 */ J9BCbreakpoint,
-
-#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
    /* 203 */ J9BCdefaultvalue,
    /* 204 */ J9BCwithfield,
-#else /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
-   /* 203 */ J9BCunknown,
-   /* 204 */ J9BCunknown,
-#endif
    /* 205 */ J9BCunknown, J9BCunknown, J9BCunknown, J9BCunknown,
    /* 209 */ J9BCunknown, J9BCunknown, J9BCunknown, J9BCunknown,
    /* 213 */ J9BCiincw, J9BCunknown,
@@ -826,6 +833,9 @@ const uint8_t TR_J9ByteCodeIterator::_estimatedCodeSize[] =
   25, // J9BCmonitorenter
   25, // J9BCmonitorexit
    0, // J9BCwide
+   0, // J9BCasyncCheck
+   1, // J9BCdefaultvalue
+   1, // J9BCwithfield
    0, // J9BCunknown
    };
 

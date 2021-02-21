@@ -39,19 +39,6 @@ namespace J9 { typedef J9::Z::CPU CPUConnector; }
 #include "infra/Assert.hpp"
 #include "infra/Flags.hpp"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#define PROCESSOR_FEATURES_SIZE 1
-typedef struct TR_ProcessorFeatureFlags {
-  uint32_t featureFlags[PROCESSOR_FEATURES_SIZE];
-} TR_ProcessorFeatureFlags;
-
-#ifdef __cplusplus
-}
-#endif
-
 namespace J9
 {
 
@@ -60,26 +47,34 @@ namespace Z
 
 class OMR_EXTENSIBLE CPU : public J9::CPU
    {
-   protected:
+protected:
 
    CPU() : J9::CPU() {}
    CPU(const OMRProcessorDesc& processorDescription) : J9::CPU(processorDescription) {}
 
-   public:
+public:
 
-   static int32_t TO_PORTLIB_get390MachineId();
-   static bool TO_PORTLIB_get390_supportsZNext();
-   static bool TO_PORTLIB_get390_supportsZ15();
-   static bool TO_PORTLIB_get390_supportsZ14();
-   static bool TO_PORTLIB_get390_supportsZ13();
-   static bool TO_PORTLIB_get390_supportsZ6();
-   static bool TO_PORTLIB_get390_supportsZGryphon();
-   static bool TO_PORTLIB_get390_supportsZHelix();
+   /** 
+    * @brief A factory method used to construct a CPU object for portable AOT compilations
+    * @param[in] omrPortLib : the port library
+    * @return TR::CPU
+    */
+   static TR::CPU detectRelocatable(OMRPortLibrary * const omrPortLib);
 
-   void initializeS390ProcessorFeatures();
+   /** 
+    * @brief A factory method used to construct a CPU object based on user customized processorDescription
+    * @param[in] OMRProcessorDesc : the processor description
+    * @return TR::CPU
+    */
+   static TR::CPU customize(OMRProcessorDesc processorDescription);
 
-   TR_ProcessorFeatureFlags getProcessorFeatureFlags();
-   bool isCompatible(TR_Processor processorSignature, TR_ProcessorFeatureFlags processorFeatureFlags);
+   /**
+    * @brief Intialize _supportedFeatureMasks to the list of processor features that will be exploited by the compiler and set _isSupportedFeatureMasksEnabled to true
+    * @return void
+    */
+   static void enableFeatureMasks();
+   
+   bool isCompatible(const OMRProcessorDesc& processorDescription);
    };
 
 }

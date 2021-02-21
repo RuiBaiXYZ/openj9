@@ -94,6 +94,8 @@ extern J9_CFUNC UDATA mergeMemorySpaces(J9VMThread *vmThread, void *destinationM
 extern J9_CFUNC UDATA j9gc_scavenger_enabled(J9JavaVM *javaVM);
 extern J9_CFUNC UDATA j9gc_concurrent_scavenger_enabled(J9JavaVM *javaVM);
 extern J9_CFUNC UDATA j9gc_software_read_barrier_enabled(J9JavaVM *javaVM);
+extern J9_CFUNC BOOLEAN j9gc_hot_reference_field_required(J9JavaVM *javaVM);
+extern J9_CFUNC uint32_t j9gc_max_hot_field_list_length(J9JavaVM *javaVM);
 extern J9_CFUNC void j9gc_objaccess_indexableStoreAddress(J9VMThread *vmThread, J9IndexableObject *destObject, I_32 index, void *value, UDATA isVolatile);
 extern J9_CFUNC void j9gc_objaccess_mixedObjectStoreAddress(J9VMThread *vmThread, j9object_t destObject, UDATA offset, void *value, UDATA isVolatile);
 extern J9_CFUNC void j9gc_objaccess_cloneObject(J9VMThread *vmThread, j9object_t srcObject, j9object_t destObject);
@@ -195,8 +197,8 @@ extern J9_CFUNC void J9MetronomeWriteBarrierStore(J9VMThread *vmThread, J9Object
 extern J9_CFUNC void J9MetronomeWriteBarrierJ9ClassStore(J9VMThread *vmThread, J9Object *dstObject, J9Object **dstAddress, J9Object *srcObject);
 extern J9_CFUNC void J9ReadBarrier(J9VMThread *vmThread, fj9object_t *srcAddress);
 extern J9_CFUNC void J9ReadBarrierJ9Class(J9VMThread *vmThread, j9object_t *srcAddress);
-extern J9_CFUNC j9object_t j9gc_objaccess_monitorTableReadObject(J9VMThread *vmThread, j9object_t *srcAddress);
-extern J9_CFUNC j9object_t j9gc_objaccess_monitorTableReadObjectVM(J9JavaVM *vm, j9object_t *srcAddress);
+extern J9_CFUNC j9object_t j9gc_weakRoot_readObject(J9VMThread *vmThread, j9object_t *srcAddress);
+extern J9_CFUNC j9object_t j9gc_weakRoot_readObjectVM(J9JavaVM *vm, j9object_t *srcAddress);
 extern J9_CFUNC UDATA isStaticObjectAllocateFlags(J9JavaVM *javaVM);
 extern J9_CFUNC void J9FlushThreadLocalHeap(J9VMThread *vmContext);
 extern J9_CFUNC jvmtiIterationControl j9mm_iterate_region_objects(J9JavaVM *vm, J9PortLibrary *portLibrary, struct J9MM_IterateRegionDescriptor *region, UDATA flags, jvmtiIterationControl(*func)(J9JavaVM *vm, struct J9MM_IterateObjectDescriptor *objectDesc, void *userData), void *userData);
@@ -240,7 +242,7 @@ extern J9_CFUNC void j9gc_set_memoryController(J9VMThread *vmThread, J9Object* o
 extern J9_CFUNC const char* omrgc_get_version(OMR_VM *omrVM);
 extern J9_CFUNC void j9gc_startGCIfTimeExpired(OMR_VMThread* vmThread);
 extern J9_CFUNC void j9gc_allocation_threshold_changed(J9VMThread* currentThread);
-extern J9_CFUNC void j9gc_set_allocation_sampling_interval(J9VMThread* vmThread, UDATA samplingInterval);
+extern J9_CFUNC void j9gc_set_allocation_sampling_interval(J9JavaVM *vm, UDATA samplingInterval);
 extern J9_CFUNC void j9gc_set_allocation_threshold(J9VMThread* vmThread, UDATA low, UDATA high);
 extern J9_CFUNC void j9gc_objaccess_recentlyAllocatedObject(J9VMThread *vmThread, J9Object *dstObject);
 extern J9_CFUNC void j9gc_objaccess_postStoreClassToClassLoader(J9VMThread *vmThread, J9ClassLoader* destClassLoader, J9Class* srcClass);
@@ -251,7 +253,7 @@ extern J9_CFUNC const jchar* j9gc_objaccess_jniGetStringCritical(J9VMThread* vmT
 extern J9_CFUNC void j9gc_objaccess_jniReleaseStringCritical(J9VMThread* vmThread, jstring str, const jchar * elems);
 extern J9_CFUNC UDATA j9gc_arraylet_getLeafSize(J9JavaVM* javaVM);
 extern J9_CFUNC UDATA j9gc_arraylet_getLeafLogSize(J9JavaVM* javaVM);
-extern J9_CFUNC void j9gc_get_CPU_times(J9JavaVM *javaVM, U_64* masterCpuMillis, U_64* slaveCpuMillis, U_32* maxThreads, U_32* currentThreads);
+extern J9_CFUNC void j9gc_get_CPU_times(J9JavaVM *javaVM, U_64* mainCpuMillis, U_64* workerCpuMillis, U_32* maxThreads, U_32* currentThreads);
 
 
 /* J9VMFinalizeSupport*/

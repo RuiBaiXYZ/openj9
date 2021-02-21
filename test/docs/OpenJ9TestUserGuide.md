@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2016, 2020 IBM Corp. and others
+Copyright (c) 2016, 2021 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -200,6 +200,13 @@ e.g.,
 Above command will run [all possible variations in _testExample](https://github.com/eclipse/openj9/blob/master/test/functional/TestExample/playlist.xml#L28-L30)
 target
 
+#### Run a list of tests <br />
+make _testList TESTLIST=testTargetName1,testTargetName2,testTargetName3 <br />
+e.g.,
+```
+make _testList TESTLIST=jit_jitt,jit_recognizedMethod,testSCCMLTests2_1
+```
+
 #### Run all tests
 - compile & run tests
 ```
@@ -212,7 +219,10 @@ target
 
 #### Run tests against specific (e.g., hotspot 8) SDK
 
-`<impl>` and `<subset>` elements are used to annotate tests in playlist.xml, so that the tests will be run against the targeted JDK_IMPL and JDK_VERSION (and is determined by the SDK defined in TEST_JDK_HOME variable)
+`<impl>` and `<subset>` elements are used to annotate tests in playlist.xml, so that the tests will be run against the targeted JDK_IMPL and JDK_VERSION (and is determined by the SDK defined in TEST_JDK_HOME variable).  
+
+For example, adding a `<subsets><subset>8</subset></subsets>` block into the [target definition of TestExample](https://github.com/eclipse/openj9/blob/master/test/functional/TestExample/playlist.xml#L26-L49) would mean that test would only get run against jdk8 and would be skipped for other JDK versions.  If `<subsets>` or `<impls>` are not included in the target definition, then it is assumed that ALL versions and implementations are valid for that test target.
+
 
 #### Rerun the failed tests from the last run
 ```
@@ -231,20 +241,224 @@ There are 3 ways to add options to your test run:
 
 - If you want to change test options, you can update playlist.xml in the corresponding test project.
 
+#### Run test or group of tests multiple times
+- Using TEST_ITERATIONS to specify the number of iterations. The test (for group target, each test in the group) will be executed multiple times. The test will pass if all the iterations pass. This feature is designed to repetitively run small test targets, use with caution for top-level test targets that may take a long time to run.
+
+```
+    make _testExample TEST_ITERATIONS=2
+```
+or
+```
+    export TEST_ITERATIONS=2
+    make _testExample
+```
+
 ### 5. Exclude tests
 
-#### Exclude test target in playlist.xml
-Add `<disabled>` element, with a link to the issue that describes the reason for disabling test
-for example: 
+#### Automatically exclude a test target
+Instead of having to manually create a PR to disable test targets, they can now be automatically disabled via Github workflow (see autoTestPR.yml). In the issue that describes the test failure, add a comment with the following format:
+
+```auto exclude test <testName>```
+
+If the testName matches the testCaseName defined in ```<testCaseName>``` element of playlist.xml, the entire test suite will be excluded. If the testName is testCaseName followed by _n, only the (n+1)th variation will be excluded. 
+
+For example:
+
 ```
-    <disabled>[https://github.com/eclipse/openj9/issues/6777](https://github.com/eclipse/openj9/issues/6777)<disabled>
+<test>
+  <testCaseName>jdk_test</testCaseName> 
+  <variations>
+    <variation>NoOptions</variation>
+    <variation>-Xmx1024m</variation>
+  </variations>
+  ...
 ```
-inside the `<test>` element that you want to exclude.
+To exclude the entire suite:
+
+```auto exclude test jdk_test```
+
+To exclude the 2nd variation listed which is assigned suffix_1 ```-Xmx1024m```:
+
+```auto exclude test jdk_test_1```
+
+To exclude the test for openj9 only:
+
+```auto exclude test jdk_test impl=openj9```
+
+To exclude the test for adoptopenjdk vendor only:
+
+```auto exclude test jdk_test vendor=adoptopenjdk```
+
+To exclude the test for java 8 only:
+
+```auto exclude test jdk_test ver=8```
+
+To exclude the test for all linux platforms:
+
+```auto exclude test jdk_test plat=.*linux.*```
+
+plat is defined in regular expression. All platforms can be found here: https://github.com/AdoptOpenJDK/openjdk-tests/blob/master/buildenv/jenkins/openjdk_tests
+
+To exclude the 2nd variation listed which is assigned suffix_1 ```-Xmx1024m``` against adoptopenjdk openj9 java 8 on windows only:
+
+```auto exclude test jdk_test_1 impl=openj9 vendor=adoptopenjdk ver=8 plat=.*windows.*```
+
+After the comment is left, there will be a auto PR created with the exclude change in the playlist.xml. The PR will be linked to issue. If the testName can not be found in the repo, no PR will be created and there will be a comment left in the issue linking to the failed workflow run for more details. In the case where the parameter contains space separated values, use single quotes to group the parameter.
+
+#### Manually exclude a test target
+Search the test name to find its playlist.xml file. Add a ```<disabled>``` element after ```<testCaseName>``` element. The ```<disabled>``` element should always contain a ```<comment>``` element to specify the related issue url (or issue comment url).
+
+For example:
+
+```
+<test>
+  <testCaseName>jdk_test</testCaseName> 
+  <disabled>
+    <comment>https://github.com/AdoptOpenJDK/openjdk-tests/issues/123456</comment>
+  </disabled>
+  ...
+```
+
+This will disable the entire test suite. The following section describes how to disable the specific test cases.
+
+##### Exclude a specific test variation:
+Add a ```<variation>``` element in the ```<disabled>``` element to specify the variation. The ```<variation>``` element must match an element defined in the ```<variations>``` element.
+
+For example, to exclude the test case with variation ```-Xmx1024m```:
+
+```
+<test>
+  <testCaseName>jdk_test</testCaseName> 
+  <disabled>
+    <comment>https://github.com/AdoptOpenJDK/openjdk-tests/issues/123456</comment>
+    <variation>-Xmx1024m</variation>
+  </disabled>
+  ...
+  <variations>
+    <variation>NoOptions</variation>
+    <variation>-Xmx1024m</variation>
+  </variations>
+  ...
+```
+
+##### Exclude a test against specific java implementation:
+Add a ```<impl>``` element in the ```<disabled>``` element to specify the implementation.
+
+For example, to exclude the test for openj9 only:
+
+```
+<test>
+  <testCaseName>jdk_test</testCaseName> 
+  <disabled>
+    <comment>https://github.com/AdoptOpenJDK/openjdk-tests/issues/123456</comment>
+    <impl>openj9</impl>
+  </disabled>
+  ...
+```
+
+##### Exclude a test against specific java vendor:
+Add a ```<vendor>``` element in the ```<disabled>``` element to specify the vendor information.
+
+For example, to exclude the test for AdoptOpenJDK only:
+
+```
+<test>
+  <testCaseName>jdk_test</testCaseName> 
+  <disabled>
+    <comment>https://github.com/AdoptOpenJDK/openjdk-tests/issues/123456</comment>
+    <vendor>adoptopenjdk</vendor>
+  </disabled>
+  ...
+```
+
+##### Exclude a test against specific java version:
+Add a ```<subset>``` element in the ```<disabled>``` element to specify the version.
+
+For example, to exclude the test for java 11 and up:
+
+```
+<test>
+  <testCaseName>jdk_test</testCaseName> 
+  <disabled>
+    <comment>https://github.com/AdoptOpenJDK/openjdk-tests/issues/123456</comment>
+    <subset>11+</subset>
+  </disabled>
+  ...
+```
+
+
+##### Exclude a test against specific platform:
+Add a ```<plat>``` element in the ```<disabled>``` element to specify the platform in regular expression. All platforms can be found here: https://github.com/AdoptOpenJDK/openjdk-tests/blob/master/buildenv/jenkins/openjdk_tests
+
+For example, to exclude the test for all linux platforms:
+
+```
+<test>
+  <testCaseName>jdk_test</testCaseName> 
+  <disabled>
+    <comment>https://github.com/AdoptOpenJDK/openjdk-tests/issues/123456</comment>
+    <plat>.*linux.*</plat>
+  </disabled>
+  ...
+```
+
+
+##### Exclude test against multiple criteria:
+Defined a combination of ```<variation>```, ```<impl>```, ```<subset>```, and  ```<plat>``` in the ```<disabled>``` element.
+
+For example, to exclude the test with variation ```-Xmx1024m``` against adoptopenjdk openj9 java 8 on windows only:
+
+```
+<test>
+  <testCaseName>jdk_test</testCaseName> 
+  <disabled>
+    <comment>https://github.com/AdoptOpenJDK/openjdk-tests/issues/123456</comment>
+    <variation>-Xmx1024m</variation>
+    <subset>8</subset>
+    <impl>openj9</impl>
+    <vendor>adoptopenjdk</vendor>
+    <plat>.*windows.*</plat>
+  </disabled>
+  ...
+```
+
+Note: Same element cannot be defined multiple times inside one ```<disabled>``` element. It is because the elements inside the disable element are in AND relationship.
+
+For example, to exclude test on against hotspot and openj9. It is required to define multiple ```<disabled>``` elements, each with a single ```<impl>``` element inside:
+
+```
+<test>
+  <testCaseName>jdk_test</testCaseName> 
+  <disabled>
+    <comment>https://github.com/AdoptOpenJDK/openjdk-tests/issues/123456</comment>
+    <subset>8</subset>
+    <impl>openj9</impl>
+  </disabled>
+  <disabled>
+    <comment>https://github.com/AdoptOpenJDK/openjdk-tests/issues/123456</comment>
+    <subset>8</subset>
+    <impl>hotspot</impl>
+  </disabled>
+  ...
+```
+
+Or remove ```<impl>``` element to exclude test against all implementations:
+
+```
+<test>
+  <testCaseName>jdk_test</testCaseName> 
+  <disabled>
+    <comment>https://github.com/AdoptOpenJDK/openjdk-tests/issues/123456</comment>
+    <subset>8</subset>
+  </disabled>
+  ...
+```
+#### Execute excluded test target
 
 If a test is disabled using `<disabled>` tag in playlist.xml, it can be executed by specifying the test target or adding `disabled` in front of its top-level test target.
 
 ```    
-        make _testA    // testA has <disabled> tag in playlist.xml  
+        make _disabled.testA    // testA has <disabled> tag in playlist.xml  
         make _disabled.sanity.functional
         make _disabled.extended
 ```
@@ -257,7 +471,9 @@ Disabled tests and reasons can also be printed through adding `echo.disabled` in
         make _echo.disabled.extended
 ```
 
-#### Exclude temporarily on all platforms
+
+#### more granular exclusion for testNG test
+##### Exclude temporarily on all platforms
 Depends on the JDK_VERSION, add a line in the test/TestConfig/resources/excludes/latest_exclude_$(JDK_VERSION).txt file. It is the same format that the OpenJDK tests use, name of test, defect number, platforms to exclude.
 
 To exclude on all platforms, use generic-all.  For example:
@@ -270,7 +486,7 @@ test class, by using :methodName behind the class name (OpenJDK does not
 support this currently). In the example, only the testGetProcessCPULoad
 method from that class will be excluded (on all platforms/specs).
 
-#### Exclude temporarily on specific platforms or architectures
+##### Exclude temporarily on specific platforms or architectures
 Same as excluding on all platforms, you add a line to
 latest_exclude_$(JDK_VERSION).txt file, but with specific specs to
 exclude, for example:
@@ -284,7 +500,7 @@ from running on the linux_x86-64 platform.
 Note: in OpenJ9 the defect numbers would associate with git issue numbers
 (OpenJDK defect numbers associate with their bug tracking system).
 
-#### Exclude permanently on all or specific platforms/archs
+##### Exclude permanently on all or specific platforms/archs
 
 For tests that should NEVER run on particular platforms or
 architectures, we should not use the default_exclude.txt file. To

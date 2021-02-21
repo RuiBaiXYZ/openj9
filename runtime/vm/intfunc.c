@@ -195,6 +195,7 @@ J9InternalVMFunctions J9InternalFunctions = {
 	cleanUpClassLoader,
 #endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */
 	iterateStackTrace,
+	getNPEMessage,
 	internalReleaseVMAccessNoMutex,
 	getVMHookInterface,
 	internalAttachCurrentThread,
@@ -227,6 +228,7 @@ J9InternalVMFunctions J9InternalFunctions = {
 	structuredSignalHandler,
 	structuredSignalHandlerVM,
 	addHiddenInstanceField,
+	reportHotField,
 	fieldOffsetsStartDo,
 	defaultValueWithUnflattenedFlattenables,
 	fieldOffsetsNextDo,
@@ -296,8 +298,10 @@ J9InternalVMFunctions J9InternalFunctions = {
 	sendForGenericInvoke,
 	jitFillOSRBuffer,
 	sendResolveMethodHandle,
+	resolveOpenJDKInvokeHandle,
 	resolveConstantDynamic,
 	resolveInvokeDynamic,
+	sendResolveOpenJDKInvokeHandle,
 	sendResolveConstantDynamic,
 	sendResolveInvokeDynamic,
 	resolveMethodHandleRef,
@@ -364,10 +368,10 @@ J9InternalVMFunctions J9InternalFunctions = {
 	registerOSHandler,
 	throwNativeOOMError,
 	throwNewJavaIoIOException,
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 	loadAndVerifyNestHost,
 	setNestmatesError,
-#endif
+#endif /* JAVA_SPEC_VERSION >= 11 */
 	areValueTypesEnabled,
 	peekClassHashTable,
 #if defined(J9VM_OPT_JITSERVER)
@@ -375,4 +379,22 @@ J9InternalVMFunctions J9InternalFunctions = {
 #endif /* J9VM_OPT_JITSERVER */
 	createJoinableThreadWithCategory,
 	valueTypeCapableAcmp,
+	isNameOrSignatureQtype,
+	isClassRefQtype,
+	getFlattenableFieldOffset,
+	isFlattenableFieldFlattened,
+	getFlattenableFieldType,
+	getFlattenableFieldSize,
+	arrayElementSize,
+	getFlattenableField,
+	cloneValueType,
+	putFlattenableField,
+#if JAVA_SPEC_VERSION >= 15
+	checkClassBytes,
+#endif /* JAVA_SPEC_VERSION >= 15 */
+	storeFlattenableArrayElement,
+	loadFlattenableArrayElement,
+	jniIsInternalClassRef,
+	objectIsBeingWaitedOn,
+	areValueBasedMonitorChecksEnabled
 };

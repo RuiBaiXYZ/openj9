@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar16]*/
+/*[INCLUDE-IF Sidecar18-SE]*/
 /*******************************************************************************
- * Copyright (c) 1998, 2019 IBM Corp. and others
+ * Copyright (c) 1998, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -80,7 +80,7 @@ public class Throwable implements java.io.Serializable {
 	 * The list containing the exceptions suppressed 
 	 */
 	private List<Throwable> suppressedExceptions = Collections.EMPTY_LIST;
-	private transient boolean enableWritableStackTrace = true;
+	private transient boolean disableWritableStackTrace;
 	
 /**
  * Constructs a new instance of this class with its 
@@ -165,7 +165,7 @@ protected Throwable(String detailMessage, Throwable throwable,
 	}
 	
 	if (enableWritableStackTrace == false)	{
-		this.enableWritableStackTrace = false;
+		this.disableWritableStackTrace = true;
 	} else {
 		fillInStackTrace();
 	}
@@ -231,17 +231,18 @@ public void setStackTrace(StackTraceElement[] trace) {
 	if (trace == null) {
 		throw new NullPointerException();
 	}
-	for (int i=0; i<trace.length; i++)	{
-		if (trace[i] == null) {
+	StackTraceElement[] localCopy = trace.clone();
+	for (int i=0; i<localCopy.length; i++)	{
+		if (localCopy[i] == null) {
 			throw new NullPointerException();
 		}
 	}
 	
-	if (enableWritableStackTrace == false) {
+	if (disableWritableStackTrace) {
 		return;
 	}
 	
-	stackTrace = (StackTraceElement[])trace.clone();
+	stackTrace = localCopy;
 }
 
 /**
@@ -283,16 +284,19 @@ private static int countDuplicates(StackTraceElement[] currentStack, StackTraceE
  * @return an array of StackTraceElement representing the stack
  */
 StackTraceElement[] getInternalStackTrace() {
-
-	if (!enableWritableStackTrace) {
+	if (disableWritableStackTrace) {
 		return	ZeroStackTraceElementArray;
 	}
 
-	if (stackTrace == null) {
-		stackTrace = J9VMInternals.getStackTrace(this, true);
+	StackTraceElement[] localStackTrace = stackTrace;
+	if (localStackTrace == null) {
+		// Assign the result to a local variable to avoid refetching
+		// the instance variable and any memory ordering issues
+		localStackTrace = J9VMInternals.getStackTrace(this, true);
+		stackTrace = localStackTrace;
 	} 
 	
-	return stackTrace;
+	return localStackTrace;
 }
 
 /**
@@ -350,9 +354,7 @@ private void printStackTraceHelper(Appendable appendable) {
  * @return		String
  *				a printable representation for the receiver.
  */
-/*[IF AnnotateOverride]*/
 @Override
-/*[ENDIF]*/
 public String toString () {
 	/*[PR 102230] Should call getLocalizedMessage() */
 	String msg = getLocalizedMessage();
@@ -429,7 +431,7 @@ private void readObject(ObjectInputStream s)
 	throws IOException, ClassNotFoundException	{
 	s.defaultReadObject();
 	
-	enableWritableStackTrace = (stackTrace != null);
+	disableWritableStackTrace = (stackTrace == null);
 	
 	if (stackTrace != null) {
 		if (stackTrace.length == 1) {
@@ -487,14 +489,13 @@ private void readObject(ObjectInputStream s)
 	}
 }
 
-/* 
- * CMVC 97756 try to continue printing as much as possible of the stack trace even
- *            in the presence of OutOfMemoryErrors.
- */
-
 /**
- * Print stack trace
- *  
+ * Print stack trace.
+ *
+ * The stack trace is constructed with appendTo() and avoids allocating Objects (i.e. Strings)
+ * to try to continue printing as much as possible of the stack trace even in the presence of
+ * OutOfMemoryErrors (CMVC 97756).
+ *
  * @param	err	
  * 			the specified print stream/writer 
  * @param	parentStack	
@@ -589,18 +590,19 @@ private StackTraceElement[] printStackTrace(
 		return null;
 	}
 	for (int i=0; i < stack.length - duplicates; i++) {
+		StackTraceElement element = stack[i];
 		if (!outOfMemory) {
 			try {
-				appendTo(err, "\tat " + stack[i], indents);			 //$NON-NLS-1$
+				appendTo(err, "\tat " + element, indents); //$NON-NLS-1$
 			} catch(OutOfMemoryError e) {
 				outOfMemory = true;
 			}
 		}
 		if (outOfMemory) {
 			appendTo(err, "\tat ", indents); //$NON-NLS-1$
-			Util.printStackTraceElement(stack[i], null, err, false);
+			Util.printStackTraceElement(element, null, err, false);
 		}
-		appendLnTo(err);		
+		appendLnTo(err);
 	}
 	if (duplicates > 0) {
 		if (!outOfMemory) {

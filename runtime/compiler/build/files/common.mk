@@ -30,6 +30,8 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     compiler/optimizer/PreEscapeAnalysis.cpp \
     compiler/optimizer/PostEscapeAnalysis.cpp \
     compiler/optimizer/FearPointAnalysis.cpp \
+    compiler/optimizer/HandleRecompilationOps.cpp \
+    compiler/optimizer/HotFieldMarking.cpp \
     compiler/optimizer/HCRGuardAnalysis.cpp \
     compiler/optimizer/IdiomRecognition.cpp \
     compiler/optimizer/IdiomRecognitionUtils.cpp \
@@ -84,6 +86,7 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     omr/compiler/codegen/OMRLinkage.cpp \
     omr/compiler/codegen/OMRMachine.cpp \
     omr/compiler/codegen/OMRMemoryReference.cpp \
+    omr/compiler/codegen/OMRPeephole.cpp \
     omr/compiler/codegen/OMRRealRegister.cpp \
     omr/compiler/codegen/OMRRegister.cpp \
     omr/compiler/codegen/OMRRegisterPair.cpp \
@@ -266,6 +269,7 @@ JIT_PRODUCT_SOURCE_FILES+=\
     compiler/codegen/J9WatchedInstanceFieldSnippet.cpp \
     compiler/codegen/J9WatchedStaticFieldSnippet.cpp \
     compiler/codegen/MonitorState.cpp \
+    compiler/codegen/PrivateLinkage.cpp \
     compiler/compile/J9AliasBuilder.cpp \
     compiler/compile/J9Compilation.cpp \
     compiler/compile/J9Method.cpp \
@@ -275,6 +279,7 @@ JIT_PRODUCT_SOURCE_FILES+=\
     compiler/control/DLLMain.cpp \
     compiler/control/HookedByTheJit.cpp \
     compiler/control/J9Options.cpp \
+    compiler/control/JitDump.cpp \
     compiler/control/MethodToBeCompiled.cpp \
     compiler/control/rossa.cpp \
     compiler/env/ClassLoaderTable.cpp \
@@ -290,6 +295,7 @@ JIT_PRODUCT_SOURCE_FILES+=\
     compiler/env/J9JitMemory.cpp \
     compiler/env/J9KnownObjectTable.cpp \
     compiler/env/J9ObjectModel.cpp \
+    compiler/env/J9PersistentInfo.cpp \
     compiler/env/J9SegmentAllocator.cpp \
     compiler/env/J9SegmentCache.cpp \
     compiler/env/J9SegmentProvider.cpp \
@@ -355,7 +361,6 @@ JIT_PRODUCT_SOURCE_FILES+=\
     compiler/runtime/J9JitPersistentMemory.cpp \
     compiler/runtime/J9Profiler.cpp \
     compiler/runtime/JitRuntime.cpp \
-    compiler/runtime/LMGuardedStorage.cpp \
     compiler/runtime/MetaData.cpp \
     compiler/runtime/MetaDataDebug.cpp \
     compiler/runtime/MethodMetaData.c \
@@ -375,7 +380,6 @@ JIT_PRODUCT_SOURCE_FILES+=\
     omr/compiler/env/OMRCompilerEnv.cpp \
     omr/compiler/env/OMRIO.cpp \
     omr/compiler/env/OMRKnownObjectTable.cpp \
-    omr/compiler/runtime/Alignment.cpp \
     omr/compiler/runtime/CodeCacheTypes.cpp \
     omr/compiler/runtime/OMRCodeCache.cpp \
     omr/compiler/runtime/OMRCodeCacheConfig.cpp \
@@ -395,7 +399,8 @@ JIT_PRODUCT_SOURCE_FILES+=\
     compiler/net/ClientStream.cpp \
     compiler/net/CommunicationStream.cpp \
     compiler/net/LoadSSLLibs.cpp \
-    compiler/net/ProtobufTypeConvert.cpp \
+    compiler/net/MessageBuffer.cpp \
+    compiler/net/Message.cpp \
     compiler/net/ServerStream.cpp \
     compiler/runtime/CompileService.cpp \
     compiler/runtime/JITClientSession.cpp \
@@ -409,6 +414,3 @@ include $(JIT_MAKE_DIR)/files/host/$(HOST_ARCH).mk
 include $(JIT_MAKE_DIR)/files/target/$(TARGET_ARCH).mk
 -include $(JIT_MAKE_DIR)/files/host/$(HOST_ARCH)-extra.mk
 -include $(JIT_MAKE_DIR)/files/target/$(TARGET_ARCH)-extra.mk
-ifneq ($(J9VM_OPT_JITSERVER),)
-include $(JIT_MAKE_DIR)/files/net.mk
-endif

@@ -22,9 +22,13 @@
 
 #include "j9.h"
 
-#include "codegen/CodeGenerator.hpp"
 #include "codegen/ARM64Instruction.hpp"
+#include "codegen/CodeGenerator.hpp"
+#include "codegen/GCStackAtlas.hpp"
 #include "codegen/J9ARM64Snippet.hpp"
+#include "codegen/Relocation.hpp"
+#include "codegen/SnippetGCMap.hpp"
+#include "runtime/CodeCacheManager.hpp"
 
 TR::ARM64MonitorEnterSnippet::ARM64MonitorEnterSnippet(
    TR::CodeGenerator *codeGen,

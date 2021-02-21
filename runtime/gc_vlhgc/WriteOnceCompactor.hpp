@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -47,7 +47,7 @@
 
 class MM_AllocateDescription;
 class MM_WriteOnceCompactor;
-class MM_Dispatcher;
+class MM_ParallelDispatcher;
 class MM_Heap;
 class MM_HeapRegionDescriptorVLHGC;
 class MM_MemoryPool;
@@ -75,13 +75,13 @@ public:
 	virtual void setup(MM_EnvironmentBase *env);
 	virtual void cleanup(MM_EnvironmentBase *env);
 
-	void masterSetup(MM_EnvironmentBase *env);
-	void masterCleanup(MM_EnvironmentBase *env);
+	void mainSetup(MM_EnvironmentBase *env);
+	void mainCleanup(MM_EnvironmentBase *env);
 
 	/**
 	 * Create an ParallelCompactTask object.
 	 */
-	MM_ParallelWriteOnceCompactTask(MM_EnvironmentBase *env, MM_Dispatcher *dispatcher, MM_WriteOnceCompactor *compactScheme, MM_CycleState *cycleState, MM_MarkMap *nextMarkMap)
+	MM_ParallelWriteOnceCompactTask(MM_EnvironmentBase *env, MM_ParallelDispatcher *dispatcher, MM_WriteOnceCompactor *compactScheme, MM_CycleState *cycleState, MM_MarkMap *nextMarkMap)
 		: MM_ParallelTask(env, dispatcher)
 		, _compactScheme(compactScheme)
 		, _cycleState(cycleState)
@@ -102,7 +102,7 @@ private:
     J9JavaVM * const _javaVM;	/**< Cached pointer to the common JavaVM instance */
     MM_GCExtensions * const _extensions;	/**< Cached pointer to the common GCExtensions instance */
     MM_Heap * const _heap;	/**< Cached pointer to the common Heap instance */
-    MM_Dispatcher * const _dispatcher;	/**< Cached pointer to the common Dispatcher instance */
+    MM_ParallelDispatcher * const _dispatcher;	/**< Cached pointer to the common Dispatcher instance */
 	MM_HeapRegionManager * const _regionManager; /**< The region manager which holds the MM_HeapRegionDescriptor instances which manage the properties of the regions */
     void * const _heapBase;	/**< The cached value of the lowest byte address which can be occupied by the heap */
     void * const _heapTop;	/**< The cached value of the lowest byte address after the heap */
@@ -308,7 +308,7 @@ private:
 	 * Called to rebuild the given mark map from references in the given work packets.  Any packet slot which points into
 	 * the compact set is marked in the given mark map.
 	 * 
-	 * @param env[in] The master GC thread
+	 * @param env[in] The main GC thread
 	 * @param packets[in] The work packets for the in-progress GMP cycle
 	 * @param markMap[in] The mark map for the in-progress GMP cycle
 	 */
@@ -318,7 +318,7 @@ private:
 	 * Part of planning refactoring (JAZZ 21595).
 	 * This function is analogous to moveObjects.  It is meant to be the non-moving equivalent which only performs planning actions
 	 * but does not move objects or write to the heap.
-	 * @param env[in] The master GC thread
+	 * @param env[in] The main GC thread
 	 * @param objectCount[in/out] The number of objects the receiver planned to move
 	 * @param byteCount[in/out] The number of bytes the receiver planned to move
 	 * @param skippedObjectCount[in/out] The number of objects the receiver planned to skip
@@ -352,7 +352,7 @@ private:
 	 * Part of planning refactoring (JAZZ 21595).
 	 * This function is analogous to doCompact.  It is meant to be the non-moving equivalent which only performs planning actions
 	 * but does not move objects or write to the heap.
-	 * @param env[in] The master GC thread
+	 * @param env[in] The main GC thread
 	 * @param copyDestinationBase[in/out] The base address of object copy destinations.  This is updated to the byte after the space consumed by the copy before this method returns
 	 * @param copyDestinationTop[in] The end address of object copy destinations
 	 * @param firstTopCopy[in] The first object to try to copy
@@ -365,7 +365,7 @@ private:
 	 * Part of planning refactoring (JAZZ 21595).
 	 * This function is analogous to doCompact.  It is meant to be the non-moving equivalent which only performs planning actions
 	 * but does not move objects or write to the heap.
-	 * @param env[in] The master GC thread
+	 * @param env[in] The main GC thread
 	 * @param copyDestinationBase[in] The base address of object copy destinations
 	 * @param firstTopCopy[in] The first object to try to copy
 	 * @param endOfCopyBlock[in] The first byte after the last object which should be copied
@@ -385,7 +385,7 @@ private:
 	/**
 	 * Walks the previous mark map to find all objects in regions to be compacted and then, using forwarding pointer data,
 	 * finds their new locations and copies them.
-	 * @param env[in] The master GC thread
+	 * @param env[in] The main GC thread
 	 */
 	void moveObjects(MM_EnvironmentVLHGC *env);
 
@@ -415,8 +415,8 @@ private:
 	UDATA movedPageSize(MM_EnvironmentVLHGC *env, void *page);
 
 	/**
-	 * Called in the master thread to do the initial population of the move work stack.  This call must be made prior to moveObjects().
-	 * @param env[in] The master GC thread
+	 * Called in the main thread to do the initial population of the move work stack.  This call must be made prior to moveObjects().
+	 * @param env[in] The main GC thread
 	 */
 	void setupMoveWorkStack(MM_EnvironmentVLHGC *env);
 
@@ -553,7 +553,7 @@ public:
 	static MM_WriteOnceCompactor *newInstance(MM_EnvironmentVLHGC *env);
 	void kill(MM_EnvironmentVLHGC *env);
 
-	void masterSetupForGC(MM_EnvironmentVLHGC *env);
+	void mainSetupForGC(MM_EnvironmentVLHGC *env);
 	void compact(MM_EnvironmentVLHGC *env);
 
 	J9Object *getForwardingPtr(J9Object *objectPtr) const;

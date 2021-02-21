@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2020 IBM Corp. and others
+ * Copyright (c) 2017, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -39,7 +39,6 @@
 #include "CollectorLanguageInterfaceImpl.hpp"
 #endif /* defined(J9VM_GC_FINALIZATION) */
 #include "ConfigurationDelegate.hpp"
-#include "Dispatcher.hpp"
 #include "EnvironmentDelegate.hpp"
 #include "FinalizableReferenceBuffer.hpp"
 #include "GlobalCollector.hpp"
@@ -50,6 +49,7 @@
 #include "MarkingSchemeRootMarker.hpp"
 #include "MarkingSchemeRootClearer.hpp"
 #include "OwnableSynchronizerObjectList.hpp"
+#include "ParallelDispatcher.hpp"
 #include "ReferenceObjectBuffer.hpp"
 #include "RootScanner.hpp"
 #include "StackSlotValidator.hpp"
@@ -113,7 +113,7 @@ MM_MarkingDelegate::clearClassLoadersScannedFlag(MM_EnvironmentBase *env)
 #endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */
 
 void
-MM_MarkingDelegate::masterSetupForWalk(MM_EnvironmentBase *env)
+MM_MarkingDelegate::mainSetupForWalk(MM_EnvironmentBase *env)
 {
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 	_markMap = NULL;
@@ -173,7 +173,7 @@ MM_MarkingDelegate::workerCleanupAfterGC(MM_EnvironmentBase *env)
 }
 
 void
-MM_MarkingDelegate::masterSetupForGC(MM_EnvironmentBase *env)
+MM_MarkingDelegate::mainSetupForGC(MM_EnvironmentBase *env)
 {
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 	clearClassLoadersScannedFlag(env);
@@ -184,7 +184,7 @@ MM_MarkingDelegate::masterSetupForGC(MM_EnvironmentBase *env)
 }
 
 void
-MM_MarkingDelegate::masterCleanupAfterGC(MM_EnvironmentBase *env)
+MM_MarkingDelegate::mainCleanupAfterGC(MM_EnvironmentBase *env)
 {
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 	_markMap = (_extensions->dynamicClassUnloading != MM_GCExtensions::DYNAMIC_CLASS_UNLOADING_NEVER) ? _markingScheme->getMarkMap() : NULL;
@@ -230,7 +230,7 @@ MM_MarkingDelegate::scanRoots(MM_EnvironmentBase *env)
 		/* Setting the permanent class loaders to scanned without a locked operation is safe
 		 * Class loaders will not be rescanned until a thread synchronize is executed
 		 */
-		if (env->isMasterThread()) {
+		if (env->isMainThread()) {
 			J9JavaVM * javaVM = (J9JavaVM*)env->getLanguageVM();
 			((J9ClassLoader *)javaVM->systemClassLoader)->gcFlags |= J9_GC_CLASS_LOADER_SCANNED;
 			_markingScheme->markObject(env, (omrobjectptr_t )((J9ClassLoader *)javaVM->systemClassLoader)->classLoaderObject);
@@ -314,7 +314,7 @@ MM_MarkingDelegate::completeMarking(MM_EnvironmentBase *env)
 								 * so, if this pointer happened to be NULL at this point let it crash here
 								 */
 								Assert_MM_true(NULL != classLoader->classHashTable);
-								clazz = javaVM->internalVMFunctions->hashClassTableStartDo(classLoader, &walkState);
+								clazz = javaVM->internalVMFunctions->hashClassTableStartDo(classLoader, &walkState, 0);
 								while (NULL != clazz) {
 									_markingScheme->markObjectNoCheck(env, (omrobjectptr_t )clazz->classObject);
 									_anotherClassMarkPass = true;
@@ -386,46 +386,11 @@ MM_MarkingDelegate::scanClass(MM_EnvironmentBase *env, J9Class *clazz)
 
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 	if (isDynamicClassUnloadingEnabled()) {
-		UDATA classDepth = GC_ClassModel::getClassDepth(clazz);
-		/* Superclasses - if the depth is 0, don't bother - no superclasses */
-		if (0 < classDepth) {
-			J9Class** superclassScanPtr = clazz->superclasses;
-			J9Class** superclassEndScanPtr = superclassScanPtr + classDepth;
-			while (superclassScanPtr < superclassEndScanPtr) {
-				J9Class *clazzPtr = *superclassScanPtr++;
-				_markingScheme->markObject(env, clazzPtr->classObject);
-			}
-		}
-
-		if (NULL != clazz->arrayClass) {
-			J9Class *clazzPtr = clazz->arrayClass;
-			_markingScheme->markObject(env, clazzPtr->classObject);
-		}
-
-		/* Component type and Leaf Component type for indexable */
-		if (_extensions->objectModel.isIndexable(clazz)) {
-			J9ArrayClass *indexableClass = (J9ArrayClass *)clazz;
-			J9Class *clazzPtr = indexableClass->componentType;
-			_markingScheme->markObject(env, clazzPtr->classObject);
-
-			/*
-			 * There is no mandatory need to scan leafComponentType here because this class
-			 * would be discovered at the end componentType chain eventually
-			 * However it is a performance optimization because an early class discovery
-			 * might reduce number of loops to scan
-			 */
-			clazzPtr = indexableClass->leafComponentType;
-			_markingScheme->markObject(env, clazzPtr->classObject);
-		}
-
-		/* ITable */
-		J9JavaVM *javaVM = (J9JavaVM *)env->getLanguageVM();
-		if (!GC_ClassModel::usesSharedITable(javaVM, clazz)) {
-			J9ITable *clazzITable = (J9ITable *)clazz->iTable;
-			J9ITable *endITable = (0 != classDepth) ? (J9ITable *)(clazz->superclasses[classDepth - 1]->iTable) : NULL;
-			while (clazzITable != endITable) {
-				_markingScheme->markObject(env, clazzITable->interfaceClass->classObject);
-				clazzITable = clazzITable->next;
+		GC_ClassIteratorClassSlots classSlotIterator((J9JavaVM*)env->getLanguageVM(), clazz);
+		J9Class **slotPtr;
+		while (NULL != (slotPtr = classSlotIterator.nextSlot())) {
+			if (NULL != *slotPtr) {
+				_markingScheme->markObject(env, (*slotPtr)->classObject);
 			}
 		}
 	}

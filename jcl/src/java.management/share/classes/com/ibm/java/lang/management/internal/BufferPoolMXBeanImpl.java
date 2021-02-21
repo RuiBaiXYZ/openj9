@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar17]*/
 /*******************************************************************************
- * Copyright (c) 2005, 2019 IBM Corp. and others
+ * Copyright (c) 2005, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -28,8 +28,8 @@ import java.util.List;
 
 import javax.management.ObjectName;
 
-/*[IF Java12]*/
-import jdk.internal.access.JavaNioAccess.BufferPool;
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+import jdk.internal.misc.VM.BufferPool;
 import jdk.internal.access.SharedSecrets;
 /*[ELSE]
 /*[IF Sidecar19-SE]
@@ -38,8 +38,8 @@ import jdk.internal.misc.SharedSecrets;
 /*[ELSE]
 import sun.misc.JavaNioAccess.BufferPool;
 import sun.misc.SharedSecrets;
-/*[ENDIF]*/
-/*[ENDIF]*/
+/*[ENDIF] Sidecar19-SE */
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 
 /**
  * The implementation MXBean for {@link java.lang.management.BufferPoolMXBean}.

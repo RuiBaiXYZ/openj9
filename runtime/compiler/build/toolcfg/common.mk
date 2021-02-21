@@ -51,17 +51,9 @@ ifdef ASSUMES
     PRODUCT_DEFINES+=PROD_WITH_ASSUMES
 endif
 
-ifdef PUBLIC_BUILD
-    PRODUCT_DEFINES+=PUBLIC_BUILD
-endif
-
 ifdef ENABLE_GPU
     ifeq (,$(CUDA_HOME))
         $(error You must set CUDA_HOME if ENABLE_GPU is set)
-    endif
-
-    ifeq (,$(GDK_HOME))
-        $(error You must set GDK_HOME if ENABLE_GPU is set)
     endif
 
     PRODUCT_INCLUDES+=$(CUDA_HOME)/include $(CUDA_HOME)/nvvm/include $(GDK_HOME)
@@ -87,7 +79,6 @@ ifneq ($(J9VM_OPT_JITSERVER),)
 # Networking
 #
 PRODUCT_INCLUDES+=\
-    $(FIXED_SRCBASE)/compiler/net/gen \
     $(FIXED_SRCBASE)/compiler/net
 endif
 #

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -49,7 +49,7 @@
 **/
 
 // used when querying VM for BigDecimal dfp field
-static int16_t dfpFieldOffset = -1; // initialize to an illegal val
+int16_t dfpFieldOffset = -1; // initialize to an illegal val
 
 // Rounding modes
 const uint8_t rmIEEEdefault = 0x0; // round to nearest ties to even
@@ -78,7 +78,7 @@ const char * fieldName = "laside";
 const char * sig = "J";
 const uint32_t fieldLen = 6;
 const uint32_t sigLen = 1;
-const char * className = "Ljava/math/BigDecimal;\0";
+const char * className = "Ljava/math/BigDecimal;";
 const int32_t len = 22;
 
 /*
@@ -207,7 +207,7 @@ genLoadDFP(
       fprRegister = cg->allocateRegister(TR_FPR);
 
       // move it from GPR to FPR
-      if (cg->comp()->target().cpu.getSupportsFloatingPointExtensionFacility())
+      if (cg->comp()->target().cpu.supportsFeature(OMR_FEATURE_S390_FPE))
          {
          generateRRInstruction(cg, TR::InstOpCode::LDGR, node, fprRegister, newRegister);
          }
@@ -271,7 +271,7 @@ genStoreDFP(
    /*if (TR::TreeEvaluator::dfpFieldSymbolReference) // re-use
       dfpMR->setSymbolReference(TR::TreeEvaluator::dfpFieldSymbolReference);
    else //create our own (generic long shadow)
-      dfpMR->setSymbolReference(cg->comp()->getSymRefTab()->
+      dfpMR->setSymbolReference(comp->getSymRefTab()->
                                    findOrCreateGenericLongShadowSymbolReference(
                                    dfpFieldOffset, node->getSymbolReference()->getSymbol()->getResolvedMethodSymbol()));
    */
@@ -1384,7 +1384,7 @@ inlineBigDecimalFromPackedConverter(
       cg->stopUsingRegister(valRegister);
       }
 
-   // load and sign extend the the exponent
+   // load and sign extend the exponent
    TR::Register * expRegister = NULL;
    clobbered = false;
    if (node->getChild(2)->getReferenceCount() > 1)
@@ -2640,7 +2640,7 @@ deloadHelper(TR::Node * node, TR::CodeGenerator * cg, TR::MemoryReference * srcM
    TR::MemoryReference * hiMR;
    if (loMR == NULL)
       {
-      loMR = generateS390MemoryReference(node, cg);
+      loMR =  TR::MemoryReference::create(cg, node);
       }
    hiMR = generateS390MemoryReference(*loMR, 8, cg);
    // FP reg pairs for long double: FPR0 & FPR2, FPR4 & FPR6, FPR1 & FPR3, FPR5 & FPR7 etc..
@@ -2675,9 +2675,9 @@ destoreHelper(TR::Node * node, TR::CodeGenerator * cg)
       valueChild = node->getFirstChild();
       }
   // source returns a reg pair, so... TODO
-  TR::Register * srcReg = cg->evaluate(valueChild);
+   TR::Register * srcReg = cg->evaluate(valueChild);
 
-   TR::MemoryReference * loMR = generateS390MemoryReference(node, cg);
+   TR::MemoryReference * loMR = TR::MemoryReference::create(cg, node);
    TR::MemoryReference * hiMR = generateS390MemoryReference(*loMR, 8, cg);
 
    generateRXInstruction(cg, TR::InstOpCode::STD, node, srcReg->getHighOrder(), loMR);

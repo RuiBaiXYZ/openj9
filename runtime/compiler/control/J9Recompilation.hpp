@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -71,6 +71,7 @@ public:
    void setIsProfilingCompilation(bool v) { _bodyInfo->setIsProfilingBody(v); }
 
    TR_PersistentProfileInfo *findOrCreateProfileInfo();
+   TR_PersistentProfileInfo *getProfileInfo();
 
    bool useSampling() {return _useSampling;}
 
@@ -134,6 +135,7 @@ public:
 
 #if defined(J9VM_OPT_JITSERVER)
    static TR_PersistentJittedBodyInfo * persistentJittedBodyInfoFromString(const std::string &bodyInfoStr, const std::string &methodInfoStr, TR_Memory * trMemory);
+   static void resetPersistentProfileInfo(TR_PersistentMethodInfo *methodInfo);
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
 protected:

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -165,7 +165,7 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 	J9CfrMethod *method;
 	IDATA target, start, i1, i2, result, tableSize;
 	U_8 *bcStart, *bcInstructionStart, *bcIndex, *bcEnd;
-	UDATA bc, index, u1, u2, i, maxLocals, cpCount, tag, firstKey;
+	UDATA bc, index, u1, u2, i, maxLocals, cpCount, tag;
 	UDATA sigChar;
 	UDATA errorType = 0;
 	UDATA errorDataIndex = 0;
@@ -745,17 +745,10 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 			CHECK_END;
 			bcIndex -= (I_32) u1 * 8;
 
-			firstKey = TRUE;
 			for (i = 0; i < u1; i++) {
-				i1 = (IDATA) NEXT_U32(u2, bcIndex);
-				if (!firstKey) {
-					if ((I_32)i1 <= (I_32)i2) {
-						errorType = J9NLS_CFR_ERR_BC_SWITCH_NOT_SORTED__ID;
-						goto _verifyError;
-					}
-				}
-				firstKey = FALSE;
-				i2 = i1;
+				/* Skip over match/key part of match-offset pair. Match/key order is verified in the second verification pass */
+				NEXT_U32(u2, bcIndex);
+
 				target = start + (I_32) NEXT_U32(u2, bcIndex);
 				if ((UDATA) target >= length) {
 					errorType = J9NLS_CFR_ERR_BC_SWITCH_OFFSET__ID;
@@ -864,9 +857,9 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 			}
 			info = &(classfile->constantPool[index]);
 			if (info->tag != CFR_CONSTANT_Methodref) {
-				if (((flags & BCT_MajorClassFileVersionMask) >= BCT_Java8MajorVersionShifted)
-				&& (bc != CFR_BC_invokevirtual) && (info->tag == CFR_CONSTANT_InterfaceMethodref)
-				) {
+				BOOLEAN isJava8orLater = ((flags & BCT_MajorClassFileVersionMask) >= BCT_Java8MajorVersionShifted) || J9_ARE_ANY_BITS_SET(flags, BCT_Unsafe);
+
+				if (isJava8orLater && (bc != CFR_BC_invokevirtual) && (info->tag == CFR_CONSTANT_InterfaceMethodref)) {
 					/* JVMS 4.9.1 Static Constraints:
 					 * The indexbyte operands of each invokespecial and invokestatic instruction must represent
 					 * a valid index into the constant_pool table. The constant pool entry referenced by that
@@ -884,8 +877,9 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 			info = &(classfile->constantPool[classfile->constantPool[index].slot1]);
 			if (info->bytes[0] == '<') {
 				if ((bc != CFR_BC_invokespecial)
-						||(info->tag != CFR_CONSTANT_Utf8)
-						|| (strncmp((char *) info->bytes, "<init>", 6))) {
+				|| (info->tag != CFR_CONSTANT_Utf8)
+				|| !J9UTF8_DATA_EQUALS("<init>", 6, info->bytes, info->slot1)
+				) {
 					errorType = J9NLS_CFR_ERR_BC_METHOD_INVALID__ID;
 					goto _verifyError;
 				}
@@ -976,11 +970,6 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 				errorType = J9NLS_CFR_ERR_BC_NEW_NOT_CLASS__ID;
 				/* Jazz 82615: Set the constant pool index to show up in the error message framework */
 				errorDataIndex = index;
-				goto _verifyError;
-			}
-			info = &(classfile->constantPool[info->slot1]);
-			if (info->bytes[0] == '[') {
-				errorType = J9NLS_CFR_ERR_BC_NEW_ARRAY__ID;
 				goto _verifyError;
 			}
 			break;
@@ -1429,7 +1418,7 @@ checkStackMapEntries (J9CfrClassFile* classfile, J9CfrAttributeCode * code, U_8 
 			}
 		}
 
-		/* A value of type long or double must occupy two consecutive local variables. Ensure that if there is is a long or double entry in 
+		/* A value of type long or double must occupy two consecutive local variables. Ensure that if there is a long or double entry in
 		 * an append frame maxLocals reflects the correct number of slots. An incorrect maxLocals value in all other cases will be handled 
 		 * in bcverify.c */
 		if (checkAppendArraySize) {
@@ -1547,13 +1536,10 @@ checkMethodStructure (J9PortLibrary * portLib, J9CfrClassFile * classfile, UDATA
 
 	/* Throw a class format error if we are given a static <init> method (otherwise later we will throw a verify error due to back stack shape) */
 	info = &(classfile->constantPool[method->nameIndex]);
-	if (info->slot1 == 6) {		/* size of '<init>' */
-		if ((info->tag == CFR_CONSTANT_Utf8)
-				&& (!strncmp ((char *)info->bytes, "<init>", 6))) {
-			if (method->accessFlags & CFR_ACC_STATIC) {
-				errorType = J9NLS_CFR_ERR_ILLEGAL_METHOD_MODIFIERS__ID;
-				goto _formatError;
-			}
+	if (method->accessFlags & CFR_ACC_STATIC) {
+		if ((CFR_CONSTANT_Utf8 == info->tag) && J9UTF8_DATA_EQUALS("<init>", 6, info->bytes, info->slot1)) {
+			errorType = J9NLS_CFR_ERR_ILLEGAL_METHOD_MODIFIERS__ID;
+			goto _formatError;
 		}
 	}
 

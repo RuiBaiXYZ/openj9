@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2019 IBM Corp. and others
+# Copyright (c) 2017, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,15 +20,17 @@
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
 
-# Don't append version suffix.
-set(CMAKE_SHARED_LIBRARY_SUFFIX ${J9VM_OLD_SHARED_SUFFIX})
+set(OMR_ENHANCED_WARNINGS OFF)
 
 set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/generated.c" PROPERTIES GENERATED TRUE)
 
 ################################################################################
 # Redirector
 ################################################################################
-add_library(jvm_redirect SHARED
+j9vm_add_library(jvm_redirect
+	SHARED
+	OUTPUT_NAME jvm
+
 	"${CMAKE_CURRENT_BINARY_DIR}/generated.c"
 	redirector.c
 )
@@ -47,9 +49,14 @@ if(OMR_OS_ZOS)
 		PRIVATE
 			"${omr_SOURCE_DIR}/port/zos390"
 	)
+	# redirector needs getUserExtendedPrivateAreaMemoryType from omrutil,
+	# but we don't want to introduce any transitive dependencies, so we use $<TARGET_FILE>.
+	target_link_libraries(jvm_redirect PRIVATE $<TARGET_FILE:omrutil>)
+
+	# Ensure that omrutil is built before we attempt to link it.
+	add_dependencies(jvm_redirect omrutil)
 endif()
 set_target_properties(jvm_redirect PROPERTIES
-	OUTPUT_NAME jvm
 	ARCHIVE_OUTPUT_NAME redirector_jvm
 	LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
 	RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"

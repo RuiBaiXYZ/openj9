@@ -268,6 +268,35 @@ Java_java_lang_Class_isClassADeclaredClass(JNIEnv *env, jobject jlClass, jobject
 	return result;
 }
 
+jboolean JNICALL
+Java_java_lang_Class_isCircularDeclaringClass(JNIEnv *env, jobject recv)
+{
+	J9VMThread *currentThread = (J9VMThread*)env;
+	J9JavaVM *vm = currentThread->javaVM;
+	J9InternalVMFunctions *vmFuncs = vm->internalVMFunctions;
+	jboolean result = JNI_FALSE;
+
+	vmFuncs->internalEnterVMFromJNI(currentThread);
+
+	J9Class *clazz = J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, J9_JNI_UNWRAP_REFERENCE(recv));
+	J9Class *currentClazz = clazz;
+	J9UTF8 *outerClassName = J9ROMCLASS_OUTERCLASSNAME(currentClazz->romClass);
+	while (NULL != outerClassName) {
+		J9Class *outerClass = vmFuncs->internalFindClassUTF8(currentThread, J9UTF8_DATA(outerClassName),
+								J9UTF8_LENGTH(outerClassName), currentClazz->classLoader, 0);
+		if (NULL == outerClass) {
+			break;
+		} else if (clazz == outerClass) {
+			result = JNI_TRUE;
+			break;
+		}
+		currentClazz = outerClass;
+		outerClassName = J9ROMCLASS_OUTERCLASSNAME(currentClazz->romClass);
+	}
+
+	vmFuncs->internalExitVMToJNI(currentThread);
+	return result;
+}
 
 jobject JNICALL
 Java_com_ibm_oti_vm_VM_getClassNameImpl(JNIEnv *env, jclass recv, jclass jlClass)
@@ -283,6 +312,7 @@ Java_com_ibm_oti_vm_VM_getClassNameImpl(JNIEnv *env, jclass recv, jclass jlClass
 	UDATA utfLength;
 	UDATA freeUTFData = FALSE;
 	U_8 onStackBuffer[64];
+	bool anonClassName = false;
 
 	vmFuncs->internalEnterVMFromJNI(currentThread);
 
@@ -331,16 +361,17 @@ Java_com_ibm_oti_vm_VM_getClassNameImpl(JNIEnv *env, jclass recv, jclass jlClass
 				utfData[utfLength - 1] = ';';
 			}
 		}
+		anonClassName = J9_ARE_ANY_BITS_SET(leafROMClass->extraModifiers, J9AccClassAnonClass | J9AccClassHidden);
 	} else {
 		J9UTF8 *className = J9ROMCLASS_CLASSNAME(romClass);
 		utfLength = J9UTF8_LENGTH(className);
 		utfData = J9UTF8_DATA(className);
+		anonClassName = J9_ARE_ANY_BITS_SET(romClass->extraModifiers, J9AccClassAnonClass | J9AccClassHidden);
 	}
 
 	if (NULL != utfData) {
 		UDATA flags = J9_STR_INTERN | J9_STR_XLAT;
-
-		if (J9_ARE_ALL_BITS_SET(romClass->extraModifiers, J9AccClassAnonClass)) {
+		if (anonClassName) {
 			flags |= J9_STR_ANON_CLASS_NAME;
 		}
 		j9object_t classNameObject = vm->memoryManagerFunctions->j9gc_createJavaLangString(currentThread, utfData, utfLength, flags);
@@ -1179,6 +1210,12 @@ Java_java_lang_Class_getRecordComponentsImpl(JNIEnv *env, jobject cls)
 	return getRecordComponentsHelper(env, cls);
 }
 
+jarray JNICALL
+Java_java_lang_Class_permittedSubclassesImpl(JNIEnv *env, jobject cls)
+{
+	return permittedSubclassesHelper(env, cls);
+}
+
 static UDATA
 frameIteratorGetAccSnapshotHelper(J9VMThread * currentThread, J9StackWalkState * walkState, j9object_t acc, j9object_t perm)
 {
@@ -1796,7 +1833,7 @@ storePDobjectsHelper(J9VMThread* vmThread, J9Class* arrayClass, J9StackWalkState
 jobject JNICALL
 Java_java_lang_Class_getNestHostImpl(JNIEnv *env, jobject recv)
 {
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 	J9VMThread *currentThread = (J9VMThread*)env;
 	J9InternalVMFunctions *vmFuncs = currentThread->javaVM->internalVMFunctions;
 	vmFuncs->internalEnterVMFromJNI(currentThread);
@@ -1823,16 +1860,16 @@ Java_java_lang_Class_getNestHostImpl(JNIEnv *env, jobject recv)
 
 	vmFuncs->internalExitVMToJNI(currentThread);
 	return result;
-#else /* defined(J9VM_OPT_VALHALLA_NESTMATES) */
+#else /* JAVA_SPEC_VERSION >= 11 */
 	Assert_JCL_unimplemented();
 	return NULL;
-#endif /* defined(J9VM_OPT_VALHALLA_NESTMATES) */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 }
 
 jobject JNICALL
 Java_java_lang_Class_getNestMembersImpl(JNIEnv *env, jobject recv)
 {
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 	J9VMThread *currentThread = (J9VMThread*)env;
 	J9JavaVM *vm = currentThread->javaVM;
 	J9InternalVMFunctions *vmFuncs = vm->internalVMFunctions;
@@ -1913,10 +1950,28 @@ Java_java_lang_Class_getNestMembersImpl(JNIEnv *env, jobject recv)
 _done:
 	vmFuncs->internalExitVMToJNI(currentThread);
 	return result;
-#else /* defined(J9VM_OPT_VALHALLA_NESTMATES) */
+#else /* JAVA_SPEC_VERSION >= 11 */
 	Assert_JCL_unimplemented();
 	return NULL;
-#endif /* defined(J9VM_OPT_VALHALLA_NESTMATES) */
+#endif /* JAVA_SPEC_VERSION >= 11 */
+}
+
+jboolean JNICALL 
+Java_java_lang_Class_isHiddenImpl(JNIEnv *env, jobject recv)
+{
+#if JAVA_SPEC_VERSION >= 15
+	jboolean result = JNI_FALSE;
+	J9VMThread *currentThread = (J9VMThread*)env;
+	J9InternalVMFunctions *vmFuncs = currentThread->javaVM->internalVMFunctions;
+	vmFuncs->internalEnterVMFromJNI(currentThread);
+	J9Class *clazz = J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, J9_JNI_UNWRAP_REFERENCE(recv));
+	result = J9ROMCLASS_IS_HIDDEN(clazz->romClass);
+	vmFuncs->internalExitVMToJNI(currentThread);
+	return result;
+#else /* JAVA_SPEC_VERSION >= 15 */
+	Assert_JCL_unimplemented();
+	return JNI_FALSE;
+#endif /* JAVA_SPEC_VERSION >= 15 */
 }
 
 }

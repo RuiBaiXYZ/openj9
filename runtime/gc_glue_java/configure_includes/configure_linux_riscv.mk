@@ -23,7 +23,7 @@
 include $(CONFIG_INCL_DIR)/configure_common.mk
 
 # The riscv64 cross toolchain is used for both 32bit and 64bit
-RISCV_CROSSTOOLS_PREFIX=riscv64-unknown-linux-gnu
+RISCV_CROSSTOOLS_PREFIX ?= riscv64-unknown-linux-gnu
 
 CONFIGURE_ARGS += \
     --enable-debug \
@@ -41,17 +41,17 @@ CONFIGURE_ARGS += \
 
 ifneq (,$(findstring _riscv64, $(SPEC)))
     CONFIGURE_ARGS += \
-        --host=riscv64-unknown-linux-gnu \
+        --host=$(RISCV_CROSSTOOLS_PREFIX) \
         --enable-OMR_ENV_DATA64 \
         'OMR_TARGET_DATASIZE=64'
 endif
 
 ifneq (,$(findstring _cmprssptrs, $(SPEC)))
 	CONFIGURE_ARGS += \
-		--enable-OMR_GC_COMPRESSED_POINTERS
+		OMR_GC_POINTER_MODE=compressed
 else
 	CONFIGURE_ARGS += \
-		--enable-OMR_GC_FULL_POINTERS
+		OMR_GC_POINTER_MODE=full
 endif
 
 ifneq (,$(findstring _cross, $(SPEC)))
@@ -66,7 +66,7 @@ ifneq (,$(findstring _cross, $(SPEC)))
     OBJCOPY=$(RISCV_CROSSTOOLS_PREFIX)-objcopy
 else
     CONFIGURE_ARGS += \
-        --build=riscv64-unknown-linux-gnu
+        --build=$(RISCV_CROSSTOOLS_PREFIX)
 
     ifeq (default,$(origin AR))
         AR=ar

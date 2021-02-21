@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -44,17 +44,17 @@ uint8_t *TR::ARMRecompilationSnippet::emitSnippetBody()
    */
 
    uint8_t             *buffer = cg()->getBinaryBufferCursor();
-   TR::SymbolReference  *countingRecompMethodSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_ARMcountingRecompileMethod, false, false, false);
+   TR::SymbolReference  *countingRecompMethodSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_ARMcountingRecompileMethod);
 
    getSnippetLabel()->setCodeLocation(buffer);
 
    *(int32_t *)buffer = encodeHelperBranchAndLink(countingRecompMethodSymRef, buffer, getNode(), cg());  // BL resolve
    buffer += 4;
 
-   *(int32_t *)buffer = (int32_t)(intptrj_t)cg()->comp()->getRecompilationInfo()->getJittedBodyInfo();
+   *(int32_t *)buffer = (int32_t)(intptr_t)cg()->comp()->getRecompilationInfo()->getJittedBodyInfo();
    buffer += 4;
 
-   *(int32_t *)buffer = ((int32_t)(intptrj_t)cg()->getCodeStart());
+   *(int32_t *)buffer = ((int32_t)(intptr_t)cg()->getCodeStart());
    buffer += 4;
 
    return buffer;

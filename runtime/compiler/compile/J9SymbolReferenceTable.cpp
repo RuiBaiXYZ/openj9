@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -181,6 +181,11 @@ J9::SymbolReferenceTable::findOrCreateThrowCurrentExceptionSymbolRef(TR::Resolve
    return findOrCreateRuntimeHelper(TR_throwCurrentException, true, false, true);
    }
 
+TR::SymbolReference *
+J9::SymbolReferenceTable::findOrCreateThrowUnreportedExceptionSymbolRef(TR::ResolvedMethodSymbol *)
+   {
+   return findOrCreateRuntimeHelper(TR_throwUnreportedException, true /* canGCandReturn */, false /* canGCandExcept */, true /* preservesAllRegisters */);
+   }
 
 TR::SymbolReference *
 J9::SymbolReferenceTable::findOrCreateReleaseVMAccessSymbolRef(TR::ResolvedMethodSymbol *)
@@ -235,6 +240,62 @@ TR::SymbolReference *
 J9::SymbolReferenceTable::findOrCreateWriteBarrierBatchStoreSymbolRef(TR::ResolvedMethodSymbol *)
    {
    return findOrCreateRuntimeHelper(TR_writeBarrierBatchStore, false, false, true);
+   }
+
+
+TR::SymbolReference *
+J9::SymbolReferenceTable::findOrCreateAcmpHelperSymbolRef(TR::ResolvedMethodSymbol * owningMEthodSymbol)
+   {
+   return findOrCreateRuntimeHelper(TR_acmpHelper, true, false, true);
+   }
+
+
+TR::SymbolReference *
+J9::SymbolReferenceTable::findOrCreateGetFlattenableFieldSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol)
+   {
+   return findOrCreateRuntimeHelper(TR_getFlattenableField, true, true, true);
+   }
+
+
+TR::SymbolReference *
+J9::SymbolReferenceTable::findOrCreateWithFlattenableFieldSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol)
+   {
+   return findOrCreateRuntimeHelper(TR_withFlattenableField, true, true, true);
+   }
+
+
+TR::SymbolReference *
+J9::SymbolReferenceTable::findOrCreatePutFlattenableFieldSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol)
+   {
+   return findOrCreateRuntimeHelper(TR_putFlattenableField, true, true, true);
+   }
+
+
+TR::SymbolReference *
+J9::SymbolReferenceTable::findOrCreateGetFlattenableStaticFieldSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol)
+   {
+   return findOrCreateRuntimeHelper(TR_getFlattenableStaticField, true, true, true);
+   }
+
+
+TR::SymbolReference *
+J9::SymbolReferenceTable::findOrCreatePutFlattenableStaticFieldSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol)
+   {
+   return findOrCreateRuntimeHelper(TR_putFlattenableStaticField, true, true, true);
+   }
+
+
+TR::SymbolReference *
+J9::SymbolReferenceTable::findOrCreateLoadFlattenableArrayElementSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol)
+   {
+   return findOrCreateRuntimeHelper(TR_ldFlattenableArrayElement, true, true, true);
+   }
+
+
+TR::SymbolReference *
+J9::SymbolReferenceTable::findOrCreateStoreFlattenableArrayElementSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol)
+   {
+   return findOrCreateRuntimeHelper(TR_strFlattenableArrayElement, true, true, true);
    }
 
 
@@ -352,8 +413,15 @@ J9::SymbolReferenceTable::findOrCreateInterfaceMethodSymbol(TR::ResolvedMethodSy
 
 
 TR::SymbolReference *
-J9::SymbolReferenceTable::findOrCreateDynamicMethodSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t callSiteIndex)
+J9::SymbolReferenceTable::findOrCreateDynamicMethodSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t callSiteIndex, bool * unresolvedInCP)
    {
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+   TR_ResolvedMethod  * method = owningMethodSymbol->getResolvedMethod()->getResolvedDynamicMethod(comp(), callSiteIndex, unresolvedInCP);
+   if (method)
+      owningMethodSymbol->setMayHaveInlineableCall(true);
+
+   TR::SymbolReference * symRef = findOrCreateMethodSymbol(owningMethodSymbol->getResolvedMethodIndex(), -1, method, TR::MethodSymbol::Static);
+#else
    List<TR::SymbolReference> *methods = dynamicMethodSymrefsByCallSiteIndex(callSiteIndex);
    ListIterator<TR::SymbolReference> li(methods);
    for (TR::SymbolReference *symRef = li.getFirst(); symRef; symRef = li.getNext())
@@ -361,13 +429,10 @@ J9::SymbolReferenceTable::findOrCreateDynamicMethodSymbol(TR::ResolvedMethodSymb
       if (symRef->getOwningMethodIndex() == owningMethodSymbol->getResolvedMethodIndex())
          return symRef;
       }
-
-   TR_ResolvedMethod  * method = owningMethodSymbol->getResolvedMethod()->getResolvedDynamicMethod(comp(), callSiteIndex);
-   if (method)
-      owningMethodSymbol->setMayHaveInlineableCall(true);
-
+   TR_ResolvedMethod  * method = owningMethodSymbol->getResolvedMethod()->getResolvedDynamicMethod(comp(), callSiteIndex, unresolvedInCP);
    TR::SymbolReference * symRef = findOrCreateMethodSymbol(owningMethodSymbol->getResolvedMethodIndex(), -1, method, TR::MethodSymbol::ComputedVirtual);
    methods->add(symRef);
+#endif /* J9VM_OPT_OPENJDK_METHODHANDLE */
    return symRef;
    }
 
@@ -385,14 +450,17 @@ J9::SymbolReferenceTable::findOrCreateHandleMethodSymbol(TR::ResolvedMethodSymbo
 
 
 TR::SymbolReference *
-J9::SymbolReferenceTable::findOrCreateHandleMethodSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t cpIndex)
+J9::SymbolReferenceTable::findOrCreateHandleMethodSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t cpIndex, bool * unresolvedInCP)
    {
-   bool isUnresolvedInCP;
-   TR_ResolvedMethod  * method = owningMethodSymbol->getResolvedMethod()->getResolvedHandleMethod(comp(), cpIndex, &isUnresolvedInCP);
+   TR_ResolvedMethod  * method = owningMethodSymbol->getResolvedMethod()->getResolvedHandleMethod(comp(), cpIndex, unresolvedInCP);
    if (method)
       owningMethodSymbol->setMayHaveInlineableCall(true);
 
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+   TR::SymbolReference * symRef = findOrCreateMethodSymbol(owningMethodSymbol->getResolvedMethodIndex(), cpIndex, method, TR::MethodSymbol::Static);
+#else
    TR::SymbolReference * symRef = findOrCreateMethodSymbol(owningMethodSymbol->getResolvedMethodIndex(), cpIndex, method, TR::MethodSymbol::ComputedVirtual);
+#endif /* J9VM_OPT_OPENJDK_METHODHANDLE */
    return symRef;
    }
 
@@ -421,7 +489,11 @@ J9::SymbolReferenceTable::findOrCreateCallSiteTableEntrySymbol(TR::ResolvedMetho
       {
       TR::KnownObjectTable *knot = comp()->getOrCreateKnownObjectTable();
       if (knot)
-         knownObjectIndex = knot->getIndexAt((uintptrj_t*)entryLocation);
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+         knownObjectIndex = knot->getOrCreateIndexAt((uintptr_t*)entryLocation, true);
+#else
+         knownObjectIndex = knot->getOrCreateIndexAt((uintptr_t*)entryLocation);
+#endif
       }
 
    symRef = new (trHeapMemory()) TR::SymbolReference(self(), sym, owningMethodSymbol->getResolvedMethodIndex(), -1,
@@ -438,7 +510,6 @@ J9::SymbolReferenceTable::findOrCreateCallSiteTableEntrySymbol(TR::ResolvedMetho
    aliasBuilder.callSiteTableEntrySymRefs().set(symRef->getReferenceNumber());
    return symRef;
    }
-
 
 TR::SymbolReference *
 J9::SymbolReferenceTable::findOrCreateMethodTypeTableEntrySymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t cpIndex)
@@ -457,8 +528,21 @@ J9::SymbolReferenceTable::findOrCreateMethodTypeTableEntrySymbol(TR::ResolvedMet
    TR::StaticSymbol *sym = TR::StaticSymbol::createMethodTypeTableEntry(trHeapMemory(),cpIndex);
    sym->setStaticAddress(entryLocation);
    bool isUnresolved = owningMethod->isUnresolvedMethodTypeTableEntry(cpIndex);
+
+   TR::KnownObjectTable::Index knownObjectIndex = TR::KnownObjectTable::UNKNOWN;
+   if (!isUnresolved)
+      {
+      TR::KnownObjectTable *knot = comp()->getOrCreateKnownObjectTable();
+      if (knot)
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+         knownObjectIndex = knot->getOrCreateIndexAt((uintptr_t*)entryLocation, true);
+#else
+         knownObjectIndex = knot->getOrCreateIndexAt((uintptr_t*)entryLocation);
+#endif
+      }
+
    symRef = new (trHeapMemory()) TR::SymbolReference(self(), sym, owningMethodSymbol->getResolvedMethodIndex(), -1,
-                                                    isUnresolved ? _numUnresolvedSymbols++ : 0);
+                                                    (isUnresolved ? _numUnresolvedSymbols++ : 0), knownObjectIndex);
 
    if (isUnresolved)
       {
@@ -471,6 +555,22 @@ J9::SymbolReferenceTable::findOrCreateMethodTypeTableEntrySymbol(TR::ResolvedMet
    aliasBuilder.methodTypeTableEntrySymRefs().set(symRef->getReferenceNumber());
    return symRef;
    }
+
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+TR::SymbolReference *
+J9::SymbolReferenceTable::refineInvokeCacheElementSymRefWithKnownObjectIndex(TR::SymbolReference * originalSymRef, uintptr_t arrayElementRef)
+   {
+   TR_J9VMBase *fej9 = (TR_J9VMBase *)(fe());
+   TR_ASSERT(fej9->haveAccess(), "Require VM access to be acquired by caller");
+   TR::KnownObjectTable *knot = comp()->getOrCreateKnownObjectTable();
+   if (!knot) return originalSymRef;
+   TR::KnownObjectTable::Index arrayElementKnotIndex = TR::KnownObjectTable::UNKNOWN;
+   arrayElementKnotIndex = knot->getOrCreateIndex(arrayElementRef);
+   TR::SymbolReference *newRef = findOrCreateSymRefWithKnownObject(originalSymRef, arrayElementKnotIndex);
+   return newRef;
+   }
+
+#endif
 
 TR::SymbolReference *
 J9::SymbolReferenceTable::findOrCreateVarHandleMethodTypeTableEntrySymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t cpIndex)
@@ -782,6 +882,14 @@ J9::SymbolReferenceTable::findOrCreateShadowSymbol(TR::ResolvedMethodSymbol * ow
    TR_ResolvedJ9Method * owningMethod =
       static_cast<TR_ResolvedJ9Method*>(owningMethodSymbol->getResolvedMethod());
 
+   if (comp()->compileRelocatableCode())
+      {
+      comp()->setUseTracingBuffer(true);
+      if (comp()->getTracingBufferStart() == NULL)
+         comp()->allocateTracingBuffer();
+      comp()->resetTracingBuffer();
+      }
+
    bool isVolatile = true, isFinal = false, isPrivate = false, isUnresolvedInCP;
    TR::DataType type = TR::NoType;
    uint32_t offset = 0;
@@ -801,22 +909,62 @@ J9::SymbolReferenceTable::findOrCreateShadowSymbol(TR::ResolvedMethodSymbol * ow
    if (resolved)
       {
       bool isStatic = false;
+      TR_OpaqueClassBlock* fromResolvedJ9Method = NULL;
       containingClass =
-         owningMethod->definingClassFromCPFieldRef(comp(), cpIndex, isStatic);
+         owningMethod->definingClassFromCPFieldRef(comp(), cpIndex, isStatic, &fromResolvedJ9Method);
 
-      TR_ASSERT_FATAL(
-         containingClass != NULL,
-         "failed to get defining class of field ref cpIndex=%d in owning method J9Method=%p",
-         cpIndex,
-         owningMethod->getNonPersistentIdentifier());
+      if (comp()->compileRelocatableCode())
+         {
+         if (comp()->useTracingBuffer())
+            {
+            if (containingClass == NULL)
+               {
+               const char *bufferPtr = comp()->getTracingBufferCursor();
+               for (char *cursor = comp()->getTracingBufferStart(); cursor < bufferPtr; cursor += TRACING_BUFFER_SEGMENT_SIZE)
+                  {
+                  J9VMThread *vmThread = comp()->fej9()->getCurrentVMThread();
+                  // each subsection *should* be NULL terminated
+                  fprintf(stderr, "%p: %s", vmThread, cursor);
+                  }
+               fprintf(stderr, "End (%d)\n", comp()->getTracingBufferFreeSpace());
+               }
+            comp()->setUseTracingBuffer(false);
+            }
+
+         TR_ASSERT_FATAL(
+            containingClass != NULL,
+            "failed to get defining class of field ref cpIndex=%d in owning method J9Method=%p\n"
+            "\tTR_ResolvedJ9Method::definingClassFromCPFieldRef=%p, TR_ResolvedRelocatableJ9Method::definingClassFromCPFieldRef=%p\n"
+            "\tfromResolvedJ9Method=%p\n"
+            "\tTR_UseSymbolValidationManager=%d",
+            cpIndex,
+            owningMethod->getNonPersistentIdentifier(),
+            owningMethod->TR_ResolvedJ9Method::definingClassFromCPFieldRef(comp(), owningMethod->cp(), cpIndex, isStatic),
+            static_cast<TR_ResolvedRelocatableJ9Method *>(owningMethod)->definingClassFromCPFieldRef(comp(), cpIndex, isStatic),
+            fromResolvedJ9Method,
+            comp()->getOption(TR_UseSymbolValidationManager));
+         }
+      else
+         {
+         TR_ASSERT_FATAL(
+            containingClass != NULL,
+            "failed to get defining class of field ref cpIndex=%d in owning method J9Method=%p",
+            cpIndex,
+            owningMethod->getNonPersistentIdentifier());
+         }
 
       ResolvedFieldShadowKey key(containingClass, offset, type);
       TR::SymbolReference *symRef =
          findResolvedFieldShadow(key, isVolatile, isPrivate, isFinal);
 
       if (symRef != NULL)
+         {
+         comp()->setUseTracingBuffer(false);
          return symRef;
+         }
       }
+
+   comp()->setUseTracingBuffer(false);
 
    TR::Symbol * sym = 0;
 
@@ -1139,7 +1287,7 @@ J9::SymbolReferenceTable::findOrCreateCurrentThreadSymbolRef()
    }
 
 TR::SymbolReference *
-J9::SymbolReferenceTable::findOrCreateJ9MethodConstantPoolFieldSymbolRef(intptrj_t offset)
+J9::SymbolReferenceTable::findOrCreateJ9MethodConstantPoolFieldSymbolRef(intptr_t offset)
    {
    if (!element(j9methodConstantPoolSymbol))
       {
@@ -1158,7 +1306,7 @@ J9::SymbolReferenceTable::findOrCreateJ9MethodConstantPoolFieldSymbolRef(intptrj
    }
 
 TR::SymbolReference *
-J9::SymbolReferenceTable::findOrCreateJ9MethodExtraFieldSymbolRef(intptrj_t offset)
+J9::SymbolReferenceTable::findOrCreateJ9MethodExtraFieldSymbolRef(intptr_t offset)
    {
    if (!element(j9methodExtraFieldSymbol))
       {
@@ -1178,7 +1326,7 @@ J9::SymbolReferenceTable::findOrCreateJ9MethodExtraFieldSymbolRef(intptrj_t offs
 
 
 TR::SymbolReference *
-J9::SymbolReferenceTable::findOrCreateStartPCLinkageInfoSymbolRef(intptrj_t offset)
+J9::SymbolReferenceTable::findOrCreateStartPCLinkageInfoSymbolRef(intptr_t offset)
    {
    if (!element(startPCLinkageInfoSymbol))
       {
@@ -1193,7 +1341,7 @@ J9::SymbolReferenceTable::findOrCreateStartPCLinkageInfoSymbolRef(intptrj_t offs
 
 
 TR::SymbolReference *
-J9::SymbolReferenceTable::findOrCreatePerCodeCacheHelperSymbolRef(TR_CCPreLoadedCode helper, uintptrj_t helperAddr)
+J9::SymbolReferenceTable::findOrCreatePerCodeCacheHelperSymbolRef(TR_CCPreLoadedCode helper, uintptr_t helperAddr)
    {
    CommonNonhelperSymbol index = (CommonNonhelperSymbol)(firstPerCodeCacheHelperSymbol + helper);
    if (!element(index))
@@ -1221,10 +1369,11 @@ J9::SymbolReferenceTable::findOrCreateStringSymbol(TR::ResolvedMethodSymbol * ow
    TR_ResolvedMethod * owningMethod = owningMethodSymbol->getResolvedMethod();
    void * stringConst = owningMethod->stringConstant(cpIndex);
    TR::SymbolReference * symRef;
+   bool isString = true;
    if (owningMethod->isUnresolvedString(cpIndex))
       {
       symRef = findOrCreateCPSymbol(owningMethodSymbol, cpIndex, TR::Address, false, 0);
-      symRef->setOffset((uintptrj_t)stringConst);
+      symRef->setOffset((uintptr_t)stringConst);
       }
    else
       {
@@ -1234,13 +1383,39 @@ J9::SymbolReferenceTable::findOrCreateStringSymbol(TR::ResolvedMethodSymbol * ow
          TR::KnownObjectTable *knot = comp()->getOrCreateKnownObjectTable();
          if (knot)
             {
-            knownObjectIndex = knot->getIndexAt((uintptrj_t*)stringConst);
+            knownObjectIndex = knot->getOrCreateIndexAt((uintptr_t*)stringConst);
             }
          }
       symRef = findOrCreateCPSymbol(owningMethodSymbol, cpIndex, TR::Address, true, stringConst, knownObjectIndex);
       }
+
    TR::StaticSymbol * sym = (TR::StaticSymbol *)symRef->getSymbol();
-   sym->setConstString();
+
+   // If the cp entry is patched, it's resolved during the patching
+   // Unresolved cp entry will always contain a const string
+   if (symRef->isUnresolved())
+      {
+      sym->setConstString();
+      }
+   // If symbol is created the first time, check if the const object is String
+   else if (!sym->isConstString() &&
+            !sym->isNonSpecificConstObject())
+      {
+      TR::VMAccessCriticalSection constantCriticalSection(comp()->fej9());
+      TR_OpaqueClassBlock *clazz = comp()->fej9()->getObjectClassAt((uintptr_t)stringConst);
+      if (comp()->fej9()->isString(clazz))
+         {
+         sym->setConstString();
+         }
+      else
+         {
+         if (comp()->compileRelocatableCode())
+            comp()->failCompilation<J9::AOTHasPatchedCPConstant>("Patched Constant not supported in AOT.");
+
+         sym->setNonSpecificConstObject();
+         }
+      }
+
    return symRef;
    }
 
@@ -1253,7 +1428,7 @@ J9::SymbolReferenceTable::findOrCreateConstantDynamicSymbol(TR::ResolvedMethodSy
    if (owningMethod->isUnresolvedConstantDynamic(cpIndex))
       {
       symRef = findOrCreateCPSymbol(owningMethodSymbol, cpIndex, TR::Address, false, 0);
-      symRef->setOffset((uintptrj_t)dynamicConst);
+      symRef->setOffset((uintptr_t)dynamicConst);
       }
    else
       {
@@ -1275,7 +1450,7 @@ J9::SymbolReferenceTable::findOrCreateMethodMonitorEntrySymbolRef(TR::ResolvedMe
 TR::SymbolReference *
 J9::SymbolReferenceTable::findOrCreateMethodMonitorExitSymbolRef(TR::ResolvedMethodSymbol *)
    {
-   return findOrCreateRuntimeHelper(TR_methodMonitorExit, true, false, true);
+   return findOrCreateRuntimeHelper(TR_methodMonitorExit, true /* canGCandReturn */, true /* canGCandExcept */, true /* preservesAllRegisters */);
    }
 
 
@@ -1303,7 +1478,7 @@ J9::SymbolReferenceTable::findOrCreateMethodTypeSymbol(TR::ResolvedMethodSymbol 
    if (owningMethod->isUnresolvedMethodType(cpIndex))
       {
       symRef = findOrCreateCPSymbol(owningMethodSymbol, cpIndex, TR::Address, false, 0);
-      symRef->setOffset((uintptrj_t)methodTypeConst);
+      symRef->setOffset((uintptr_t)methodTypeConst);
       }
    else
       {
@@ -1323,11 +1498,15 @@ J9::SymbolReferenceTable::findOrCreateMethodHandleSymbol(TR::ResolvedMethodSymbo
    if (owningMethod->isUnresolvedMethodHandle(cpIndex))
       {
       symRef = findOrCreateCPSymbol(owningMethodSymbol, cpIndex, TR::Address, false, 0);
-      symRef->setOffset((uintptrj_t)methodHandleConst);
+      symRef->setOffset((uintptr_t)methodHandleConst);
       }
    else
       {
-      symRef = findOrCreateCPSymbol(owningMethodSymbol, cpIndex, TR::Address, true, methodHandleConst);
+      TR::KnownObjectTable::Index knownObjectIndex = TR::KnownObjectTable::UNKNOWN;
+      TR::KnownObjectTable *knot = comp()->getOrCreateKnownObjectTable();
+      if (knot)
+         knownObjectIndex = knot->getOrCreateIndexAt((uintptr_t*)methodHandleConst);
+      symRef = findOrCreateCPSymbol(owningMethodSymbol, cpIndex, TR::Address, true, methodHandleConst, knownObjectIndex);
       }
    TR::StaticSymbol * sym = (TR::StaticSymbol *)symRef->getSymbol();
    sym->setConstMethodHandle();
@@ -1416,7 +1595,7 @@ J9::SymbolReferenceTable::findJavaLangReferenceReferentShadowSymbol(TR_ResolvedM
    TR::SymbolReference * symRef;
    TR_SymRefIterator i(type == TR::Address ? aliasBuilder.addressShadowSymRefs() :
                                             (type == TR::Int32 ? aliasBuilder.intShadowSymRefs() : aliasBuilder.nonIntPrimitiveShadowSymRefs()), self());
-   while (symRef = i.getNext())
+   while ((symRef = i.getNext()) != NULL)
       if (symRef->getSymbol()->getDataType() == type &&
           symRef->getOffset() == offset &&
           symRef->getOwningMethod(comp()) == owningMethod)
@@ -1553,9 +1732,6 @@ J9::SymbolReferenceTable::findOrCreateStaticSymbol(TR::ResolvedMethodSymbol * ow
    bool isVolatile, isFinal, isPrivate, isUnresolvedInCP;
    bool resolved = owningMethod->staticAttributes(comp(), cpIndex, &dataAddress, &type, &isVolatile, &isFinal, &isPrivate, isStore, &isUnresolvedInCP);
 
-   if (  isUnresolvedInCP && (type != TR::Address && _compilation->cg()->getAccessStaticsIndirectly()))
-      resolved = false;
-
    bool sharesSymbol = false;
 
    TR::StaticSymbol * sym = 0;
@@ -1613,9 +1789,9 @@ J9::SymbolReferenceTable::findOrCreateStaticSymbol(TR::ResolvedMethodSymbol * ow
          auto stream = TR::CompilationInfo::getStream();
          stream->write(JITServer::MessageType::KnownObjectTable_symbolReferenceTableCreateKnownObject, dataAddress, clientMethod, cpIndex);
 
-         auto recv = stream->read<TR::KnownObjectTable::Index, uintptrj_t*>();
+         auto recv = stream->read<TR::KnownObjectTable::Index, uintptr_t*>();
          knownObjectIndex = std::get<0>(recv);
-         uintptrj_t *objectPointerReference = std::get<1>(recv);
+         uintptr_t *objectPointerReference = std::get<1>(recv);
 
          if (knownObjectIndex != TR::KnownObjectTable::UNKNOWN)
             {
@@ -1626,7 +1802,7 @@ J9::SymbolReferenceTable::findOrCreateStaticSymbol(TR::ResolvedMethodSymbol * ow
 #endif /* defined(J9VM_OPT_JITSERVER) */
          {
          TR::VMAccessCriticalSection getObjectReferenceLocation(comp());
-         if (*((uintptrj_t*)dataAddress) != 0)
+         if (*((uintptr_t*)dataAddress) != 0)
             {
             TR_J9VMBase *fej9 = comp()->fej9();
             TR_OpaqueClassBlock *declaringClass = owningMethod->getDeclaringClassFromFieldOrStatic(comp(), cpIndex);
@@ -1645,7 +1821,7 @@ J9::SymbolReferenceTable::findOrCreateStaticSymbol(TR::ResolvedMethodSymbol * ow
                         && (clazzNameLength != 16 || strncmp(clazzName, "java/lang/System", 16)))
                   {
                   TR_OpaqueClassBlock *varHandleClass =  fej9->getSystemClassFromClassName("java/lang/invoke/VarHandle", 26);
-                  TR_OpaqueClassBlock *objectClass = TR::Compiler->cls.objectClass(comp(), *((uintptrj_t*)dataAddress));
+                  TR_OpaqueClassBlock *objectClass = TR::Compiler->cls.objectClass(comp(), *((uintptr_t*)dataAddress));
 
                   if (varHandleClass != NULL
                       && objectClass != NULL
@@ -1657,7 +1833,7 @@ J9::SymbolReferenceTable::findOrCreateStaticSymbol(TR::ResolvedMethodSymbol * ow
 
                if (createKnownObject)
                   {
-                  knownObjectIndex = knot->getIndexAt((uintptrj_t*)dataAddress);
+                  knownObjectIndex = knot->getOrCreateIndexAt((uintptr_t*)dataAddress);
                   }
                }
             }
@@ -1673,12 +1849,6 @@ J9::SymbolReferenceTable::findOrCreateStaticSymbol(TR::ResolvedMethodSymbol * ow
    if (resolved)
       {
       sym->setStaticAddress(dataAddress);
-      if (type != TR::Address && _compilation->cg()->getAccessStaticsIndirectly() && !_compilation->compileRelocatableCode())
-         {
-         TR_OpaqueClassBlock * feClass = owningMethod->classOfStatic(cpIndex, true);
-         TR_J9VMBase *fej9 = (TR_J9VMBase *)(fe());
-         symRef->setOffset((char *)dataAddress - (char *)fej9->addressOfFirstClassStatic(feClass));
-         }
       }
    else
       {
@@ -1915,7 +2085,7 @@ TR::SymbolReference *
 J9::SymbolReferenceTable::findOrCreateThreadDebugEventData(int32_t index)
    {
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(fe());
-   intptrj_t offset = fej9->getThreadDebugEventDataOffset(index);
+   intptr_t offset = fej9->getThreadDebugEventDataOffset(index);
    ListIterator<TR::SymbolReference> li(&_currentThreadDebugEventDataSymbolRefs);
    TR::SymbolReference * symRef;
    for (symRef = li.getFirst(); symRef; symRef = li.getNext())
@@ -2208,7 +2378,7 @@ J9::SymbolReferenceTable::checkImmutable(TR::SymbolReference *symRef)
 
 
 TR::SymbolReference *
-J9::SymbolReferenceTable::findOrCreateImmutableGenericIntShadowSymbolReference(intptrj_t offset)
+J9::SymbolReferenceTable::findOrCreateImmutableGenericIntShadowSymbolReference(intptr_t offset)
    {
    static char *disableImmutableIntShadows = feGetEnv("TR_disableImmutableIntShadows");
    if (disableImmutableIntShadows)
@@ -2261,9 +2431,23 @@ J9::SymbolReferenceTable::findOrCreateProfilingBufferEndSymbolRef()
    return element(profilingBufferEndSymbol);
    }
 
+TR::SymbolReference *
+J9::SymbolReferenceTable::findOrCreateVMThreadTempSlotFieldSymbolRef()
+   {
+   if (!element(j9VMThreadTempSlotFieldSymbol))
+      {
+      TR_J9VMBase *fej9 = (TR_J9VMBase *)(fe());
+      TR::Symbol * sym = TR::RegisterMappedSymbol::createMethodMetaDataSymbol(trHeapMemory(), "j9VMThreadTempSlotField");
+      sym->setDataType(TR::Address);
+      element(j9VMThreadTempSlotFieldSymbol) = new (trHeapMemory()) TR::SymbolReference(self(), j9VMThreadTempSlotFieldSymbol, sym);
+      element(j9VMThreadTempSlotFieldSymbol)->setOffset(fej9->thisThreadGetTempSlotOffset());
+      aliasBuilder.addressStaticSymRefs().set(getNonhelperIndex(j9VMThreadTempSlotFieldSymbol));
+      }
+   return element(j9VMThreadTempSlotFieldSymbol);
+   }
 
 TR::SymbolReference *
-J9::SymbolReferenceTable::findOrCreateProfilingBufferSymbolRef(intptrj_t offset)
+J9::SymbolReferenceTable::findOrCreateProfilingBufferSymbolRef(intptr_t offset)
    {
    if (!element(profilingBufferSymbol))
       {
@@ -2283,7 +2467,7 @@ J9::SymbolReferenceTable::findShadowSymbol(TR_ResolvedMethod * owningMethod, int
    TR::SymbolReference * symRef;
    TR_SymRefIterator i(type == TR::Address ? aliasBuilder.addressShadowSymRefs() :
                                             (type == TR::Int32 ? aliasBuilder.intShadowSymRefs() : aliasBuilder.nonIntPrimitiveShadowSymRefs()), self());
-   while (symRef = i.getNext())
+   while ((symRef = i.getNext()) != NULL)
       {
       if ((recognizedField &&
           *recognizedField != TR::Symbol::UnknownField &&
@@ -2339,6 +2523,18 @@ J9::SymbolReferenceTable::findOrCreateArrayComponentTypeSymbolRef()
    return element(componentClassSymbol);
    }
 
+TR::SymbolReference *
+J9::SymbolReferenceTable::findOrCreateObjectEqualityComparisonSymbolRef()
+   {
+   TR::SymbolReference *symRef = element(objectEqualityComparisonSymbol);
+   if (symRef != NULL)
+      return symRef;
+
+   symRef = self()->findOrCreateCodeGenInlinedHelper(objectEqualityComparisonSymbol);
+   symRef->setCanGCandReturn();
+   symRef->setCanGCandExcept();
+   return symRef;
+   }
 
 TR::ParameterSymbol *
 J9::SymbolReferenceTable::createParameterSymbol(

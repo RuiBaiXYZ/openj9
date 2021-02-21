@@ -34,7 +34,7 @@
 uint8_t *TR::X86AllocPrefetchSnippet::emitSnippetBody()
    {
    TR::Compilation *comp = cg()->comp();
-   if (TR::Options::getCmdLineOptions()->realTimeGC())
+   if (comp->getOptions()->realTimeGC())
       return 0;
 
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
@@ -61,7 +61,7 @@ uint8_t *TR::X86AllocPrefetchSnippet::emitSnippetBody()
    *buffer++ = 0xe8;
 
    int32_t disp32;
-   uintptrj_t helperAddress = 0;
+   uintptr_t helperAddress = 0;
 
    if (useSharedCodeCacheSnippet)
       {
@@ -86,7 +86,7 @@ uint8_t *TR::X86AllocPrefetchSnippet::emitSnippetBody()
    else
       {
       TR_RuntimeHelper helper = (comp->getOption(TR_EnableNewX86PrefetchTLH)) ? TR_X86newPrefetchTLH : TR_X86prefetchTLH;
-      helperSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(helper, false, false, false);
+      helperSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(helper);
       disp32 = cg()->branchDisplacementToHelperOrTrampoline(buffer+4, helperSymRef);
       if (fej9->needRelocationsForHelpers())
          {
@@ -177,7 +177,7 @@ class HeapProperties
    };
 
 template <TR::HeapTypes::Type HEAP_TYPE, bool is64Bit>
-uint8_t* TR::X86AllocPrefetchSnippet::emitSharedBody(uint8_t* prefetchSnippetBuffer, TR_X86ProcessorInfo &cpuInfo)
+uint8_t* TR::X86AllocPrefetchSnippet::emitSharedBody(uint8_t* prefetchSnippetBuffer, TR::Compilation* comp)
    {
 
    typedef HeapProperties<HEAP_TYPE> HeapTraits;
@@ -233,7 +233,7 @@ uint8_t* TR::X86AllocPrefetchSnippet::emitSharedBody(uint8_t* prefetchSnippetBuf
    for (int32_t lineOffset = 0; lineOffset < numLines; ++lineOffset)
       {
       prefetchSnippetBuffer[0] = 0x0F;
-      if (cpuInfo.isAMD15h())
+      if (comp->target().cpu.is(OMR_PROCESSOR_X86_AMDFAMILY15H))
          prefetchSnippetBuffer[1] = 0x0D;
       else
          prefetchSnippetBuffer[1] = 0x18;
@@ -315,21 +315,22 @@ uint32_t TR::getCCPreLoadedCodeSize()
 
 void TR::createCCPreLoadedCode(uint8_t *CCPreLoadedCodeBase, uint8_t *CCPreLoadedCodeTop, void ** CCPreLoadedCodeTable, TR::CodeGenerator *cg)
    {
+   TR::Compilation *comp = cg->comp();
    uint8_t *cursor = CCPreLoadedCodeBase;
 
    CCPreLoadedCodeTable[TR_CCPreLoadedCode::TR_AllocPrefetch] = static_cast<void *>(cursor);
-   if (cg->comp()->target().is64Bit())
-      cursor = TR::X86AllocPrefetchSnippet::emitSharedBody<TR::HeapTypes::ZeroedHeap, true>(cursor, cg->getX86ProcessorInfo());
+   if (comp->target().is64Bit())
+      cursor = TR::X86AllocPrefetchSnippet::emitSharedBody<TR::HeapTypes::ZeroedHeap, true>(cursor, comp);
    else
-      cursor = TR::X86AllocPrefetchSnippet::emitSharedBody<TR::HeapTypes::ZeroedHeap, false>(cursor, cg->getX86ProcessorInfo());
+      cursor = TR::X86AllocPrefetchSnippet::emitSharedBody<TR::HeapTypes::ZeroedHeap, false>(cursor, comp);
 
    cursor = static_cast<uint8_t *>( TR::alignAllocation<32>(cursor) );
 
    CCPreLoadedCodeTable[TR_CCPreLoadedCode::TR_NonZeroAllocPrefetch] = static_cast<void *>(cursor);
-   if (cg->comp()->target().is64Bit())
-      cursor = TR::X86AllocPrefetchSnippet::emitSharedBody<TR::HeapTypes::NonZeroedHeap, true>(cursor, cg->getX86ProcessorInfo());
+   if (comp->target().is64Bit())
+      cursor = TR::X86AllocPrefetchSnippet::emitSharedBody<TR::HeapTypes::NonZeroedHeap, true>(cursor, comp);
    else
-      cursor = TR::X86AllocPrefetchSnippet::emitSharedBody<TR::HeapTypes::NonZeroedHeap, false>(cursor, cg->getX86ProcessorInfo());
+      cursor = TR::X86AllocPrefetchSnippet::emitSharedBody<TR::HeapTypes::NonZeroedHeap, false>(cursor, comp);
 
    cursor = static_cast<uint8_t *>( TR::alignAllocation<32>(cursor) );
 

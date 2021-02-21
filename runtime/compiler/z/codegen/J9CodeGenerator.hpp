@@ -20,18 +20,16 @@
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
-#ifndef TR_J9_Z_CODEGENERATORBASE_INCL
-#define TR_J9_Z_CODEGENERATORBASE_INCL
+#ifndef J9_Z_CODEGENERATOR_INCL
+#define J9_Z_CODEGENERATOR_INCL
 
 /*
  * The following #define and typedef must appear before any #includes in this file
  */
-#ifndef TRJ9_CODEGENERATORBASE_CONNECTOR
-#define TRJ9_CODEGENERATORBASE_CONNECTOR
-
+#ifndef J9_CODEGENERATOR_CONNECTOR
+#define J9_CODEGENERATOR_CONNECTOR
 namespace J9 { namespace Z { class CodeGenerator; } }
 namespace J9 { typedef J9::Z::CodeGenerator CodeGeneratorConnector; }
-
 #else
 #error J9::Z::CodeGenerator expected to be a primary connector, but a J9 connector is already defined
 #endif
@@ -51,9 +49,14 @@ namespace Z
 
 class OMR_EXTENSIBLE CodeGenerator : public J9::CodeGenerator
    {
-   public:
 
-   CodeGenerator();
+protected:
+
+   CodeGenerator(TR::Compilation *comp);
+
+public:
+
+   void initialize();
 
    TR::Recompilation *allocateRecompilationInfo();
 
@@ -76,6 +79,7 @@ class OMR_EXTENSIBLE CodeGenerator : public J9::CodeGenerator
 
    bool alwaysGeneratesAKnownCleanSign(TR::Node *node);
    bool alwaysGeneratesAKnownPositiveCleanSign(TR::Node *node);
+   bool canUseRelativeLongInstructions(int64_t value);
    TR_RawBCDSignCode alwaysGeneratedSign(TR::Node *node);
 
    uint32_t getPDMulEncodedSize(TR::Node *pdmul, TR_PseudoRegister *multiplicand, TR_PseudoRegister *multiplier);
@@ -90,6 +94,7 @@ class OMR_EXTENSIBLE CodeGenerator : public J9::CodeGenerator
    uint32_t getDecimalFloatToPackedFixedSize();
    uint32_t getDecimalDoubleToPackedFixedSize();
    uint32_t getDecimalLongDoubleToPackedFixedSize();
+   bool callUsesHelperImplementation(TR::Symbol *sym);
 
    uint32_t getLongToPackedFixedSize()               { return TR_LONG_TO_PACKED_SIZE; }
    uint32_t getIntegerToPackedFixedSize()            { return TR_INTEGER_TO_PACKED_SIZE; }
@@ -113,7 +118,7 @@ class OMR_EXTENSIBLE CodeGenerator : public J9::CodeGenerator
 
    bool constLoadNeedsLiteralFromPool(TR::Node *node);
 
-   bool supportsTrapsInTMRegion(){ return J9::Z::CodeGenerator::comp()->target().isZOS(); }
+   bool supportsTrapsInTMRegion();
 
    using J9::CodeGenerator::addAllocatedRegister;
    void addAllocatedRegister(TR_PseudoRegister * temp);
@@ -327,6 +332,11 @@ class OMR_EXTENSIBLE CodeGenerator : public J9::CodeGenerator
 
    // LL: move to .cpp
    bool arithmeticNeedsLiteralFromPool(TR::Node *node);
+
+   /**
+    * \brief Determines whether the code generator supports stack allocations
+    */
+   bool supportsStackAllocations() { return true; }
 
    private:
 

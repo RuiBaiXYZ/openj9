@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -32,11 +32,15 @@
 struct
 TR_ResolvedJ9JITServerMethodInfoStruct
    {
+   TR_ResolvedJ9JITServerMethodInfoStruct() :
+      remoteMirror(NULL)
+      {}
+
    TR_ResolvedJ9Method *remoteMirror;
    J9RAMConstantPoolItem *literals;
    J9Class *ramClass;
    uint64_t methodIndex;
-   uintptrj_t jniProperties;
+   uintptr_t jniProperties;
    void *jniTargetAddress;
    bool isInterpreted;
    bool isJNINative;
@@ -118,6 +122,7 @@ TR_ResolvedMethodCacheEntry
    TR_PersistentJittedBodyInfo *persistentBodyInfo;
    TR_PersistentMethodInfo *persistentMethodInfo;
    TR_ContiguousIPMethodHashTableEntry *IPMethodInfo;
+   int32_t ttlForUnresolved;
    };
 
 using TR_ResolvedMethodInfoCache = UnorderedMap<TR_ResolvedMethodKey, TR_ResolvedMethodCacheEntry>;
@@ -153,7 +158,7 @@ public:
    virtual void setRecognizedMethodInfo(TR::RecognizedMethod rm) override;
    virtual J9ClassLoader *getClassLoader() override;
    virtual bool staticAttributes(TR::Compilation *, int32_t cpIndex, void * *, TR::DataType * type, bool * volatileP, bool * isFinal, bool *isPrivate, bool isStore, bool * unresolvedInCP, bool needsAOTValidation) override;
-   virtual TR_OpaqueClassBlock * definingClassFromCPFieldRef(TR::Compilation *comp, int32_t cpIndex, bool isStatic) override;
+   virtual TR_OpaqueClassBlock * definingClassFromCPFieldRef(TR::Compilation *comp, int32_t cpIndex, bool isStatic, TR_OpaqueClassBlock **fromResolvedJ9Method = NULL) override;
    virtual TR_OpaqueClassBlock * getClassFromConstantPool(TR::Compilation *, uint32_t cpIndex, bool returnClassToAOT = false) override;
    virtual TR_OpaqueClassBlock * getDeclaringClassFromFieldOrStatic(TR::Compilation *comp, int32_t cpIndex) override;
    virtual TR_OpaqueClassBlock * classOfStatic(int32_t cpIndex, bool returnClassForAOT = false) override;
@@ -161,7 +166,7 @@ public:
    virtual void * getConstantDynamicTypeFromCP(int32_t cpIndex) override;
    virtual bool isConstantDynamic(I_32 cpIndex) override;
    virtual bool isUnresolvedConstantDynamic(int32_t cpIndex) override;
-   virtual void * dynamicConstant(int32_t cpIndex, uintptrj_t *obj) override;
+   virtual void * dynamicConstant(int32_t cpIndex, uintptr_t *obj) override;
 
    virtual bool isUnresolvedString(int32_t cpIndex, bool optimizeForAOT = false) override;
    virtual TR_ResolvedMethod * getResolvedVirtualMethod(TR::Compilation *, int32_t cpIndex, bool ignoreRtResolve, bool * unresolvedInCP) override;
@@ -178,7 +183,7 @@ public:
    virtual char * localName(uint32_t slotNumber, uint32_t bcIndex, int32_t &len, TR_Memory *) override;
    virtual bool virtualMethodIsOverridden() override { return _virtualMethodIsOverridden; }
    virtual TR_ResolvedMethod * getResolvedInterfaceMethod(TR::Compilation *, TR_OpaqueClassBlock * classObject, int32_t cpIndex) override;
-   virtual TR_OpaqueClassBlock * getResolvedInterfaceMethod(int32_t cpIndex, uintptrj_t * pITableIndex) override;
+   virtual TR_OpaqueClassBlock * getResolvedInterfaceMethod(int32_t cpIndex, uintptr_t * pITableIndex) override;
    virtual uint32_t getResolvedInterfaceMethodOffset(TR_OpaqueClassBlock * classObject, int32_t cpIndex) override;
    virtual TR_ResolvedMethod *   getResolvedImproperInterfaceMethod(TR::Compilation * comp, I_32 cpIndex) override;
    virtual void * startAddressForJNIMethod(TR::Compilation *) override;
@@ -188,6 +193,8 @@ public:
    virtual char * getClassNameFromConstantPool(uint32_t cpIndex, uint32_t &length) override;
    virtual char * classNameOfFieldOrStatic(int32_t cpIndex, int32_t & len) override;
    virtual char * classSignatureOfFieldOrStatic(int32_t cpIndex, int32_t & len) override;
+   virtual char * getMethodSignatureFromConstantPool(int32_t cpIndex, int32_t & len) override;
+   virtual char * getMethodNameFromConstantPool(int32_t cpIndex, int32_t & len) override;
    virtual char * fieldOrStaticNameChars(int32_t cpIndex, int32_t & len) override;
    virtual bool isSubjectToPhaseChange(TR::Compilation *comp) override;
    virtual void * stringConstant(int32_t cpIndex) override;
@@ -211,17 +218,21 @@ public:
    virtual void getFaninInfo(uint32_t *count, uint32_t *weight, uint32_t *otherBucketWeight = NULL) override;
    virtual bool getCallerWeight(TR_ResolvedJ9Method *caller, uint32_t *weight, uint32_t pcIndex=~0) override;
    virtual uint16_t archetypeArgPlaceholderSlot() override;
+   virtual bool isFieldQType(int32_t cpIndex) override;
+   virtual bool isFieldFlattened(TR::Compilation *comp, int32_t cpIndex, bool isStatic) override;
 
    TR_ResolvedJ9Method *getRemoteMirror() const { return _remoteMirror; }
    static void createResolvedMethodMirror(TR_ResolvedJ9JITServerMethodInfo &methodInfo, TR_OpaqueMethodBlock *method, uint32_t vTableSlot, TR_ResolvedMethod *owningMethod, TR_FrontEnd *fe, TR_Memory *trMemory);
    static void createResolvedMethodFromJ9MethodMirror(TR_ResolvedJ9JITServerMethodInfo &methodInfo, TR_OpaqueMethodBlock *method, uint32_t vTableSlot, TR_ResolvedMethod *owningMethod, TR_FrontEnd *fe, TR_Memory *trMemory);
    bool addValidationRecordForCachedResolvedMethod(const TR_ResolvedMethodKey &key, TR_OpaqueMethodBlock *method);
-   void cacheResolvedMethodsCallees();
+   void cacheResolvedMethodsCallees(int32_t ttlForUnresolved = 2);
+   void cacheFields();
+   int32_t collectImplementorsCapped(TR_OpaqueClassBlock *topClass, int32_t maxCount, int32_t cpIndexOrOffset, TR_YesNoMaybe useGetResolvedInterfaceMethod, TR_ResolvedMethod **implArray);
+   static void packMethodInfo(TR_ResolvedJ9JITServerMethodInfo &methodInfo, TR_ResolvedJ9Method *resolvedMethod, TR_FrontEnd *fe);
 
 protected:
    JITServer::ServerStream *_stream;
    J9Class *_ramClass; // client pointer to RAM class
-   static void packMethodInfo(TR_ResolvedJ9JITServerMethodInfo &methodInfo, TR_ResolvedJ9Method *resolvedMethod, TR_FrontEnd *fe);
    static void setAttributeResultFromResolvedMethodFieldAttributes(const TR_J9MethodFieldAttributes &attributes, U_32 * fieldOffset, void **address, TR::DataType * type, bool * volatileP, bool * isFinal, bool * isPrivate, bool * unresolvedInCP, bool *result, bool isStatic);
    virtual bool getCachedFieldAttributes(int32_t cpIndex, TR_J9MethodFieldAttributes &attributes, bool isStatic);
    virtual void cacheFieldAttributes(int32_t cpIndex, const TR_J9MethodFieldAttributes &attributes, bool isStatic);
@@ -246,7 +257,6 @@ private:
    TR_IPMethodHashTableEntry *_iProfilerMethodEntry;
 
    char* getROMString(int32_t& len, void *basePtr, std::initializer_list<size_t> offsets);
-   char* getRemoteROMString(int32_t& len, void *basePtr, std::initializer_list<size_t> offsets);
    virtual char * fieldOrStaticName(I_32 cpIndex, int32_t & len, TR_Memory * trMemory, TR_AllocationKind kind = heapAlloc) override;
    void unpackMethodInfo(TR_OpaqueMethodBlock * aMethod, TR_FrontEnd * fe, TR_Memory * trMemory, uint32_t vTableSlot, TR::CompilationInfoPerThread *threadCompInfo, const TR_ResolvedJ9JITServerMethodInfo &methodInfo);
    };
@@ -278,7 +288,7 @@ class TR_ResolvedRelocatableJ9JITServerMethod : public TR_ResolvedJ9JITServerMet
    virtual void *                startAddressForJITInternalNativeMethod() override;
    virtual void *                startAddressForInterpreterOfJittedMethod() override;
 
-   virtual TR_OpaqueClassBlock * definingClassFromCPFieldRef(TR::Compilation *comp, int32_t cpIndex, bool isStatic) override;
+   virtual TR_OpaqueClassBlock * definingClassFromCPFieldRef(TR::Compilation *comp, int32_t cpIndex, bool isStatic, TR_OpaqueClassBlock **fromResolvedJ9Method = NULL) override;
    virtual TR_OpaqueClassBlock * getClassFromConstantPool(TR::Compilation *, uint32_t cpIndex, bool returnClassToAOT = false) override;
    virtual bool                  validateClassFromConstantPool(TR::Compilation *comp, J9Class *clazz, uint32_t cpIndex, TR_ExternalRelocationTargetKind reloKind = TR_ValidateClass) override;
    virtual bool                  validateArbitraryClass(TR::Compilation *comp, J9Class *clazz) override;

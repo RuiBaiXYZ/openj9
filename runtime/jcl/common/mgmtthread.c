@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2019 IBM Corp. and others
+ * Copyright (c) 1998, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -592,7 +592,6 @@ Java_com_ibm_java_lang_management_internal_ThreadMXBeanImpl_getThreadInfoImpl(JN
 	Trc_JCL_threadmxbean_getThreadInfoImpl6_Entry(env, id, 
 			maxStackDepth, getLockedMonitors, getLockedSynchronizers);
 
-	/* This function call ensures that the correct tenant thread is matched with the thread ID */
 	allinfo = getArrayOfThreadInfo(env, &id, 1, maxStackDepth, getLockedMonitors, getLockedSynchronizers);
 	if (allinfo) {
 		if (allinfo[0].thread) {
@@ -637,7 +636,6 @@ Java_com_ibm_java_lang_management_internal_ThreadMXBeanImpl_getMultiThreadInfoIm
 			return NULL;
 		}
 
-		/* Threads that belong to other tenants will be filtered out in this function call */
 		allinfo = getArrayOfThreadInfo(env, threadIDs, numThreads,
 				maxStackDepth,
 				getLockedMonitors, getLockedSynchronizers);
@@ -705,7 +703,7 @@ Java_openj9_internal_tools_attach_target_DiagnosticUtils_dumpAllThreadsImpl(JNIE
 				{
 					++numThreads;
 					exc = getThreadInfo(currentThread, vmThread, info,
-							maxDepth, getLockedMonitors);
+							(jsize)J9_THREADINFO_MAX_STACK_DEPTH, getLockedMonitors);
 					if (exc > 0) {
 						freeThreadInfos(currentThread, allinfo, numThreads);
 						goto dumpAll_failWithExclusive;
@@ -750,7 +748,7 @@ Java_openj9_internal_tools_attach_target_DiagnosticUtils_dumpAllThreadsImpl(JNIE
 	}
 	vmfns->internalExitVMToJNI(currentThread);
 
-	result = createThreadInfoArray(env, allinfo, numThreads, (jsize)J9_THREADINFO_MAX_STACK_DEPTH);
+	result = createThreadInfoArray(env, allinfo, numThreads, maxDepth);
 	j9mem_free_memory(allinfo);
 	
 	Trc_JCL_threadmxbean_dumpAllThreads_Exit(env, result);
@@ -2103,8 +2101,7 @@ isInNative(JNIEnv *env, jobjectArray stackTrace)
 }
 
 /**
- * Discover deadlocked threads. In case of multitenancy, only the deadlocked threads that belong to
- * the calling tenant are returned.
+ * Discover deadlocked threads.
  * @param[in] env
  * @param[in] findFlags J9VMTHREAD_FINDDEADLOCKFLAG_xxx. Flags passed to the VM helper 
  * that determine whether deadlocks among synchronizers or waiting threads should be 
@@ -2119,23 +2116,24 @@ findDeadlockedThreads(JNIEnv *env, UDATA findFlags)
 	PORT_ACCESS_FROM_ENV(env);
 	J9VMThread *currentThread = (J9VMThread *)env;
 	J9JavaVM *javaVM = currentThread->javaVM;
+	J9InternalVMFunctions *vmfns = javaVM->internalVMFunctions;
 	j9object_t *threads = NULL;
 	IDATA deadCount = 0;
 	jlong *deadIDs = NULL;
 	jlongArray resultArray = NULL;
 	UDATA i;
 
-	javaVM->internalVMFunctions->internalEnterVMFromJNI(currentThread);
+	vmfns->internalEnterVMFromJNI(currentThread);
 	
-	deadCount = javaVM->internalVMFunctions->findObjectDeadlockedThreads(currentThread, &threads, NULL, findFlags);
+	deadCount = vmfns->findObjectDeadlockedThreads(currentThread, &threads, NULL, findFlags);
 
 	/* spec says to return NULL array for no threads */	
 	if (deadCount <= 0) {
 		if (deadCount < 0) {
 oom:
-			javaVM->internalVMFunctions->setNativeOutOfMemoryError(currentThread, 0, 0);
+			vmfns->setNativeOutOfMemoryError(currentThread, 0, 0);
 		}
-		javaVM->internalVMFunctions->internalExitVMToJNI(currentThread);
+		vmfns->internalExitVMToJNI(currentThread);
 		j9mem_free_memory(threads);
 		return NULL;
 	}
@@ -2150,7 +2148,7 @@ oom:
 	}
 
 	j9mem_free_memory(threads);
-	javaVM->internalVMFunctions->internalExitVMToJNI(currentThread);
+	vmfns->internalExitVMToJNI(currentThread);
 
 	resultArray = (*env)->NewLongArray(env, (jsize)deadCount);
 	if (NULL != resultArray) {

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+ * Copyright (c) 2019, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -51,6 +51,11 @@ class OMR_EXTENSIBLE TreeEvaluator: public J9::TreeEvaluator
    static TR::Register *awrtbarEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *awrtbariEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
+   static TR::Register *irdbarEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *irdbariEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *ardbarEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *ardbariEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+
    static TR::Register *DIVCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
    static TR::Register *flushEvaluator(TR::Node *node, TR::CodeGenerator *cg);
@@ -69,9 +74,39 @@ class OMR_EXTENSIBLE TreeEvaluator: public J9::TreeEvaluator
     */
    static void generateTestAndReportFieldWatchInstructions(TR::CodeGenerator *cg, TR::Node *node, TR::Snippet *dataSnippet, bool isWrite, TR::Register *sideEffectRegister, TR::Register *valueReg, TR::Register *dataSnippetRegister);
 
+   /**
+    * @brief Generates instructions for inlining new/newarray/anewarray
+    *
+    * @param[in] node: node
+    * @param[in]   cg: code generator
+    *
+    * @return register containing allocated object, NULL if inlining is not possible
+    */
+   static TR::Register *VMnewEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+
    static TR::Register *monexitEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
    static TR::Register *instanceofEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+
+   /**
+    * @brief Generates instructions for inlining instanceof
+    *
+    * @param[in] node: node
+    * @param[in]   cg: code generator
+    *
+    * @return register containing the result of instanceof
+    */
+   static TR::Register *VMinstanceofEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+
+   /**
+    * @brief Generates instructions for inlining checkcast
+    *
+    * @param[in] node: node
+    * @param[in]   cg: code generator
+    *
+    * @return register whcih is always NULL
+    */
+   static TR::Register *VMcheckcastEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
    static TR::Register *checkcastAndNULLCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
@@ -120,6 +155,19 @@ class OMR_EXTENSIBLE TreeEvaluator: public J9::TreeEvaluator
     * @return register containing result
     */
    static TR::Register *directCallEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+
+   /**
+    * @brief Generates the sequence to handle cases where the monitor object is value type
+    * @param[in] node : the monitor enter/exit node
+    * @param[in] helperCallLabel : the label for OOL code calling VM monitor enter/exit helpers
+    * @param[in] objReg : register for the monitor object
+    * @param[in] temp1Reg : temporary register 1
+    * @param[in] temp2Reg : temporary register 2
+    * @param[in] cg : CodeGenerator
+    * @param[in] classFlag : class flag
+    */
+   static void generateCheckForValueMonitorEnterOrExit(TR::Node *node, TR::LabelSymbol *helperCallLabel, TR::Register *objReg, TR::Register *temp1Reg, TR::Register *temp2Reg, TR::CodeGenerator *cg, int32_t classFlag);
+
    };
 
 } // ARM64

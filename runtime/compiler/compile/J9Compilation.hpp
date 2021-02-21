@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -59,6 +59,7 @@ class TR_RelocationRuntime;
 namespace TR { class IlGenRequest; }
 #ifdef J9VM_OPT_JITSERVER
 struct SerializedRuntimeAssumption;
+class ClientSessionData;
 #endif
 
 #define COMPILATION_AOT_HAS_INVOKEHANDLE -9
@@ -73,6 +74,22 @@ struct SerializedRuntimeAssumption;
 #define COMPILATION_RESERVE_NTRAMPOLINES_INSUFFICIENT_SPACE -18
 #define COMPILATION_RESERVE_NTRAMPOLINES_ERROR_INBINARYENCODING -19
 #define COMPILATION_AOT_RELOCATION_FAILED -20
+
+#define TRACING_BUFFER_CAPACITY 10*1024
+#define TRACING_BUFFER_SEGMENT_SIZE 128
+#define ADD_TRACING_BUFFER_MESSAGE(comp, fmt, ...) \
+   do \
+      { \
+      if (comp->useTracingBuffer()) \
+         { \
+         char *buffer = comp->getTracingBufferCursor(); \
+         if (comp->getTracingBufferFreeSpace() >= TRACING_BUFFER_SEGMENT_SIZE) \
+            { \
+            snprintf(buffer, TRACING_BUFFER_SEGMENT_SIZE, fmt, ##__VA_ARGS__); \
+            comp->incTracingBuffer(TRACING_BUFFER_SEGMENT_SIZE); \
+            } \
+         } \
+      } while (false)
 
 
 
@@ -97,7 +114,8 @@ class OMR_EXTENSIBLE Compilation : public OMR::CompilationConnector
          TR::Region &heapMemoryRegion,
          TR_Memory *,
          TR_OptimizationPlan *optimizationPlan,
-         TR_RelocationRuntime *reloRuntime);
+         TR_RelocationRuntime *reloRuntime,
+         TR::Environment *target = NULL);
 
    ~Compilation();
 
@@ -144,6 +162,8 @@ class OMR_EXTENSIBLE Compilation : public OMR::CompilationConnector
 
    void * getAotMethodDataStart() const { return _aotMethodDataStart; }
    void setAotMethodDataStart(void *p) { _aotMethodDataStart = p; }
+
+   TR_AOTMethodHeader * getAotMethodHeaderEntry();
 
    TR::Node *findNullChkInfo(TR::Node *node);
 
@@ -274,7 +294,12 @@ class OMR_EXTENSIBLE Compilation : public OMR::CompilationConnector
    TR_CHTable *getCHTable() const { return _transientCHTable; }
 
    // Inliner
+   using OMR::CompilationConnector::incInlineDepth;
+   bool incInlineDepth(TR::ResolvedMethodSymbol *, TR_ByteCodeInfo &, int32_t cpIndex, TR::SymbolReference *callSymRef, bool directCall, TR_PrexArgInfo *argInfo = 0);
+
    bool isGeneratedReflectionMethod(TR_ResolvedMethod *method);
+
+   TR_ExternalRelocationTargetKind getReloTypeForMethodToBeInlined(TR_VirtualGuardSelection *guard, TR::Node *callNode, TR_OpaqueClassBlock *receiverClass);
 
    // cache J9 VM pointers
    TR_OpaqueClassBlock *getObjectClassPointer();
@@ -322,6 +347,16 @@ class OMR_EXTENSIBLE Compilation : public OMR::CompilationConnector
    bool isRemoteCompilation() const { return _remoteCompilation; } // client side
    void setRemoteCompilation() { _remoteCompilation = true; }
    TR::list<SerializedRuntimeAssumption*>& getSerializedRuntimeAssumptions() { return _serializedRuntimeAssumptions; }
+   ClientSessionData *getClientData() const { return _clientData; }
+   void setClientData(ClientSessionData *clientData) { _clientData = clientData; }
+   void switchToPerClientMemory()
+      {
+      _trMemory = _perClientMemory;
+      }
+   void switchToGlobalMemory()
+      {
+      _trMemory = &_globalMemory;
+      }
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
    TR::SymbolValidationManager *getSymbolValidationManager() { return _symbolValidationManager; }
@@ -329,6 +364,23 @@ class OMR_EXTENSIBLE Compilation : public OMR::CompilationConnector
    // Flag to record if any optimization has prohibited OSR over a range of trees
    void setOSRProhibitedOverRangeOfTrees() { _osrProhibitedOverRangeOfTrees = true; }
    bool isOSRProhibitedOverRangeOfTrees() { return _osrProhibitedOverRangeOfTrees; }
+
+   void setUseTracingBuffer(bool use) { _useTracingBuffer = use; }
+   bool useTracingBuffer() { return _useTracingBuffer; }
+   char *getTracingBufferStart() { return _tracingBufferStart; }
+   char *getTracingBufferCursor() { return _tracingBufferCursor; }
+   void incTracingBuffer(size_t size)
+      {
+      _tracingBufferCursor += size;
+      _tracingBufferFreeSpace -= size;
+      }
+   void allocateTracingBuffer();
+   void resetTracingBuffer()
+      {
+      _tracingBufferCursor = _tracingBufferStart;
+      _tracingBufferFreeSpace = _tracingBufferSize;
+      }
+   int32_t getTracingBufferFreeSpace() { return _tracingBufferFreeSpace; }
 
 private:
    enum CachedClassPointerId
@@ -423,10 +475,22 @@ private:
    // The following flag is set when a request to complete this compilation
    // has been sent to a remote VM (client side in JITServer)
    bool _remoteCompilation;
+   // Client session data for the client that requested this out-of-process
+   // compilation (at the JITServer); unused (always NULL) at the client side
+   ClientSessionData *_clientData;
+
+   TR_Memory *_perClientMemory;
+   TR_Memory _globalMemory;
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
    TR::SymbolValidationManager *_symbolValidationManager;
    bool _osrProhibitedOverRangeOfTrees;
+
+   bool _useTracingBuffer;
+   char *_tracingBufferStart;
+   char *_tracingBufferCursor;
+   int32_t _tracingBufferSize;
+   int32_t _tracingBufferFreeSpace;
    };
 
 }

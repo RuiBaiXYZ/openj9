@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000, 2019 IBM Corp. and others
+# Copyright (c) 2000, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -996,11 +996,47 @@ J9NLS_JNICHK_NON_ARRAY_REQUIRED.system_action=If -Xcheck:jni:nonfatal has been s
 J9NLS_JNICHK_NON_ARRAY_REQUIRED.user_response=Check and correct the JNI application code.
 # END NON-TRANSLATABLE
 
-J9NLS_JNICHK_NON_PACKED_API_USED_FOR_PACKED_OBJECTS=Rada JNI v %1$s: Tuto funkci nelze pou\u017e\u00edt se sbalen\u00fdmi objekty. Pou\u017eijte m\u00edsto toho %2$s.
+J9NLS_JNICHK_NON_PACKED_API_USED_FOR_PACKED_OBJECTS=Rada JNI v %1$s: Tuto funkci nelze pou\u017e\u00edt se sbalen\u00fdmi objekty. Pou\u017eijte m\u00edsto n\u00ed %2$s.
 # START NON-TRANSLATABLE
 J9NLS_JNICHK_NON_PACKED_API_USED_FOR_PACKED_OBJECTS.sample_input_1=GetPrimitiveArrayCritical
 J9NLS_JNICHK_NON_PACKED_API_USED_FOR_PACKED_OBJECTS.sample_input_2=GetPackedArrayElements
 J9NLS_JNICHK_NON_PACKED_API_USED_FOR_PACKED_OBJECTS.explanation=wrong api used.
 J9NLS_JNICHK_NON_PACKED_API_USED_FOR_PACKED_OBJECTS.system_action=JVM continues
 J9NLS_JNICHK_NON_PACKED_API_USED_FOR_PACKED_OBJECTS.user_response=Check and correct the JNI application code.
+# END NON-TRANSLATABLE
+
+J9NLS_JNICHK_NON_STATIC_FIELDID_PASSED=Chyba JNI v metod\u011b %1$s: O\u010dek\u00e1v\u00e1 se, \u017ee argument #%2$d je statick\u00fd, rozhran\u00ed JNI v\u0161ak byl p\u0159ed\u00e1n identifik\u00e1tor nestatick\u00e9ho pole.
+# START NON-TRANSLATABLE
+J9NLS_JNICHK_NON_STATIC_FIELDID_PASSED.sample_input_1=methodName
+J9NLS_JNICHK_NON_STATIC_FIELDID_PASSED.explanation=Validation of the field ID passed on the named JNI function has failed.
+J9NLS_JNICHK_NON_STATIC_FIELDID_PASSED.system_action=If -Xcheck:jni:nonfatal has been specified, the JVM continues, otherwise it terminates.
+J9NLS_JNICHK_NON_STATIC_FIELDID_PASSED.user_response=Check that the field ID passed in the function is correct.
+# END NON-TRANSLATABLE
+
+J9NLS_JNICHK_STATIC_FIELDID_PASSED=Chyba JNI v metod\u011b %1$s: O\u010dek\u00e1v\u00e1 se, \u017ee argument #%2$d nen\u00ed statick\u00fd, rozhran\u00ed JNI v\u0161ak byl p\u0159ed\u00e1n identifik\u00e1tor statick\u00e9ho pole.
+# START NON-TRANSLATABLE
+J9NLS_JNICHK_STATIC_FIELDID_PASSED.sample_input_1=methodName
+J9NLS_JNICHK_STATIC_FIELDID_PASSED.explanation=Validation of the field ID passed on the named JNI function has failed.
+J9NLS_JNICHK_STATIC_FIELDID_PASSED.system_action=If -Xcheck:jni:nonfatal has been specified, the JVM continues, otherwise it terminates.
+J9NLS_JNICHK_STATIC_FIELDID_PASSED.user_response=Check that the field ID passed in the function is correct.
+# END NON-TRANSLATABLE
+
+# JNI is not translatable
+J9NLS_JNICHK_ARGUMENT_IS_NOT_SUBCLASS2=Chyba JNI v %1$s: Typ argumentu #%2$d nen\u00ed podt\u0159\u00eddou t\u0159\u00eddy %3$s nebo %4$s.
+# START NON-TRANSLATABLE
+J9NLS_JNICHK_ARGUMENT_IS_NOT_SUBCLASS2.sample_input_1=methodName
+J9NLS_JNICHK_ARGUMENT_IS_NOT_SUBCLASS2.sample_input_2=3
+J9NLS_JNICHK_ARGUMENT_IS_NOT_SUBCLASS2.sample_input_3=package1/Class1
+J9NLS_JNICHK_ARGUMENT_IS_NOT_SUBCLASS2.sample_input_4=package2/Class2
+J9NLS_JNICHK_ARGUMENT_IS_NOT_SUBCLASS2.explanation=The named JNI function has been called with an incorrect parameter type.
+J9NLS_JNICHK_ARGUMENT_IS_NOT_SUBCLASS2.system_action=If -Xcheck:jni:nonfatal has been specified, the JVM continues, otherwise it terminates.
+J9NLS_JNICHK_ARGUMENT_IS_NOT_SUBCLASS2.user_response=Correct the JNI function call.
+# END NON-TRANSLATABLE
+
+# abortonerror is not translatable
+J9NLS_JNICHK_HELP_16=\tabortonerror   p\u0159i z\u00e1va\u017en\u00e9 chyb\u011b dojde k p\u0159ed\u010dasn\u00e9mu ukon\u010den\u00ed
+# START NON-TRANSLATABLE
+J9NLS_JNICHK_HELP_15.explanation=NOTAG
+J9NLS_JNICHK_HELP_15.system_action=
+J9NLS_JNICHK_HELP_15.user_response=
 # END NON-TRANSLATABLE

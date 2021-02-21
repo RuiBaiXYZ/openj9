@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -44,6 +44,7 @@
 #include "vm_internal.h"
 #include "j2sever.h"
 #include "util_api.h"
+#include "j9accessbarrier.h"
 
 #include "VMHelpers.hpp"
 #include "VMAccess.hpp"
@@ -283,7 +284,8 @@ static UDATA gpProtectedToReflected(void *entryArg)
 
 static jclass JNICALL gpCheckFindClass(JNIEnv * env, const char *name)
 {
-	if (((J9VMThread *) env)->gpProtected) {
+	/* Check if already protected or -Xrs is set and short-circuit the path through gpProtectAndRun */
+	if ((((J9VMThread *) env)->gpProtected) || (J9_ARE_ALL_BITS_SET(((J9VMThread *) env)->javaVM->sigFlags, J9_SIG_XRS_SYNC))) {
 		return findClass(env, name);
 	} else {
 		J9RedirectedFindClassArgs args;
@@ -298,7 +300,8 @@ static jclass JNICALL gpCheckFindClass(JNIEnv * env, const char *name)
 #if  !defined(J9VM_INTERP_MINIMAL_JNI)
 static jobject JNICALL gpCheckToReflectedField(JNIEnv * env, jclass clazz, jfieldID fieldID, jboolean isStatic)
 {
-	if (((J9VMThread *) env)->gpProtected) {
+	/* Check if already protected or -Xrs is set and short-circuit the path through gpProtectAndRun */
+	if ((((J9VMThread *) env)->gpProtected) || (J9_ARE_ALL_BITS_SET(((J9VMThread *) env)->javaVM->sigFlags, J9_SIG_XRS_SYNC))) {
 		return (jobject) toReflectedField(env, clazz, fieldID, isStatic);
 	} else {
 		J9RedirectedToReflectedArgs args;
@@ -317,7 +320,8 @@ static jobject JNICALL gpCheckToReflectedField(JNIEnv * env, jclass clazz, jfiel
 #if  !defined(J9VM_INTERP_MINIMAL_JNI)
 static jobject JNICALL gpCheckToReflectedMethod(JNIEnv * env, jclass clazz, jmethodID methodID, jboolean isStatic)
 {
-	if (((J9VMThread *) env)->gpProtected) {
+	/* Check if already protected or -Xrs is set and short-circuit the path through gpProtectAndRun */
+	if ((((J9VMThread *) env)->gpProtected) || (J9_ARE_ALL_BITS_SET(((J9VMThread *) env)->javaVM->sigFlags, J9_SIG_XRS_SYNC))) {
 		return (jobject) toReflectedMethod(env, clazz, methodID, isStatic);
 	} else {
 		J9RedirectedToReflectedArgs args;
@@ -410,9 +414,10 @@ static UDATA gpProtectedInitialize(void * entryArg)
 
 
 
-void JNICALL    gpCheckInitialize(J9VMThread* env, J9Class* clazz)
+void JNICALL gpCheckInitialize(J9VMThread* env, J9Class* clazz)
 {
-	if (((J9VMThread *) env)->gpProtected) {
+	/* Check if already protected or -Xrs is set and short-circuit the path through gpProtectAndRun */
+	if ((((J9VMThread *) env)->gpProtected) || (J9_ARE_ALL_BITS_SET(((J9VMThread *) env)->javaVM->sigFlags, J9_SIG_XRS_SYNC))) {
 		initializeClass(env, clazz);
 	} else {
 		J9RedirectedInitializeArgs args;
@@ -435,7 +440,8 @@ gpCheckCallin(JNIEnv *env, jobject receiver, jclass cls, jmethodID methodID, voi
 	handlerArgs.methodID = methodID;
 	handlerArgs.args = args;
 
-	if (((J9VMThread *) env)->gpProtected) {
+	/* Check if already protected or -Xrs is set and short-circuit the path through gpProtectAndRun */
+	if ((((J9VMThread *) env)->gpProtected) || (J9_ARE_ALL_BITS_SET(((J9VMThread *) env)->javaVM->sigFlags, J9_SIG_XRS_SYNC))) {
 		gpProtectedRunCallInMethod(&handlerArgs);
 	} else {
 		gpProtectAndRun(gpProtectedRunCallInMethod, env, &handlerArgs);
@@ -443,7 +449,7 @@ gpCheckCallin(JNIEnv *env, jobject receiver, jclass cls, jmethodID methodID, voi
 }
 
 
-UDATA JNICALL   pushArguments(J9VMThread *vmThread, J9Method* method, void *args) {
+UDATA JNICALL pushArguments(J9VMThread *vmThread, J9Method* method, void *args) {
 	jvalue* jvalues;
 	U_8 *sigChar;
 	jobject objArg;
@@ -531,9 +537,10 @@ UDATA JNICALL   pushArguments(J9VMThread *vmThread, J9Method* method, void *args
 
 
 
-void JNICALL    gpCheckSetCurrentException(J9VMThread* env, UDATA exceptionNumber, UDATA* detailMessage)
+void JNICALL gpCheckSetCurrentException(J9VMThread* env, UDATA exceptionNumber, UDATA* detailMessage)
 {
-	if (((J9VMThread *) env)->gpProtected) {
+	/* Check if already protected or -Xrs is set and short-circuit the path through gpProtectAndRun */
+	if ((((J9VMThread *) env)->gpProtected) || (J9_ARE_ALL_BITS_SET(((J9VMThread *) env)->javaVM->sigFlags, J9_SIG_XRS_SYNC))) {
 		setCurrentException(env, exceptionNumber, detailMessage);
 	} else {
 		J9RedirectedSetCurrentExceptionArgs args;
@@ -1107,9 +1114,10 @@ exceptionOccurred(JNIEnv *env)
 }
 
 
-void JNICALL    gpCheckSetCurrentExceptionNLS(J9VMThread* env, UDATA exceptionNumber, U_32 moduleName, U_32 messageNumber)
+void JNICALL gpCheckSetCurrentExceptionNLS(J9VMThread* env, UDATA exceptionNumber, U_32 moduleName, U_32 messageNumber)
 {
-	if (((J9VMThread *) env)->gpProtected) {
+	/* Check if already protected or -Xrs is set and short-circuit the path through gpProtectAndRun */
+	if ((((J9VMThread *) env)->gpProtected) || (J9_ARE_ALL_BITS_SET(((J9VMThread *) env)->javaVM->sigFlags, J9_SIG_XRS_SYNC))) {
 		setCurrentExceptionNLS(env, exceptionNumber, moduleName, messageNumber);
 	} else {
 		J9RedirectedSetCurrentExceptionNLSArgs args;
@@ -1140,9 +1148,10 @@ gpProtectedSetNativeOutOfMemoryError(void * entryArg)
 	return 0;
 }
 
-void JNICALL    gpCheckSetNativeOutOfMemoryError(J9VMThread* env, U_32 moduleName, U_32 messageNumber)
+void JNICALL gpCheckSetNativeOutOfMemoryError(J9VMThread* env, U_32 moduleName, U_32 messageNumber)
 {
-	if (((J9VMThread *) env)->gpProtected) {
+	/* Check if already protected or -Xrs is set and short-circuit the path through gpProtectAndRun */
+	if ((((J9VMThread *) env)->gpProtected) || (J9_ARE_ALL_BITS_SET(((J9VMThread *) env)->javaVM->sigFlags, J9_SIG_XRS_SYNC))) {
 		setNativeOutOfMemoryError(env, moduleName, messageNumber);
 	} else {
 		J9RedirectedSetCurrentExceptionNLSArgs args;
@@ -1162,9 +1171,10 @@ gpProtectedSetHeapOutOfMemoryError(void * entryArg)
 	return 0;
 }
 
-void JNICALL    gpCheckSetHeapOutOfMemoryError(J9VMThread* env)
+void JNICALL gpCheckSetHeapOutOfMemoryError(J9VMThread* env)
 {
-	if (((J9VMThread *) env)->gpProtected) {
+	/* Check if already protected or -Xrs is set and short-circuit the path through gpProtectAndRun */
+	if ((((J9VMThread *) env)->gpProtected) || (J9_ARE_ALL_BITS_SET(((J9VMThread *) env)->javaVM->sigFlags, J9_SIG_XRS_SYNC))) {
 		setHeapOutOfMemoryError(env);
 	} else {
 		J9RedirectedSetCurrentExceptionNLSArgs args;
@@ -1848,15 +1858,32 @@ monitorEnter(JNIEnv* env, jobject obj)
 	VM_VMAccess::inlineEnterVMFromJNI(vmThread);
 
 	j9object_t object = *(j9object_t*)obj;
-	IDATA monstatus = objectMonitorEnter(vmThread, object);
+	UDATA monstatus = objectMonitorEnter(vmThread, object);
 
-	if (0 == monstatus) {
-oom:
-		SET_NATIVE_OUT_OF_MEMORY_ERROR(vmThread, J9NLS_VM_FAILED_TO_ALLOCATE_MONITOR);
+	if (J9_OBJECT_MONITOR_ENTER_FAILED(monstatus)) {
+fail:
+#if JAVA_SPEC_VERSION >= 16
+		if (J9_OBJECT_MONITOR_VALUE_TYPE_IMSE == monstatus) {
+			J9Class* badClass = J9OBJECT_CLAZZ(vmThread, obj);
+			J9UTF8 *badClassName = J9ROMCLASS_CLASSNAME(badClass->romClass);
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+			if (J9_IS_J9CLASS_VALUETYPE(badClass)) {
+				setCurrentExceptionNLSWithArgs(vmThread, J9NLS_VM_ERROR_BYTECODE_OBJECTREF_CANNOT_BE_VALUE_TYPE, J9VMCONSTANTPOOL_JAVALANGILLEGALMONITORSTATEEXCEPTION, J9UTF8_LENGTH(badClassName), J9UTF8_DATA(badClassName));
+			} else 
+#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */		
+			{
+				Assert_VM_true(J9_ARE_ALL_BITS_SET(vmThread->javaVM->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_VALUE_BASED_EXCEPTION));
+				setCurrentExceptionNLSWithArgs(vmThread, J9NLS_VM_ERROR_BYTECODE_OBJECTREF_CANNOT_BE_VALUE_BASED, J9VMCONSTANTPOOL_JAVALANGVIRTUALMACHINEERROR, J9UTF8_LENGTH(badClassName), J9UTF8_DATA(badClassName));
+			}
+		} else
+#endif /* JAVA_SPEC_VERSION >= 16 */
+		if (J9_OBJECT_MONITOR_OOM == monstatus) {
+			SET_NATIVE_OUT_OF_MEMORY_ERROR(vmThread, J9NLS_VM_FAILED_TO_ALLOCATE_MONITOR);
+		}
 		rc = -1;
 	} else if (J9_UNEXPECTED(!VM_ObjectMonitor::recordJNIMonitorEnter(vmThread, (j9object_t)monstatus))) {
 		objectMonitorExit(vmThread, (j9object_t)monstatus);
-		goto oom;
+		goto fail;
 	}
 
 	VM_VMAccess::inlineExitVMToJNI(vmThread);
@@ -2140,6 +2167,27 @@ findJNIMethod(J9VMThread* currentThread, J9Class* clazz, char* name, char* signa
 	return result;
 }
 
+UDATA
+jniIsInternalClassRef(J9JavaVM *vm, jobject ref)
+{
+	UDATA rc = FALSE;
+	J9ClassWalkState classWalkState;
+	J9Class *clazz = allLiveClassesStartDo(&classWalkState, vm, NULL);
+	while (clazz != NULL) {
+		do {
+			if (ref == (jobject)&clazz->classObject) {
+				rc = TRUE;
+				goto done;
+			}
+			clazz = clazz->replacedClass;
+		} while (NULL != clazz);
+		clazz = allLiveClassesNextDo(&classWalkState);
+	}
+done:
+	allLiveClassesEndDo(&classWalkState);
+	return rc;
+}
+
 static jobjectRefType JNICALL
 getObjectRefType(JNIEnv *env, jobject obj)
 {
@@ -2148,8 +2196,6 @@ getObjectRefType(JNIEnv *env, jobject obj)
 	jobjectRefType rc = JNIInvalidRefType;
 	J9JNIReferenceFrame* frame;
 	J9JavaStack* stack = vmThread->stackObject;
-	J9ClassWalkState classWalkState;
-	J9Class * clazz;
 
 	VM_VMAccess::inlineEnterVMFromJNI(vmThread);
 
@@ -2211,15 +2257,10 @@ getObjectRefType(JNIEnv *env, jobject obj)
 
 	/* Check for class refs */
 
-	clazz = allLiveClassesStartDo(&classWalkState, vm, NULL);
-	while (clazz != NULL) {
-		if (obj == (jobject) &(clazz->classObject)) {
-			rc = JNILocalRefType;
-			break;
-		}
-		clazz = allLiveClassesNextDo(&classWalkState);
+	if (jniIsInternalClassRef(vm, obj)) {
+		rc = JNILocalRefType;
+		goto done;
 	}
-	allLiveClassesEndDo(&classWalkState);
 
 done:
 	VM_VMAccess::inlineExitVMToJNI(vmThread);

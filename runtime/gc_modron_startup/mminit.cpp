@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -72,7 +72,6 @@
 #endif /* J9VM_GC_REALTIME */
 #include "ClassLoaderManager.hpp"
 #include "Debug.hpp"
-#include "Dispatcher.hpp"
 #include "EnvironmentBase.hpp"
 #if defined(J9VM_GC_FINALIZATION)
 #include "FinalizeListManager.hpp"
@@ -104,7 +103,7 @@
 #include "Scavenger.hpp"
 #include "StringTable.hpp"
 #include "Validator.hpp"
-#if defined(J9VM_GC_IDLE_HEAP_MANAGER)
+#if defined(OMR_GC_IDLE_HEAP_MANAGER)
 #include "IdleGCManager.hpp"
 #endif
 
@@ -219,16 +218,16 @@ initializeMutatorModelJava(J9VMThread* vmThread)
 void
 cleanupMutatorModelJava(J9VMThread* vmThread)
 {
-	J9VMDllLoadInfo* loadInfo;
-	J9JavaVM* vm = vmThread->javaVM;
 	MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
 
 	if (NULL != env) {
+		J9JavaVM *vm = vmThread->javaVM;
+		J9VMDllLoadInfo *loadInfo = getGCDllLoadInfo(vm);
+
 		/* cleanupMutatorModelJava is called as part of the main vmThread shutdown, which happens after
 		 * gcCleanupHeapStructures has been called. We should therefore only flush allocation caches
 		 * if there is still a heap.
 		 */
-		loadInfo = FIND_DLL_TABLE_ENTRY(THIS_DLL_NAME);
 		if (!IS_STAGE_COMPLETED(loadInfo->completedBits, HEAP_STRUCTURES_FREED)) {
 			/* this can only be called if the heap still exists since it will ask the TLH chunk to be abandoned with crashes if the heap is deallocated */
 			GC_OMRVMThreadInterface::flushCachesForGC(env);
@@ -312,7 +311,11 @@ j9gc_initialize_heap(J9JavaVM *vm, IDATA *memoryParameterTable, UDATA heapBytesR
 	MM_EnvironmentBase env(vm->omrVM);
 	MM_GlobalCollector *globalCollector;
 	PORT_ACCESS_FROM_JAVAVM(vm);
-	J9VMDllLoadInfo *loadInfo = FIND_DLL_TABLE_ENTRY(THIS_DLL_NAME);
+	J9VMDllLoadInfo *loadInfo = getGCDllLoadInfo(vm);
+
+	if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_PORTABLE_SHARED_CACHE)) {
+		extensions->shouldForceLowMemoryHeapCeilingShiftIfPossible = true;
+	}
 
 #if defined(J9VM_GC_BATCH_CLEAR_TLH)
 	/* Record batch clear state in VM so inline allocates can decide correct initialization procedure */
@@ -437,7 +440,7 @@ j9gc_initialize_heap(J9JavaVM *vm, IDATA *memoryParameterTable, UDATA heapBytesR
 		goto error_no_memory;
 	}
 
-	extensions->dispatcher = extensions->configuration->createDispatcher(&env, (omrsig_handler_fn)vm->internalVMFunctions->structuredSignalHandlerVM, vm, vm->defaultOSStackSize);
+	extensions->dispatcher = extensions->configuration->createParallelDispatcher(&env, (omrsig_handler_fn)vm->internalVMFunctions->structuredSignalHandlerVM, vm, vm->defaultOSStackSize);
 	if (NULL == extensions->dispatcher) {
 		loadInfo->fatalErrorStr = (char *)j9nls_lookup_message(J9NLS_DO_NOT_PRINT_MESSAGE_TAG | J9NLS_DO_NOT_APPEND_NEWLINE, J9NLS_GC_FAILED_TO_INSTANTIATE_TASK_DISPATCHER, "Failed to instantiate task dispatcher.");
 		goto error_no_memory;
@@ -481,7 +484,7 @@ j9gc_initialize_heap(J9JavaVM *vm, IDATA *memoryParameterTable, UDATA heapBytesR
 		goto error_no_memory;
 	}
 
-#if defined(J9VM_GC_IDLE_HEAP_MANAGER)
+#if defined(OMR_GC_IDLE_HEAP_MANAGER)
 	if (extensions->gcOnIdle) {
 		/* Enable idle tuning only for gencon policy */
 		if (gc_policy_gencon == extensions->configurationOptions._gcPolicy) {
@@ -512,7 +515,7 @@ gcInitializeHeapStructures(J9JavaVM *vm)
 
 	MM_MemorySpace *defaultMemorySpace;
 	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(vm);
-	J9VMDllLoadInfo *loadInfo = FIND_DLL_TABLE_ENTRY(THIS_DLL_NAME);
+	J9VMDllLoadInfo *loadInfo = getGCDllLoadInfo(vm);
 
 	/* For now, number of segments to default in pool */
 	if ((vm->memorySegments = vm->internalVMFunctions->allocateMemorySegmentList(vm, 10, OMRMEM_CATEGORY_VM)) == NULL) {
@@ -2707,7 +2710,7 @@ configurateGCWithPolicyAndOptionsStandard(MM_EnvironmentBase *env)
 				uintptr_t nurserySize = extensions->memoryMax / 4;
 
 				/*
-				 * correctness of -Xmn* values will be analyzed later on with with initialization error in case of bad combination
+				 * correctness of -Xmn* values will be analyzed later on with initialization error in case of bad combination
 				 * so assume here all of them are correct, just check none of them is larger then entire heap size
 				 */
 				if (extensions->userSpecifiedParameters._Xmn._wasSpecified) {
@@ -2828,8 +2831,7 @@ configurateGCWithPolicyAndOptions(OMR_VM* omrVM)
 jint
 gcInitializeDefaults(J9JavaVM* vm)
 {
-	J9VMDllLoadInfo *loadInfo = FIND_DLL_TABLE_ENTRY(THIS_DLL_NAME);
-
+	J9VMDllLoadInfo *loadInfo = getGCDllLoadInfo(vm);
 	UDATA tableSize = (opt_none + 1) * sizeof(IDATA);
 	UDATA realtimeSizeClassesAllocationSize = ROUND_TO(sizeof(UDATA), sizeof(J9VMGCSizeClasses));
 	IDATA *memoryParameterTable;
@@ -2906,15 +2908,15 @@ gcInitializeDefaults(J9JavaVM* vm)
 	if (gc_policy_gencon == extensions->configurationOptions._gcPolicy) {
 		/* after we parsed cmd line options, check if we can obey the request to run CS (valid for Gencon only) */
 		if (extensions->concurrentScavengerForced) {
-#if defined(J9VM_ARCH_X86) || defined(J9VM_ARCH_POWER)
+#if defined(J9VM_ARCH_X86) || defined(J9VM_ARCH_POWER) || defined(J9VM_ARCH_AARCH64)
 			/*
-            * x86 and POWER do not respect -XXgc:softwareRangeCheckReadBarrier and have it set to true always.
-			*
-			* Z is the only consumer that actually uses -XXgc:softwareRangeCheckReadBarrier
-			* to overwrite HW concurrent scavenge.
-			*/
+			 * x86, POWER and AArch64 do not respect -XXgc:softwareRangeCheckReadBarrier and have it set to true always.
+			 *
+			 * Z is the only consumer that actually uses -XXgc:softwareRangeCheckReadBarrier
+			 * to overwrite HW concurrent scavenge.
+			 */
 			extensions->softwareRangeCheckReadBarrier = true;
-#endif /* J9VM_ARCH_X86 || J9VM_ARCH_POWER */
+#endif /* J9VM_ARCH_X86 || J9VM_ARCH_POWER || J9VM_ARCH_AARCH64 */
 			if (LOADED == (FIND_DLL_TABLE_ENTRY(J9_JIT_DLL_NAME)->loadFlags & LOADED)) {
 				/* If running jitted, it must be on supported h/w */
 				J9ProcessorDesc  processorDesc;
@@ -2924,13 +2926,13 @@ gcInitializeDefaults(J9JavaVM* vm)
 
 				if (hwSupported) {
 					/* Software Barrier request overwrites HW usage on supported HW */
-					extensions->concurrentScavengerHWSupport = hwSupported && !extensions->softwareRangeCheckReadBarrier;
+					extensions->concurrentScavengerHWSupport = hwSupported && !extensions->softwareRangeCheckReadBarrier && !J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_PORTABLE_SHARED_CACHE);
 					extensions->concurrentScavenger = hwSupported || extensions->softwareRangeCheckReadBarrier;
 				} else {
 					extensions->concurrentScavengerHWSupport = false;
-#if defined(J9VM_ARCH_X86) || defined(J9VM_ARCH_POWER) || defined(J9VM_ARCH_S390)
+#if defined(J9VM_ARCH_X86) || defined(J9VM_ARCH_POWER) || defined(J9VM_ARCH_AARCH64) || defined(J9VM_ARCH_S390)
 					extensions->concurrentScavenger = true;
-#endif /*J9VM_ARCH_X86 || J9VM_ARCH_POWER || J9VM_ARCH_S390 */
+#endif /*J9VM_ARCH_X86 || J9VM_ARCH_POWER || J9VM_ARCH_AARCH64 || J9VM_ARCH_S390 */
 				}
 			} else {
 				/* running interpreted is ok on any h/w */
@@ -3039,10 +3041,14 @@ hookReleaseVMAccess(J9HookInterface** hook, UDATA eventNum, void* voidEventData,
 	J9VMReleaseVMAccessEvent* eventData = (J9VMReleaseVMAccessEvent*)voidEventData;
 
 	J9VMThread *currentThread = eventData->currentThread;
+	MM_EnvironmentStandard *env = MM_EnvironmentStandard::getEnvironment(currentThread->omrVMThread);
 	MM_GCExtensions* ext = MM_GCExtensions::getExtensions(currentThread);
 
 	if (ext->isConcurrentScavengerInProgress()) {
-		/* to call a variant of OMR's flushGCcaches, once it's properly adjusted */
+		/* Flush and final flags are false, which means that we will not release the copy caches to scan queue, but just make them inactive,
+		 * for someone else to release them if needed. More often, however, this thread will re-acquire VM access and re-active the caches
+		 */
+		ext->scavenger->threadReleaseCaches(env, env, false, false);
 	}
 }
 
@@ -3051,11 +3057,14 @@ hookAcquiringExclusiveInNative(J9HookInterface** hook, UDATA eventNum, void* voi
 {
 	J9VMAcquringExclusiveInNativeEvent* eventData = (J9VMAcquringExclusiveInNativeEvent*)voidEventData;
 
-	J9VMThread *currentThread = eventData->currentThread;
-	MM_GCExtensions* ext = MM_GCExtensions::getExtensions(currentThread);
+	J9VMThread *targetThread = eventData->targetThread;
+	MM_EnvironmentStandard *env = MM_EnvironmentStandard::getEnvironment(targetThread->omrVMThread);
+	MM_GCExtensions* ext = MM_GCExtensions::getExtensions(targetThread);
 
 	if (ext->isConcurrentScavengerInProgress()) {
-		/* to call a variant of OMR's flushGCcaches, once it's properly adjusted */
+		/* This call back occurs when Exclusive is being acquired. There are no reason for delaying final flush - do it now (Hence, the flags are true). */
+		ext->scavenger->threadReleaseCaches(NULL, env, true, true);
+
 	}
 }
 
@@ -3173,10 +3182,13 @@ gcInitializeVMHooks(MM_GCExtensionsBase *extensions)
 	else if (extensions->concurrentScavenger) {
 		if ((*vmHookInterface)->J9HookRegisterWithCallSite(vmHookInterface, J9HOOK_VM_ACQUIREVMACCESS, hookAcquireVMAccess, OMR_GET_CALLSITE(), NULL)) {
 			result = false;
-		} else if ((*vmHookInterface)->J9HookRegisterWithCallSite(vmHookInterface, J9HOOK_VM_RELEASEVMACCESS, hookReleaseVMAccess, OMR_GET_CALLSITE(), NULL)) {
-			result = false;
-		} else if ((*vmHookInterface)->J9HookRegisterWithCallSite(vmHookInterface, J9HOOK_VM_ACQUIRING_EXCLUSIVE_IN_NATIVE, hookAcquiringExclusiveInNative, OMR_GET_CALLSITE(), NULL)) {
-			result = false;
+		} else if (extensions->concurrentScavengeExhaustiveTermination) {
+			/* Register these hooks only if Exhaustive Termination optimization is enabled */
+			if ((*vmHookInterface)->J9HookRegisterWithCallSite(vmHookInterface, J9HOOK_VM_RELEASEVMACCESS, hookReleaseVMAccess, OMR_GET_CALLSITE(), NULL)) {
+				result = false;
+			} else if ((*vmHookInterface)->J9HookRegisterWithCallSite(vmHookInterface, J9HOOK_VM_ACQUIRING_EXCLUSIVE_IN_NATIVE, hookAcquiringExclusiveInNative, OMR_GET_CALLSITE(), NULL)) {
+				result = false;
+			}
 		}
 	}
 #endif /* OMR_GC_CONCURRENT_SCAVENGER */
@@ -3195,8 +3207,10 @@ gcCleanupVMHooks(MM_GCExtensionsBase *extensions)
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
 		if (extensions->concurrentScavenger) {
 			(*vmHookInterface)->J9HookUnregister(vmHookInterface, J9HOOK_VM_ACQUIREVMACCESS, hookAcquireVMAccess, NULL);
-			(*vmHookInterface)->J9HookUnregister(vmHookInterface, J9HOOK_VM_RELEASEVMACCESS, hookReleaseVMAccess, NULL);
-			(*vmHookInterface)->J9HookUnregister(vmHookInterface, J9HOOK_VM_ACQUIRING_EXCLUSIVE_IN_NATIVE, hookAcquiringExclusiveInNative, NULL);
+			if (extensions->concurrentScavengeExhaustiveTermination) {
+				(*vmHookInterface)->J9HookUnregister(vmHookInterface, J9HOOK_VM_RELEASEVMACCESS, hookReleaseVMAccess, NULL);
+				(*vmHookInterface)->J9HookUnregister(vmHookInterface, J9HOOK_VM_ACQUIRING_EXCLUSIVE_IN_NATIVE, hookAcquiringExclusiveInNative, NULL);
+			}
 		}
 #endif /* OMR_GC_CONCURRENT_SCAVENGER */
 	}

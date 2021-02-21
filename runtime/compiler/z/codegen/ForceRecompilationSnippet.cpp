@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -41,7 +41,7 @@ TR::S390ForceRecompilationSnippet::emitSnippetBody()
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
 
    uint32_t rEP = (uint32_t) cg()->getEntryPointRegister() - 1;
-   TR::SymbolReference * glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_S390induceRecompilation, false, false, false);
+   TR::SymbolReference * glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_S390induceRecompilation);
 
    // Set up the start of data constants and jump to helper.
    // We generate:
@@ -58,10 +58,8 @@ TR::S390ForceRecompilationSnippet::emitSnippetBody()
    *(int32_t *) cursor = 0xDEADBEEF;
    cursor += sizeof(int32_t);
 
-#if !defined(PUBLIC_BUILD)
    // Generate RIOFF if RI is supported.
    cursor = generateRuntimeInstrumentationOnOffInstruction(cg(), cursor, TR::InstOpCode::RIOFF);
-#endif
 
    // BRCL
    *(int16_t *) cursor = 0xC0F4;
@@ -71,7 +69,7 @@ TR::S390ForceRecompilationSnippet::emitSnippetBody()
    // If MCC is not supported, everything should be reachable.
    // If MCC is supported, we will look up the appropriate trampoline, if
    //     necessary.
-   intptrj_t destAddr = (intptrj_t)(glueRef->getMethodAddress());
+   intptr_t destAddr = (intptr_t)(glueRef->getMethodAddress());
 
 #if defined(TR_TARGET_64BIT)
 #if defined(J9ZOS390)
@@ -90,7 +88,7 @@ TR::S390ForceRecompilationSnippet::emitSnippetBody()
    TR_ASSERT(CHECK_32BIT_TRAMPOLINE_RANGE(destAddr, cursor), "Helper Call is not reachable.");
    this->setSnippetDestAddr(destAddr);
 
-   *(int32_t *) cursor = (int32_t)((destAddr - (intptrj_t)(cursor - 2)) / 2);
+   *(int32_t *) cursor = (int32_t)((destAddr - (intptr_t)(cursor - 2)) / 2);
 
    AOTcgDiag1(comp, "add TR_HelperAddress cursor=%x\n", cursor);
    cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor, (uint8_t*) glueRef, TR_HelperAddress, cg()),
@@ -107,11 +105,7 @@ uint32_t
 TR::S390ForceRecompilationSnippet::getLength(int32_t  estimatedSnippetStart)
    {
    uint32_t length = 12;  // LARL + BRCL
-
-#if !defined(PUBLIC_BUILD)
    length += getRuntimeInstrumentationOnOffInstructionLength(cg());
-#endif
-
    return length;
    }
 
@@ -125,7 +119,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::S390ForceRecompilationSnippet * snippet)
 
    printPrefix(pOutFile, NULL, bufferPos, 6);
    trfprintf(pOutFile, "LARL \tGPR14, <%p>\t# Addr of DataConst",
-                                (intptrj_t) snippet->getDataConstantSnippet()->getSnippetLabel()->getCodeLocation());
+                                (intptr_t) snippet->getDataConstantSnippet()->getSnippetLabel()->getCodeLocation());
    bufferPos += 6;
 
    bufferPos = printRuntimeInstrumentationOnOffInstruction(pOutFile, bufferPos, false); // RIOFF
@@ -160,18 +154,18 @@ TR::S390ForceRecompilationDataSnippet::emitSnippetBody()
    //    RetAddrInForceRecompSnippet and StartPCInForceRecompSnippet vars.
 
    // Return Address
-   *(intptrj_t *) cursor = (intptrj_t)getRestartLabel()->getCodeLocation();
+   *(intptr_t *) cursor = (intptr_t)getRestartLabel()->getCodeLocation();
    AOTcgDiag1(comp, "add TR_AbsoluteMethodAddress cursor=%x\n", cursor);
    cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor, NULL, TR_AbsoluteMethodAddress, cg()),
                              __FILE__, __LINE__, getNode());
-   cursor += sizeof(intptrj_t);
+   cursor += sizeof(intptr_t);
 
    // Start PC
-   *(intptrj_t *) cursor = (intptrj_t)cg()->getCodeStart();
+   *(intptr_t *) cursor = (intptr_t)cg()->getCodeStart();
    AOTcgDiag1(comp, "add TR_AbsoluteMethodAddress cursor=%x\n", cursor);
    cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor, NULL, TR_AbsoluteMethodAddress, cg()),
                              __FILE__, __LINE__, getNode());
-   cursor += sizeof(intptrj_t);
+   cursor += sizeof(intptr_t);
 
    return cursor;
    }
@@ -182,7 +176,7 @@ TR::S390ForceRecompilationDataSnippet::getLength(int32_t estimatedSnippetStart)
    // Data Snippet is only 2 pointers:
    //     Return Address
    //     StartPC
-   return 2 * sizeof(intptrj_t);
+   return 2 * sizeof(intptr_t);
    }
 
 void
@@ -191,12 +185,12 @@ TR_Debug::print(TR::FILE *pOutFile, TR::S390ForceRecompilationDataSnippet * snip
    uint8_t * bufferPos = snippet->getSnippetLabel()->getCodeLocation();
 
    printSnippetLabel(pOutFile, snippet->getSnippetLabel(), bufferPos, "Force Recompilation Data Snippet");
-   printPrefix(pOutFile, NULL, bufferPos, sizeof(intptrj_t));
-   trfprintf(pOutFile, "DC   \t%p \t\t# Main Code Return Address", *((intptrj_t*)bufferPos));
-   bufferPos += sizeof(intptrj_t);
+   printPrefix(pOutFile, NULL, bufferPos, sizeof(intptr_t));
+   trfprintf(pOutFile, "DC   \t%p \t\t# Main Code Return Address", *((intptr_t*)bufferPos));
+   bufferPos += sizeof(intptr_t);
 
-   printPrefix(pOutFile, NULL, bufferPos, sizeof(intptrj_t));
-   trfprintf(pOutFile, "DC   \t%p \t\t# Method Start PC (to patch)", *((intptrj_t*)bufferPos));
-   bufferPos += sizeof(intptrj_t);
+   printPrefix(pOutFile, NULL, bufferPos, sizeof(intptr_t));
+   trfprintf(pOutFile, "DC   \t%p \t\t# Method Start PC (to patch)", *((intptr_t*)bufferPos));
+   bufferPos += sizeof(intptr_t);
    }
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -58,6 +58,9 @@ ClassFileOracle::KnownAnnotation ClassFileOracle::_knownAnnotations[] = {
 		{CONTENDED_SIGNATURE, sizeof(CONTENDED_SIGNATURE)},
 #undef CONTENDED_SIGNATURE
 		{J9_UNMODIFIABLE_CLASS_ANNOTATION, sizeof(J9_UNMODIFIABLE_CLASS_ANNOTATION)},
+#define VALUEBASED_SIGNATURE "Ljdk/internal/ValueBased;"
+		{VALUEBASED_SIGNATURE, sizeof(VALUEBASED_SIGNATURE)},
+#undef VALUEBASED_SIGNATURE
 		{0, 0}
 };
 
@@ -79,11 +82,11 @@ U_16
 ClassFileOracle::LocalVariablesIterator::getGenericSignatureIndex()
 {
 	Trc_BCU_Assert_NotEquals(NULL, _localVariableTable);
-	Trc_BCU_Assert_NotEquals(NULL, _localVariablesInfo[_index].localVariableTypeTable);
+	Trc_BCU_Assert_NotEquals(NULL, _localVariablesInfo[_index].localVariableTypeTableAttribute);
 
 	/* If the localVariableTable and localVariableTypeTable are in the same order, return the signatureIndex */
-	J9CfrLocalVariableTypeTableEntry* localVariableTypeTable = _localVariablesInfo[_index].localVariableTypeTable->localVariableTypeTable;
-	if ((_localVariableTableIndex < _localVariablesInfo[_index].localVariableTypeTable->localVariableTypeTableLength)
+	J9CfrLocalVariableTypeTableEntry* localVariableTypeTable = _localVariablesInfo[_index].localVariableTypeTableAttribute->localVariableTypeTable;
+	if ((_localVariableTableIndex < _localVariablesInfo[_index].localVariableTypeTableAttribute->localVariableTypeTableLength)
 			&& (_localVariableTable[_localVariableTableIndex].index == localVariableTypeTable[_localVariableTableIndex].index)
 			&& (_localVariableTable[_localVariableTableIndex].startPC == localVariableTypeTable[_localVariableTableIndex].startPC)
 			&& (_localVariableTable[_localVariableTableIndex].length == localVariableTypeTable[_localVariableTableIndex].length)) {
@@ -92,7 +95,7 @@ ClassFileOracle::LocalVariablesIterator::getGenericSignatureIndex()
 
 	/* Scan for matching localVariableTypeTable entry */
 	for (U_16 localVariableTypeTableIndex = 0;
-			localVariableTypeTableIndex < _localVariablesInfo[_index].localVariableTypeTable->localVariableTypeTableLength;
+			localVariableTypeTableIndex < _localVariablesInfo[_index].localVariableTypeTableAttribute->localVariableTypeTableLength;
 			++localVariableTypeTableIndex) {
 		if ((_localVariableTable[_localVariableTableIndex].index == localVariableTypeTable[localVariableTypeTableIndex].index)
 				&& (_localVariableTable[_localVariableTableIndex].startPC == localVariableTypeTable[localVariableTypeTableIndex].startPC)
@@ -111,13 +114,13 @@ ClassFileOracle::LocalVariablesIterator::hasGenericSignature()
 	Trc_BCU_Assert_NotEquals(NULL, _localVariableTable);
 
 	/* Check if the current local variable isn't generic */
-	if (NULL == _localVariablesInfo[_index].localVariableTypeTable) {
+	if (NULL == _localVariablesInfo[_index].localVariableTypeTableAttribute) {
 		return false;
 	}
 
 	/* Check if the localVariableTable and localVariableTypeTable are in the same order */
-	J9CfrLocalVariableTypeTableEntry* localVariableTypeTable = _localVariablesInfo[_index].localVariableTypeTable->localVariableTypeTable;
-	if ((_localVariableTableIndex < _localVariablesInfo[_index].localVariableTypeTable->localVariableTypeTableLength)
+	J9CfrLocalVariableTypeTableEntry* localVariableTypeTable = _localVariablesInfo[_index].localVariableTypeTableAttribute->localVariableTypeTable;
+	if ((_localVariableTableIndex < _localVariablesInfo[_index].localVariableTypeTableAttribute->localVariableTypeTableLength)
 			&& (_localVariableTable[_localVariableTableIndex].index == localVariableTypeTable[_localVariableTableIndex].index)
 			&& (_localVariableTable[_localVariableTableIndex].startPC == localVariableTypeTable[_localVariableTableIndex].startPC)
 			&& (_localVariableTable[_localVariableTableIndex].length == localVariableTypeTable[_localVariableTableIndex].length)) {
@@ -126,7 +129,7 @@ ClassFileOracle::LocalVariablesIterator::hasGenericSignature()
 
 	/* Scan for matching localVariableTypeTable entry */
 	for (U_16 localVariableTypeTableIndex = 0;
-			localVariableTypeTableIndex < _localVariablesInfo[_index].localVariableTypeTable->localVariableTypeTableLength;
+			localVariableTypeTableIndex < _localVariablesInfo[_index].localVariableTypeTableAttribute->localVariableTypeTableLength;
 			++localVariableTypeTableIndex) {
 		if ((_localVariableTable[_localVariableTableIndex].index == localVariableTypeTable[localVariableTypeTableIndex].index)
 				&& (_localVariableTable[_localVariableTableIndex].startPC == localVariableTypeTable[localVariableTypeTableIndex].startPC)
@@ -151,10 +154,10 @@ ClassFileOracle::ClassFileOracle(BufferManager *bufferManager, J9CfrClassFile *c
 	_doubleScalarStaticCount(0),
 	_memberAccessFlags(0),
 	_innerClassCount(0),
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 	_nestMembersCount(0),
 	_nestHost(0),
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 	_maxBranchCount(1), /* This is required to support buffer size calculations for stackmap support code */
 	_outerClassNameIndex(0),
 	_simpleNameIndex(0),
@@ -180,15 +183,18 @@ ClassFileOracle::ClassFileOracle(BufferManager *bufferManager, J9CfrClassFile *c
 	_typeAnnotationsAttribute(NULL),
 	_innerClasses(NULL),
 	_bootstrapMethodsAttribute(NULL),
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 	_nestMembers(NULL),
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 	_isClassContended(false),
 	_isClassUnmodifiable(context->isClassUnmodifiable()),
 	_isInnerClass(false),
 	_needsStaticConstantInit(false),
 	_isRecord(false),
-	_recordComponentCount(0)
+	_recordComponentCount(0),
+	_permittedSubclassesAttribute(NULL),
+	_isSealed(false),
+	_isClassValueBased(false)
 {
 	Trc_BCU_Assert_NotEquals( classFile, NULL );
 
@@ -225,6 +231,11 @@ ClassFileOracle::ClassFileOracle(BufferManager *bufferManager, J9CfrClassFile *c
 	if (OK == _buildResult) {
 		walkAttributes();
 	}
+	
+	if (_context->isClassHidden()) {
+		checkHiddenClass();
+	}
+	
 	if (OK == _buildResult) {
 		walkInterfaces();
 	}
@@ -439,7 +450,7 @@ ClassFileOracle::walkAttributes()
 			_isSynthetic = true;
 			break;
 		case CFR_ATTRIBUTE_SourceFile:
-			if (!hasSourceFile()) {
+			if (!hasSourceFile() && _context->shouldPreserveSourceFileName()) {
 				_sourceFile = (J9CfrAttributeSourceFile *)attrib;
 				markConstantUTF8AsReferenced(_sourceFile->sourceFileIndex);
 			}
@@ -457,6 +468,7 @@ ClassFileOracle::walkAttributes()
 				knownAnnotations = addAnnotationBit(knownAnnotations, JAVA8_CONTENDED_ANNOTATION);
 			}
 			knownAnnotations = addAnnotationBit(knownAnnotations, UNMODIFIABLE_ANNOTATION);
+			knownAnnotations = addAnnotationBit(knownAnnotations, VALUEBASED_ANNOTATION);
 			_annotationsAttribute = (J9CfrAttributeRuntimeVisibleAnnotations *)attrib;
 			if (0 == _annotationsAttribute->rawDataLength) {
 				UDATA foundAnnotations = walkAnnotations(_annotationsAttribute->numberOfAnnotations, _annotationsAttribute->annotations, knownAnnotations);
@@ -465,6 +477,9 @@ ClassFileOracle::walkAttributes()
 				}
 				if (containsKnownAnnotation(foundAnnotations, UNMODIFIABLE_ANNOTATION)) {
 					_isClassUnmodifiable = true;
+				}
+				if (containsKnownAnnotation(foundAnnotations, VALUEBASED_ANNOTATION)) {
+					_isClassValueBased = true;
 				}
 			}
 			break;
@@ -494,26 +509,47 @@ ClassFileOracle::walkAttributes()
 			walkRecordComponents((J9CfrAttributeRecord *)attrib);
 			break;
 		}
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+		case CFR_ATTRIBUTE_PermittedSubclasses: {
+			/* PermittedSubclasses verification is for Java version >= 15 */
+			if ((_classFile->majorVersion > 59)
+			|| ((59 == _classFile->majorVersion) && (65535 == _classFile->minorVersion))
+			) {
+				_isSealed = true;
+				_permittedSubclassesAttribute = (J9CfrAttributePermittedSubclasses *)attrib;
+				for (U_16 numberOfClasses = 0; numberOfClasses < _permittedSubclassesAttribute->numberOfClasses; numberOfClasses++) {
+					U_16 classCpIndex = _permittedSubclassesAttribute->classes[numberOfClasses];
+					markClassAsReferenced(classCpIndex);
+				}
+			}
+			break;
+		}
+#if JAVA_SPEC_VERSION >= 11
 		case CFR_ATTRIBUTE_NestMembers:
-			_nestMembers = (J9CfrAttributeNestMembers *)attrib;
-			_nestMembersCount = _nestMembers->numberOfClasses;
-			/* The classRefs are never resolved & therefore do not need to
-			 * be kept in the constant pool.
-			 */
-			for (U_16 i = 0; i < _nestMembersCount; i++) {
-				U_16 classNameIndex = UTF8_INDEX_FROM_CLASS_INDEX(_classFile->constantPool, _nestMembers->classes[i]);
-				markConstantUTF8AsReferenced(classNameIndex);
+			/* ignore CFR_ATTRIBUTE_NestMembers for hidden classes, as the nest members never know the name of hidden classes */
+			if (!_context->isClassHidden()) {
+				_nestMembers = (J9CfrAttributeNestMembers *)attrib;
+				_nestMembersCount = _nestMembers->numberOfClasses;
+				/* The classRefs are never resolved & therefore do not need to
+				 * be kept in the constant pool.
+				 */
+				for (U_16 i = 0; i < _nestMembersCount; i++) {
+					U_16 classNameIndex = UTF8_INDEX_FROM_CLASS_INDEX(_classFile->constantPool, _nestMembers->classes[i]);
+					markConstantUTF8AsReferenced(classNameIndex);
+				}
 			}
 			break;
 
 		case CFR_ATTRIBUTE_NestHost: {
-			U_16 hostClassIndex = ((J9CfrAttributeNestHost *)attrib)->hostClassIndex;
-			_nestHost = UTF8_INDEX_FROM_CLASS_INDEX(_classFile->constantPool, hostClassIndex);
-			markConstantUTF8AsReferenced(_nestHost);
+			/* Ignore CFR_ATTRIBUTE_NestHost for hidden classes, as the nest host of a hidden class is not decided by CFR_ATTRIBUTE_NestHost.
+			 * The nesthost of a hidden class is its host class if ClassOption.NESTMATE is used or itself if ClassOption.NESTMATE is not used. */
+			if (!_context->isClassHidden()) {
+				U_16 hostClassIndex = ((J9CfrAttributeNestHost *)attrib)->hostClassIndex;
+				_nestHost = UTF8_INDEX_FROM_CLASS_INDEX(_classFile->constantPool, hostClassIndex);
+				markConstantUTF8AsReferenced(_nestHost);
+			}
 			break;
 		}
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 		default:
 			Trc_BCU_ClassFileOracle_walkAttributes_UnknownAttribute((U_32)attrib->tag, (U_32)getUTF8Length(attrib->nameIndex), getUTF8Data(attrib->nameIndex), attrib->length);
 			break;
@@ -526,6 +562,38 @@ ClassFileOracle::walkAttributes()
 				_hasVerifyExcludeAttribute = true;
 			}
 		}
+	}
+}
+
+void
+ClassFileOracle::checkHiddenClass()
+{
+	ROMClassVerbosePhase v(_context, ClassFileAttributesAnalysis);
+	/* Hidden Class cannot be a record or enum. */
+	U_16 superClassNameIndex = getSuperClassNameIndex();
+	bool isEnum = false;
+	
+	/**
+	 * See test case jdk/java/lang/invoke/defineHiddenClass/BasicTest.emptyHiddenClass().
+	 * A normal Enum cannot be defined as a hidden class. But an empty enum class that does not
+	 * define constants of its type can still be defined as a hidden class. 
+	 * So when setting isEnum, add a check for field count. 
+	 */
+	if (0 != superClassNameIndex) {
+		isEnum = J9_ARE_ALL_BITS_SET(_classFile->accessFlags, CFR_ACC_ENUM) && 
+				J9UTF8_DATA_EQUALS(getUTF8Data(superClassNameIndex), getUTF8Length(superClassNameIndex), "java/lang/Enum", LITERAL_STRLEN("java/lang/Enum")) &&
+				(getFieldsCount() > 0);
+	}
+	if (_isRecord  || isEnum) {
+		PORT_ACCESS_FROM_PORT(_context->portLibrary());
+		char msg[] = "Hidden Class cannot be a record or enum";
+		UDATA len = sizeof(msg);
+		char *error = (char *) j9mem_allocate_memory(len, J9MEM_CATEGORY_CLASSES);
+		if (NULL != error) {
+			strcpy(error, msg);
+			_context->recordCFRError((U_8*)error);
+		}
+		_buildResult = InvalidClassType;
 	}
 }
 
@@ -568,11 +636,19 @@ ClassFileOracle::walkRecordComponents(J9CfrAttributeRecord *attrib)
 				break;
 			}
 			case CFR_ATTRIBUTE_RuntimeVisibleAnnotations: {
-				_recordComponentsInfo[i].annotationsAttribute = (J9CfrAttributeRuntimeVisibleAnnotations *) recordComponentAttr;
+				J9CfrAttributeRuntimeVisibleAnnotations *recordComponentAnnotations = (J9CfrAttributeRuntimeVisibleAnnotations *)recordComponentAttr;
+				if (0 == recordComponentAnnotations->rawDataLength) {
+					walkAnnotations(recordComponentAnnotations->numberOfAnnotations, recordComponentAnnotations->annotations, 0);
+				}
+				_recordComponentsInfo[i].annotationsAttribute = recordComponentAnnotations;
 				break;
 			}
 			case CFR_ATTRIBUTE_RuntimeVisibleTypeAnnotations: {
-				_recordComponentsInfo[i].typeAnnotationsAttribute = (J9CfrAttributeRuntimeVisibleTypeAnnotations *) recordComponentAttr;
+				J9CfrAttributeRuntimeVisibleTypeAnnotations *recordComponentTypeAnnotations = (J9CfrAttributeRuntimeVisibleTypeAnnotations *)recordComponentAttr;
+				if (0 == recordComponentTypeAnnotations->rawDataLength) {
+					walkTypeAnnotations(recordComponentTypeAnnotations->numberOfAnnotations, recordComponentTypeAnnotations->typeAnnotations);
+				}
+				_recordComponentsInfo[i].typeAnnotationsAttribute = recordComponentTypeAnnotations;
 				break;
 			}
 			default:
@@ -839,7 +915,7 @@ ClassFileOracle::walkTypeAnnotations(U_16 annotationsCount, J9CfrTypeAnnotation 
 			 *
 			 * In this case, force the typeIndex to a null value.
 			 * This will cause the parser to throw
-			 * an error if the the VM or application tries to retrieve the annotation.
+			 * an error if the VM or application tries to retrieve the annotation.
 			 */
 			annotation->typeIndex = 0;
 		}
@@ -1200,27 +1276,28 @@ ClassFileOracle::walkMethodCodeAttributeAttributes(U_16 methodIndex)
 					memset(_methodsInfo[methodIndex].localVariablesInfo, 0, codeAttribute->maxLocals * sizeof(LocalVariableInfo));
 				}
 
-				J9CfrAttributeLocalVariableTable *localVariableTable = (J9CfrAttributeLocalVariableTable *) attribute;
-				_methodsInfo[methodIndex].localVariablesCount += localVariableTable->localVariableTableLength;
-				if (0 != localVariableTable->localVariableTableLength) {
-					for (U_16 localVariableTableIndex = 0; localVariableTableIndex < localVariableTable->localVariableTableLength; ++localVariableTableIndex) {
-						U_16 index = localVariableTable->localVariableTable[localVariableTableIndex].index;
+				J9CfrAttributeLocalVariableTable *localVariableTableAttribute = (J9CfrAttributeLocalVariableTable *) attribute;
+				_methodsInfo[methodIndex].localVariablesCount += localVariableTableAttribute->localVariableTableLength;
+				if (0 != localVariableTableAttribute->localVariableTableLength) {
+					for (U_16 localVariableTableIndex = 0; localVariableTableIndex < localVariableTableAttribute->localVariableTableLength; ++localVariableTableIndex) {
+						U_16 index = localVariableTableAttribute->localVariableTable[localVariableTableIndex].index;
 						if (codeAttribute->maxLocals <= index) {
 							Trc_BCU_ClassFileOracle_walkMethodCodeAttributeAttributes_LocalVariableTableIndexOutOfBounds(
 									index, codeAttribute->maxLocals, (U_32)getUTF8Length(_classFile->methods[methodIndex].nameIndex), getUTF8Data(_classFile->methods[methodIndex].nameIndex));
 
 							throwGenericErrorWithCustomMsg(J9NLS_CFR_LVT_INDEX_OUTOFRANGE__ID, index);
 							break;
-						} else if (NULL == _methodsInfo[methodIndex].localVariablesInfo[index].localVariableTable) {
-							_methodsInfo[methodIndex].localVariablesInfo[index].localVariableTable = localVariableTable;
-						} else if (localVariableTable != _methodsInfo[methodIndex].localVariablesInfo[index].localVariableTable) {
+						} else if (NULL == _methodsInfo[methodIndex].localVariablesInfo[index].localVariableTableAttribute) {
+							_methodsInfo[methodIndex].localVariablesInfo[index].localVariableTableAttribute = localVariableTableAttribute;
+						} else if (localVariableTableAttribute != _methodsInfo[methodIndex].localVariablesInfo[index].localVariableTableAttribute) {
 							Trc_BCU_ClassFileOracle_walkMethodCodeAttributeAttributes_DuplicateLocalVariableTable(
-									(U_32)getUTF8Length(_classFile->methods[methodIndex].nameIndex), getUTF8Data(_classFile->methods[methodIndex].nameIndex), localVariableTable, _methodsInfo[methodIndex].localVariablesInfo[index].localVariableTable);
+									(U_32)getUTF8Length(_classFile->methods[methodIndex].nameIndex), getUTF8Data(_classFile->methods[methodIndex].nameIndex), 
+									localVariableTableAttribute, _methodsInfo[methodIndex].localVariablesInfo[index].localVariableTableAttribute);
 							_buildResult = GenericError;
 							break;
 						}
-						markConstantUTF8AsReferenced(localVariableTable->localVariableTable[localVariableTableIndex].nameIndex);
-						markConstantUTF8AsReferenced(localVariableTable->localVariableTable[localVariableTableIndex].descriptorIndex);
+						markConstantUTF8AsReferenced(localVariableTableAttribute->localVariableTable[localVariableTableIndex].nameIndex);
+						markConstantUTF8AsReferenced(localVariableTableAttribute->localVariableTable[localVariableTableIndex].descriptorIndex);
 					}
 				}
 			}
@@ -1238,21 +1315,22 @@ ClassFileOracle::walkMethodCodeAttributeAttributes(U_16 methodIndex)
 					memset(_methodsInfo[methodIndex].localVariablesInfo, 0, codeAttribute->maxLocals * sizeof(LocalVariableInfo));
 				}
 
-				J9CfrAttributeLocalVariableTypeTable *localVariableTypeTable = (J9CfrAttributeLocalVariableTypeTable *) attribute;
-				if (0 != localVariableTypeTable->localVariableTypeTableLength) {
-					for (U_16 localVariableTypeTableIndex = 0; localVariableTypeTableIndex < localVariableTypeTable->localVariableTypeTableLength; ++localVariableTypeTableIndex) {
-						J9CfrLocalVariableTypeTableEntry *lvttEntry = &(localVariableTypeTable->localVariableTypeTable[localVariableTypeTableIndex]);
+				J9CfrAttributeLocalVariableTypeTable *localVariableTypeTableAttribute = (J9CfrAttributeLocalVariableTypeTable *) attribute;
+				if (0 != localVariableTypeTableAttribute->localVariableTypeTableLength) {
+					for (U_16 localVariableTypeTableIndex = 0; localVariableTypeTableIndex < localVariableTypeTableAttribute->localVariableTypeTableLength; ++localVariableTypeTableIndex) {
+						J9CfrLocalVariableTypeTableEntry *lvttEntry = &(localVariableTypeTableAttribute->localVariableTypeTable[localVariableTypeTableIndex]);
 						const U_16 index = lvttEntry->index;
 						if (codeAttribute->maxLocals <= index) {
 							Trc_BCU_ClassFileOracle_walkMethodCodeAttributeAttributes_LocalVariableTypeTableIndexOutOfBounds(
 									index, codeAttribute->maxLocals, (U_32)getUTF8Length(_classFile->methods[methodIndex].nameIndex), getUTF8Data(_classFile->methods[methodIndex].nameIndex));
 							throwGenericErrorWithCustomMsg(J9NLS_CFR_LVTT_INDEX_OUTOFRANGE__ID, index);
 							break;
-						} else if (NULL == _methodsInfo[methodIndex].localVariablesInfo[index].localVariableTypeTable) {
-							_methodsInfo[methodIndex].localVariablesInfo[index].localVariableTypeTable = localVariableTypeTable;
-						} else if (localVariableTypeTable != _methodsInfo[methodIndex].localVariablesInfo[index].localVariableTypeTable) {
+						} else if (NULL == _methodsInfo[methodIndex].localVariablesInfo[index].localVariableTypeTableAttribute) {
+							_methodsInfo[methodIndex].localVariablesInfo[index].localVariableTypeTableAttribute = localVariableTypeTableAttribute;
+						} else if (localVariableTypeTableAttribute != _methodsInfo[methodIndex].localVariablesInfo[index].localVariableTypeTableAttribute) {
 							Trc_BCU_ClassFileOracle_walkMethodCodeAttributeAttributes_DuplicateLocalVariableTypeTable(
-									(U_32)getUTF8Length(_classFile->methods[methodIndex].nameIndex), getUTF8Data(_classFile->methods[methodIndex].nameIndex), localVariableTypeTable, _methodsInfo[methodIndex].localVariablesInfo[index].localVariableTypeTable);
+									(U_32)getUTF8Length(_classFile->methods[methodIndex].nameIndex), getUTF8Data(_classFile->methods[methodIndex].nameIndex), 
+									localVariableTypeTableAttribute, _methodsInfo[methodIndex].localVariablesInfo[index].localVariableTypeTableAttribute);
 							_buildResult = GenericError;
 							break;
 						}
@@ -1260,16 +1338,18 @@ ClassFileOracle::walkMethodCodeAttributeAttributes(U_16 methodIndex)
 						/* 4.7.14: There may be no more than one LocalVariableTypeTable attribute per local variable in the attributes table of a Code attribute. 
 						 * The entry is unique with its startPC, length, and index. */
 						for (U_16 localVariableTypeTableCompareIndex = 0; localVariableTypeTableCompareIndex < localVariableTypeTableIndex; ++localVariableTypeTableCompareIndex) {
-							J9CfrLocalVariableTypeTableEntry *lvttCompareEntry = &(localVariableTypeTable->localVariableTypeTable[localVariableTypeTableCompareIndex]);
+							J9CfrLocalVariableTypeTableEntry *lvttCompareEntry = &(localVariableTypeTableAttribute->localVariableTypeTable[localVariableTypeTableCompareIndex]);
 							if ((lvttEntry->startPC == lvttCompareEntry->startPC)
 								&& (lvttEntry->length == lvttCompareEntry->length)
+								&& (lvttEntry->nameIndex == lvttCompareEntry->nameIndex)
+								&& (lvttEntry->signatureIndex == lvttCompareEntry->signatureIndex) 
 								&& (index == lvttCompareEntry->index) 
 							) {
 								throwGenericErrorWithCustomMsg(J9NLS_CFR_LVTT_DUPLICATE__ID, index);
 								break;
 							}
 						}
-						markConstantUTF8AsReferenced(localVariableTypeTable->localVariableTypeTable[localVariableTypeTableIndex].signatureIndex);
+						markConstantUTF8AsReferenced(localVariableTypeTableAttribute->localVariableTypeTable[localVariableTypeTableIndex].signatureIndex);
 					}
 				}
 			}
@@ -1290,6 +1370,75 @@ ClassFileOracle::walkMethodCodeAttributeAttributes(U_16 methodIndex)
 		}
 	}
 
+	/* Verify that each LVTT entry has a matching local variable. Since there is no guaranteed order
+	 * for code attributes, this check must be performed after all attributes are processed.
+	 * 
+	 * According to the JVM spec: "Each entry in the local_variable_type_table array ... 
+	 * indicates the index into the local variable array of the current frame at which 
+	 * that local variable can be found."
+	 * 
+	 * While multiple LocalVariableTypeTable attributes may exist according to the spec, upon observation 
+	 * it is the common case for 'javac' to generate only one attribute per method. To take advantage of this 
+	 * I tracked the last LVTT attribute that has been verified so the second loop search is not repeated. 
+	 * Because of this for most cases the second loop will only be executed once.
+	 * 
+	 * It is also common to see LVT and LVTT entries in the same order though the spec makes no ordering guaruntees. 
+	 * To take advantage of this each search for an LVT match starts from the index where the previous match was 
+	 * found saving iterations.
+	 * 
+	 * With these two optimizations the common runtime for this verification step should be:
+	 * maxLocals + localVariableTypeTableLength + localVariableTableLength
+	 */
+	if (_context->shouldPreserveLocalVariablesInfo() && (NULL != _methodsInfo[methodIndex].localVariablesInfo)) {
+		J9CfrAttributeLocalVariableTypeTable *lastLVTTAttribute = NULL; /* track last processed LVTT attribute */
+
+		for (UDATA varIndex = 0; varIndex < codeAttribute->maxLocals; varIndex++) {
+			J9CfrAttributeLocalVariableTable *localVariableTableAttribute = _methodsInfo[methodIndex].localVariablesInfo[varIndex].localVariableTableAttribute;
+			J9CfrAttributeLocalVariableTypeTable *localVariableTypeTableAttribute = _methodsInfo[methodIndex].localVariablesInfo[varIndex].localVariableTypeTableAttribute;
+
+			/* This may occur if the variable type does not require signature information, or if there is no entry for this variable. */
+			if ((NULL == localVariableTypeTableAttribute) || (NULL == localVariableTableAttribute)) {
+				continue;
+			}
+
+			/* if LVTT has been processed previously, skip to the next variable */
+			if (NULL == lastLVTTAttribute) {
+				lastLVTTAttribute = localVariableTypeTableAttribute;
+			} else if (localVariableTypeTableAttribute == lastLVTTAttribute) {
+				continue;
+			}
+
+			/* Verify that each entry in the LocalVariableTypeTable has a match */
+			U_16 lvtIndex = 0; /* start at the index of the last LVT match since LVT and LVTTs are likely in the same order. */
+			for (U_16 lvttIndex = 0; lvttIndex < localVariableTypeTableAttribute->localVariableTypeTableLength; lvttIndex++) {
+				J9CfrLocalVariableTypeTableEntry *lvttEntry = &(localVariableTypeTableAttribute->localVariableTypeTable[lvttIndex]);
+				UDATA foundMatch = FALSE;
+
+				/* Search for match in LVT attribute with matching index. */
+				for (U_16 lvtCount = 0; lvtCount < localVariableTableAttribute->localVariableTableLength; lvtCount++) {
+					J9CfrLocalVariableTableEntry *lvtEntry = &(localVariableTableAttribute->localVariableTable[lvtIndex]);
+
+					/* Update index for next iteration, rolling over to 0 if necessary. */
+					lvtIndex = (lvtIndex + 1) % localVariableTableAttribute->localVariableTableLength;
+
+					if ((lvttEntry->startPC == lvtEntry->startPC)
+						&& (lvttEntry->length == lvtEntry->length)
+						&& (lvttEntry->nameIndex == lvtEntry->nameIndex)
+						&& (lvttEntry->index == lvtEntry->index)
+					) {
+						foundMatch = TRUE;
+						break;
+					}
+				}
+
+				/* throw error if there is no variable match. */
+				if (!foundMatch) {
+					throwGenericErrorWithCustomMsg(J9NLS_CFR_LVTT_DOES_NOT_MATCH_LVT__ID, lvttIndex);
+				}
+			}
+		}
+	}
+	
 	if ((OK == _buildResult) && (0 != lineNumbersCount)) {
 		ROMCLASS_VERBOSE_PHASE_HOT(_context, CompressLineNumbers);
 		compressLineNumberTable(methodIndex, lineNumbersCount);
@@ -2254,16 +2403,29 @@ ClassFileOracle::shouldConvertInvokeVirtualToMethodHandleBytecodeForMethodRef(U_
 	J9CfrConstantPoolInfo *name = &_classFile->constantPool[nas->slot1];
 	UDATA result = 0;
 
-	/* Invoking against java.lang.invoke.MethodHandle? */
+	/* Invoking against java.lang.invoke.MethodHandle. */
 	if (J9UTF8_LITERAL_EQUALS(targetClassName->bytes, targetClassName->slot1, "java/lang/invoke/MethodHandle")) {
 		if (J9UTF8_LITERAL_EQUALS(name->bytes, name->slot1, "invokeExact")) {
 			/* MethodHandle.invokeExact */
 			result = CFR_BC_invokehandle;
 		} else if (J9UTF8_LITERAL_EQUALS(name->bytes, name->slot1, "invoke")) {
 			/* MethodHandle.invoke */
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+ 			result = CFR_BC_invokehandle;
+#else /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 			result = CFR_BC_invokehandlegeneric;
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 		}
 	}
+
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+	/* Invoking against java.lang.invoke.VarHandle. */
+	if (J9UTF8_LITERAL_EQUALS(targetClassName->bytes, targetClassName->slot1, "java/lang/invoke/VarHandle")
+	&& VM_VMHelpers::isPolymorphicVarHandleMethod((const U_8 *)name->bytes, name->slot1)
+	) {
+		result = CFR_BC_invokehandle;
+	}
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 
 	return result;
 }
@@ -2290,18 +2452,20 @@ ClassFileOracle::shouldConvertInvokeVirtualToInvokeSpecialForMethodRef(U_16 meth
 		return false;
 	}
 
-	/* check for private methods (this is unlikely to be generated by a working compiler, but it
-		is legal, so check for the case and force it to be an invokespecial) */
+	/* check for private methods (this is unlikely to be generated by a working compiler,
+	 * but it is legal, so check for the case and force it to be an invokespecial)
+	 */
 	// TODO this hurts performance significantly - can we get away with not doing this? E.g. does it inflate vtables? Does the JIT do "the right thing"?
-	if ( className->slot1 == targetClassName->slot1 && strncmp((char *) className->bytes, (char *)targetClassName->bytes, className->slot1) == 0) {
+	if (J9UTF8_DATA_EQUALS(className->bytes, className->slot1, targetClassName->bytes, targetClassName->slot1)) {
 		for (UDATA methodIndex = 0; methodIndex < _classFile->methodsCount; methodIndex++) {
 			J9CfrMethod* method = &_classFile->methods[methodIndex];
 			J9CfrConstantPoolInfo *aName = &_classFile->constantPool[method->nameIndex];
 			J9CfrConstantPoolInfo *aSig = &_classFile->constantPool[method->descriptorIndex];
-			if (aName->slot1 == name->slot1
-				&& aSig->slot1 == sig->slot1
-				&& strncmp((char *) aName->bytes, (char *) name->bytes, name->slot1) == 0
-				&& strncmp((char *) aSig->bytes, (char *) sig->bytes, sig->slot1) == 0) {
+			if ((aName->slot1 == name->slot1)
+			&& (aSig->slot1 == sig->slot1)
+			&& (0 == memcmp(aName->bytes, name->bytes, name->slot1))
+			&& (0 == memcmp(aSig->bytes, sig->bytes, sig->slot1))
+			) {
 				/* we found the method -- is it private or final? */
 				return (method->accessFlags & (CFR_ACC_PRIVATE | CFR_ACC_FINAL)) != 0;
 			}
@@ -2653,4 +2817,3 @@ ClassFileOracle::markConstantBasedOnCpType(U_16 cpIndex, bool assertNotDoubleOrL
 		Trc_BCU_Assert_ShouldNeverHappen();
 	}
 }
-

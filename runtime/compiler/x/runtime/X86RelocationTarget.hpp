@@ -66,7 +66,7 @@ class TR_X86RelocationTarget : public TR_RelocationTarget
       
       virtual void storeRelativeAddressSequence(uint8_t *address, uint8_t *reloLocation, uint32_t seqNumber) 
          {
-         address = (uint8_t *)((intptrj_t)address - (intptrj_t)(reloLocation + 4));
+         address = (uint8_t *)((intptr_t)address - (intptr_t)(reloLocation + 4));
          storeAddressSequence(address, reloLocation, seqNumber);
          }
       
@@ -86,7 +86,6 @@ class TR_X86RelocationTarget : public TR_RelocationTarget
 
       virtual void patchNonVolatileFieldMemoryFence(J9ROMFieldShape* resolvedField, UDATA cpAddr, U_8 descriptorByte, U_8 *instructionAddress, U_8 *snippetStartAddress, J9JavaVM *javaVM);
 
-      virtual void patchMTIsolatedOffset(uint32_t offset, uint8_t *reloLocation);
    };
 
 class TR_AMD64RelocationTarget : public TR_X86RelocationTarget

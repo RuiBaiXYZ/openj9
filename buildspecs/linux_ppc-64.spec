@@ -136,7 +136,6 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="env_sharedLibsUseGlobalTable" value="true"/>
 		<flag id="gc_batchClearTLH" value="true"/>
 		<flag id="gc_debugAsserts" value="true"/>
-		<flag id="gc_idleHeapManager" value="true"/>
 		<flag id="gc_inlinedAllocFields" value="true"/>
 		<flag id="gc_enableDoubleMap" value="true"/>
 		<flag id="gc_minimumObjectSize" value="true"/>
@@ -228,7 +227,6 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="opt_jvmti" value="true"/>
 		<flag id="opt_jxeLoadSupport" value="true"/>
 		<flag id="opt_memoryCheckSupport" value="true"/>
-		<flag id="opt_methodHandle" value="true"/>
 		<flag id="opt_multiVm" value="true"/>
 		<flag id="opt_panama" value="false"/>
 		<flag id="opt_reflect" value="true"/>

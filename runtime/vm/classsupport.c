@@ -108,7 +108,7 @@ internalFindArrayClass(J9VMThread* vmThread, J9Module *j9module, UDATA arity, U_
 		/* the first level of arity is already present in the array class */
 		arity -= 1;
 
-	} else if (firstChar == 'L' && lastChar == ';') {
+	} else if (IS_REF_OR_VAL_SIGNATURE(firstChar) && lastChar == ';') {
 
 		name += arity + 1; /* 1 for 'L' */
 		length -= arity + 2; /* 2 for 'L and ';' */
@@ -223,7 +223,17 @@ internalCreateArrayClass(J9VMThread* vmThread, J9ROMArrayClass* romClass, J9Clas
 #endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 
 	if (elementInitSuccess) {
-		if (J9_ARE_ANY_BITS_SET(elementClass->classFlags, J9ClassIsAnonymous)) {
+		if (J9ROMCLASS_IS_HIDDEN(elementClass->romClass)) {
+			options |= (J9_FINDCLASS_FLAG_HIDDEN | J9_FINDCLASS_FLAG_UNSAFE);
+			if (J9ROMCLASS_IS_OPTIONNESTMATE_SET(elementClass->romClass)) {
+				options |= J9_FINDCLASS_FLAG_CLASS_OPTION_NESTMATE;
+			}
+			if (J9ROMCLASS_IS_OPTIONSTRONG_SET(elementClass->romClass)) {
+				options |= J9_FINDCLASS_FLAG_CLASS_OPTION_STRONG;
+			} else {
+				options |= J9_FINDCLASS_FLAG_ANON;
+			}
+		} else if (J9_ARE_ANY_BITS_SET(elementClass->classFlags, J9ClassIsAnonymous)) {
 			options = J9_FINDCLASS_FLAG_ANON;
 		}
 
@@ -278,7 +288,7 @@ peekClassHashTable(J9VMThread* currentThread, J9ClassLoader* classLoader, U_8* c
 }
 
 J9Class*  
-internalFindClassString(J9VMThread* currentThread, j9object_t moduleName, j9object_t className, J9ClassLoader* classLoader, UDATA options)
+internalFindClassString(J9VMThread* currentThread, j9object_t moduleName, j9object_t className, J9ClassLoader* classLoader, UDATA options, UDATA allowedBitsForClassName)
 {
 	J9Class *result = NULL;
 	J9JavaVM* vm = currentThread->javaVM;
@@ -296,31 +306,42 @@ internalFindClassString(J9VMThread* currentThread, j9object_t moduleName, j9obje
 	if (NULL == result) {
 		J9Module **findResult = NULL;
 		J9Module *j9module = NULL;
-		char localBuf[J9VM_PACKAGE_NAME_BUFFER_LENGTH];
-		char *utf8Name = NULL;
+		U_8 localBuf[J9VM_PACKAGE_NAME_BUFFER_LENGTH];
+		U_8 *utf8Name = NULL;
 		UDATA utf8Length = 0;
+		UDATA stringFlags = J9_STR_NULL_TERMINATE_RESULT;
 		PORT_ACCESS_FROM_JAVAVM(vm);
 
-		if (NULL != moduleName) {
-			J9Module module = {0};
-			J9Module *modulePtr = &module;
-
-			modulePtr->moduleName = moduleName;
-			findResult = hashTableFind(classLoader->moduleHashTable, &modulePtr);
-			if (NULL != findResult) {
-				j9module = *findResult;
-			}
+		if (CLASSNAME_INVALID == allowedBitsForClassName) {
+			stringFlags |= J9_STR_XLAT;
 		}
 
-		utf8Name = copyStringToUTF8WithMemAlloc(currentThread, className, J9_STR_NULL_TERMINATE_RESULT | J9_STR_XLAT, "", 0, localBuf, J9VM_PACKAGE_NAME_BUFFER_LENGTH, &utf8Length);
+		utf8Name = (U_8*)copyStringToUTF8WithMemAlloc(currentThread, className, stringFlags, "", 0, (char *)localBuf, J9VM_PACKAGE_NAME_BUFFER_LENGTH, &utf8Length);
 		if (NULL == utf8Name) {
 			/* Throw out-of-memory */
 			setNativeOutOfMemoryError(currentThread, 0, 0);
 			return NULL;
 		}
-		result = internalFindClassInModule(currentThread, j9module, (U_8 *)utf8Name, utf8Length, classLoader, options);
-		if (utf8Name != localBuf) {
-			j9mem_free_memory(utf8Name);
+
+		/* Make sure the name is legal */
+		if ((CLASSNAME_INVALID == allowedBitsForClassName)
+			|| (CLASSNAME_INVALID != verifyQualifiedName(currentThread, utf8Name, utf8Length, allowedBitsForClassName))
+		) {
+			if (NULL != moduleName) {
+				J9Module module = {0};
+				J9Module *modulePtr = &module;
+
+				modulePtr->moduleName = moduleName;
+				findResult = hashTableFind(classLoader->moduleHashTable, &modulePtr);
+				if (NULL != findResult) {
+					j9module = *findResult;
+				}
+			}
+
+			result = internalFindClassInModule(currentThread, j9module, utf8Name, utf8Length, classLoader, options);
+			if (utf8Name != localBuf) {
+				j9mem_free_memory(utf8Name);
+			}
 		}
 	}
 	return result;
@@ -346,7 +367,7 @@ internalRunPreInitInstructions(J9Class * ramClass, J9VMThread * vmThread)
 		U_32 description = 0;
 		UDATA i;
 		
-		BOOLEAN isAnonClass = J9_ARE_ANY_BITS_SET(romClass->extraModifiers, J9AccClassAnonClass);
+		BOOLEAN isAnonClass = J9_ARE_ANY_BITS_SET(romClass->extraModifiers, J9AccClassAnonClass | J9AccClassHidden);
 
 		for (i = 0; i < ramConstantPoolCount; ++i) {
 			if (descriptionCount == 0) {
@@ -525,21 +546,16 @@ callFindLocallyDefinedClass(J9VMThread* vmThread, J9Module *j9module, U_8* class
 	/* localBuffer should not be NULL */
 	Assert_VM_true(NULL != localBuffer);
 
-	omrthread_monitor_enter(vmThread->javaVM->classMemorySegments->segmentMutex);
 	if (NULL != dynamicLoadBuffers) {
 		 J9ClassPathEntry* classPathEntries = NULL;
 		 if (classLoader == vmThread->javaVM->systemClassLoader) {
 			 classPathEntries = classLoader->classPathEntries;
 		 }
-
-
 		 TRIGGER_J9HOOK_VM_FIND_LOCALLY_DEFINED_CLASS(vmThread->javaVM->hookInterface, vmThread, classLoader, j9module, (char*)className, classNameLength,
 						classPathEntries, classLoader->classPathEntryCount, -1, NULL, 0, 0,
 						(IDATA *) &localBuffer->entryIndex, returnVal);
 
 		findResult = (IDATA) returnVal;
-
- 		omrthread_monitor_exit(vmThread->javaVM->classMemorySegments->segmentMutex);
 		if (0 == findResult) {
 			TRIGGER_J9HOOK_VM_FIND_LOCALLY_DEFINED_CLASS_FROM_FILESYSTEM(vmThread->javaVM->hookInterface, 
 																		 vmThread, 
@@ -570,8 +586,6 @@ callFindLocallyDefinedClass(J9VMThread* vmThread, J9Module *j9module, U_8* class
 				localBuffer->loadLocationType = LOAD_LOCATION_CLASSPATH;
 			}
 		}
-	} else {
- 		omrthread_monitor_exit(vmThread->javaVM->classMemorySegments->segmentMutex);
 	}
 	return findResult;
 }

@@ -132,11 +132,11 @@ restoreBlockingEnterObject(J9VMThread *currentThread, bool collapseFrame)
  *
  * @return the object
  */
-IDATA
+UDATA
 objectMonitorEnterBlocking(J9VMThread *currentThread)
 {
 	Trc_VM_objectMonitorEnterBlocking_Entry(currentThread);
-	IDATA result = 0;
+	UDATA result = 0;
 	j9object_t object = J9VMTHREAD_BLOCKINGENTEROBJECT(currentThread, currentThread);
 	J9Class *ramClass = J9OBJECT_CLAZZ(currentThread, object);
 	/* Throughout this function, note that inlineGetLockAddress cannot run into out of memory case because
@@ -201,7 +201,7 @@ restart:
 			}
 			/* In a Concurrent GC where monitor object can *move* in a middle of GC cycle,
 			 * we need a proper barrier to get an up-to-date location of the monitor object */
-			j9objectmonitor_t volatile *lwEA = VM_ObjectMonitor::inlineGetLockAddress(currentThread, J9MONITORTABLE_OBJECT_LOAD(currentThread, &((J9ThreadMonitor*)monitor)->userData));
+			j9objectmonitor_t volatile *lwEA = VM_ObjectMonitor::inlineGetLockAddress(currentThread, J9WEAKROOT_OBJECT_LOAD(currentThread, &((J9ThreadMonitor*)monitor)->userData));
 			j9objectmonitor_t lockInLoop = J9_LOAD_LOCKWORD(currentThread, lwEA);
 			/* Change lockword from Learning to Flat if in Learning state. */
 			while (OBJECT_HEADER_LOCK_LEARNING == (lockInLoop & (OBJECT_HEADER_LOCK_LEARNING | OBJECT_HEADER_LOCK_INFLATED))) {
@@ -304,16 +304,39 @@ success:
  * 	1 if blocking is necessary
  * 	0 if out of memory
  */
-IDATA
+UDATA
 objectMonitorEnterNonBlocking(J9VMThread *currentThread, j9object_t object)
 {
-	IDATA result = (IDATA)(UDATA)object;
+	UDATA result = (UDATA)object;
 	j9objectmonitor_t volatile *lwEA = VM_ObjectMonitor::inlineGetLockAddress(currentThread, object);
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES) || (JAVA_SPEC_VERSION >= 16)
+	J9Class * objClass = J9OBJECT_CLAZZ(currentThread, object);
+#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) || (JAVA_SPEC_VERSION >= 16) */
+
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+	if (J9_IS_J9CLASS_VALUETYPE(objClass)) {
+		result = J9_OBJECT_MONITOR_VALUE_TYPE_IMSE;
+		goto done;
+	}
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */	
+#if JAVA_SPEC_VERSION >= 16
+	if (J9_IS_J9CLASS_VALUEBASED(objClass)) {
+		U_32 runtimeFlags2 = currentThread->javaVM->extendedRuntimeFlags2;
+		if (J9_ARE_ALL_BITS_SET(runtimeFlags2, J9_EXTENDED_RUNTIME2_VALUE_BASED_EXCEPTION)) {
+			result = J9_OBJECT_MONITOR_VALUE_TYPE_IMSE;
+			goto done;	
+		} else if (J9_ARE_ALL_BITS_SET(runtimeFlags2, J9_EXTENDED_RUNTIME2_VALUE_BASED_WARNING)) {
+			PORT_ACCESS_FROM_VMC(currentThread);
+			const J9UTF8* className = J9ROMCLASS_CLASSNAME(J9OBJECT_CLAZZ(currentThread, object)->romClass);
+			j9nls_printf(PORTLIB, J9NLS_WARNING, J9NLS_VM_ERROR_BYTECODE_OBJECTREF_CANNOT_BE_VALUE_BASED, J9UTF8_LENGTH(className), J9UTF8_DATA(className));
+		}
+	}
+#endif /* JAVA_SPEC_VERSION >= 16 */
 	
 restart:
 	if (NULL == lwEA) {
 		/* out of memory */
-		result = 0;
+		result = J9_OBJECT_MONITOR_OOM;
 		goto done;
 	} else {
 		/* check for a recursive flat lock */
@@ -365,7 +388,7 @@ restart:
 
 				if (lock == VM_ObjectMonitor::compareAndSwapLockword(currentThread, lwEA, lock, incremented, false)) {
 					if (0 == J9_FLATLOCK_COUNT(lock)) {
-						VM_AtomicSupport::monitorEnterBarrier();
+						VM_AtomicSupport::readBarrier();
 					}
 					if (reservedTransition) {
 						/* Transition from Learning to Reserved occurred so the Reserved Counter in the object's J9Class is incremented by 1. */
@@ -427,7 +450,7 @@ restart:
 						objectMonitor = objectMonitorInflate(currentThread, object, lock);
 						if (NULL == objectMonitor) {
 							/* out of memory */
-							result = 0;
+							result = J9_OBJECT_MONITOR_OOM;
 							goto done;
 						}
 					} else {
@@ -442,7 +465,7 @@ restart:
 						 */
 						if (NULL == monitorTableAt(currentThread, object)) {
 							/* out of memory */
-							result = 0;
+							result = J9_OBJECT_MONITOR_OOM;
 							goto done;
 						}
 						goto wouldBlock;
@@ -461,7 +484,7 @@ restart:
 wouldBlock:
 	/* unable to get thin lock by spinning - follow blocking path */
 	J9VMTHREAD_SET_BLOCKINGENTEROBJECT(currentThread, currentThread, object);
-	result = 1;
+	result = J9_OBJECT_MONITOR_BLOCKING;
 done:
 	return result;
 }
@@ -529,7 +552,7 @@ spinOnFlatLock(J9VMThread *currentThread, j9objectmonitor_t volatile *lwEA, j9ob
 					if (0 == J9_FLATLOCK_COUNT(lock)) {
 						if (lock == VM_ObjectMonitor::compareAndSwapLockword(currentThread, lwEA, lock, (j9objectmonitor_t)(UDATA)currentThread, false)) {
 							/* compare and swap succeeded */
-							VM_AtomicSupport::monitorEnterBarrier();
+							VM_AtomicSupport::readBarrier();
 							rc = true;
 
 							/* Transition from Learning to Flat occurred so the Cancel Counter in the object's J9Class is incremented by 1. */

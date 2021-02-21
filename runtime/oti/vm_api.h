@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -29,7 +29,6 @@
 *
 * This file contains public function prototypes and
 * type definitions for the VM module.
-*
 */
 
 #include "j9.h"
@@ -357,12 +356,14 @@ internalCreateArrayClass(J9VMThread* vmThread, J9ROMArrayClass* romClass, J9Clas
  * @param className String object representing name of the class to load
  * @param classLoader J9ClassLoader to use
  * @param options load options such as J9_FINDCLASS_FLAG_EXISTING_ONLY
+ * @param allowedBitsForClassName the allowed bits for a valid class name,
+ *        including CLASSNAME_INVALID, CLASSNAME_VALID_NON_ARRARY, CLASSNAME_VALID_ARRARY, or CLASSNAME_VALID.
  * 
  * @return pointer to J9Class if success, NULL if fail
  *
  */
 J9Class*  
-internalFindClassString(J9VMThread* currentThread, j9object_t moduleName, j9object_t className, J9ClassLoader* classLoader, UDATA options);
+internalFindClassString(J9VMThread* currentThread, j9object_t moduleName, j9object_t className, J9ClassLoader* classLoader, UDATA options, UDATA allowedBitsForClassName);
 
 /**
  * Load the class with the specified name in the given module.
@@ -433,6 +434,35 @@ contendedLoadTableFree(J9JavaVM* vm);
 #define J9_CP_INDEX_NONE -1
 
 /**
+ * Checks stack to see if element exists, if not adds the new element and returns TRUE. Otherwise, returns FALSE
+ *
+ * @param vmThread vmthread token
+ * @param classloader loader associated with current element
+ * @param clazz either romclass or ramclass
+ * @param stack the loading or linking stack
+ * @param comparator handle to function that will compare elements
+ * @param maxStack maximum concurrent classloads or class linkage
+ * @param stackpool pool for stack elements
+ * @param throwException flag to indicate if exception should be thrown in the case of cirularity
+ * @param ownsClassTableMutex flag to indicate if class table mutex is being held
+ * @result TRUE is element exists in stack, FALSE otherwise
+ */
+BOOLEAN
+verifyLoadingOrLinkingStack(J9VMThread *vmThread, J9ClassLoader *classLoader, void *clazz,
+		J9StackElement **stack, BOOLEAN (*comparator)(void *, J9StackElement *), UDATA maxStack,
+		J9Pool *stackpool, BOOLEAN throwException, BOOLEAN ownsClassTableMutex);
+
+/**
+ * Pops entry from stack
+ *
+ * @param vmThread vmthread token
+ * @param stack the loading or linking stack
+ * @param stackpool pool for stack elements
+ */
+void
+popLoadingOrLinkingStack(J9VMThread *vmThread, J9StackElement **stack, J9Pool *stackpool);
+
+/**
 * @brief
 * @param *vmThread
 * @param *classLoader
@@ -493,7 +523,11 @@ getJimModules(J9VMThread *currentThread);
 * @return void
 */
 void
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+calculateInstanceDescription( J9VMThread *vmThread, J9Class *ramClass, J9Class *ramSuperClass, UDATA *storage, J9ROMFieldOffsetWalkState *walkState, J9ROMFieldOffsetWalkResult *walkResult, BOOLEAN hasReferences);
+#else /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 calculateInstanceDescription( J9VMThread *vmThread, J9Class *ramClass, J9Class *ramSuperClass, UDATA *storage, J9ROMFieldOffsetWalkState *walkState, J9ROMFieldOffsetWalkResult *walkResult);
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 
 #define NO_LOCKWORD_NEEDED (UDATA) -1
 #define LOCKWORD_NEEDED		(UDATA) -2
@@ -549,15 +583,19 @@ internalExceptionDescribe(J9VMThread *vmThread);
 * @param exception
 * @param vmThread
 * @param userData
-* @param method
+* @param bytecodeOffset
+* @param romClass
+* @param romMethod
 * @param fileName
-* @param lineNumber)
+* @param lineNumber
+* @param classLoader
+* @param ramClass)
 * @param userData
 * @param pruneConstructors
 * @return UDATA
 */
 UDATA
-iterateStackTrace(J9VMThread * vmThread, j9object_t* exception,  UDATA  (*callback) (J9VMThread * vmThread, void * userData, J9ROMClass * romClass, J9ROMMethod * romMethod, J9UTF8 * fileName, UDATA lineNumber, J9ClassLoader* classLoader), void * userData, UDATA pruneConstructors);
+iterateStackTrace(J9VMThread * vmThread, j9object_t* exception,  UDATA  (*callback) (J9VMThread * vmThread, void * userData, UDATA bytecodeOffset, J9ROMClass * romClass, J9ROMMethod * romMethod, J9UTF8 * fileName, UDATA lineNumber, J9ClassLoader* classLoader, J9Class* ramClass), void * userData, UDATA pruneConstructors);
 
 
 /* ---------------- exceptionsupport.c ---------------- */
@@ -834,6 +872,19 @@ setClassLoadingConstraintSignatureError(J9VMThread *currentThread, J9ClassLoader
 void  
 setClassLoadingConstraintOverrideError(J9VMThread *currentThread, J9UTF8 *newClassNameUTF, J9ClassLoader *loader1, J9UTF8 *class1NameUTF, J9ClassLoader *loader2, J9UTF8 *class2NameUTF, J9UTF8 *exceptionClassNameUTF, U_8 *methodName, UDATA methodNameLength, U_8 *signature, UDATA signatureLength);
 
+/* ---------------- extendedMessageNPE.cpp ---------------- */
+
+/**
+ * Return an extended NPE message.
+ *
+ * Note: the caller is responsible for freeing the returned string if it is not NULL.
+ *
+ * @param npeMsgData - the J9NPEMessageData structure holding romClass/romMethod/npePC
+ * @return char* An extended NPE message or NULL if such a message can't be generated
+ */
+char*
+getNPEMessage(J9NPEMessageData *npeMsgData);
+
 /* ---------------- gphandle.c ---------------- */
 
 struct J9PortLibrary;
@@ -936,6 +987,15 @@ void
 initializeInitialMethods(J9JavaVM *vm);
 
 /* ---------------- jnicsup.c ---------------- */
+
+/**
+* @brief Determine if a JNI ref is an internal class ref
+* @param *vm
+* @param ref
+* @return UDATA
+*/
+UDATA
+jniIsInternalClassRef(J9JavaVM *vm, jobject ref);
 
 /**
 * @brief
@@ -1427,6 +1487,17 @@ printBytecodePairs(J9JavaVM *vm);
 BOOLEAN
 areValueTypesEnabled(J9JavaVM *vm);
 
+
+/**
+ * @brief Queries if -XX:DiagnoseSyncOnValueBasedClasses=1 or -XX:DiagnoseSyncOnValueBasedClasses=2 are found in the CML
+ * @param[in] vm pointer to the J9JavaVM
+ * @return FALSE if neither of -XX:DiagnoseSyncOnValueBasedClasses=1/-XX:DiagnoseSyncOnValueBasedClasses=2 are found in the CML.
+ * 			(i.e. neither J9_EXTENDED_RUNTIME2_VALUE_BASED_EXCEPTION/J9_EXTENDED_RUNTIME2_VALUE_BASED_WARNING are set in 
+ * 			vm->extendedRuntimeFlags2)
+ * 			Otherwise, return TRUE.
+ */
+BOOLEAN areValueBasedMonitorChecksEnabled(J9JavaVM *vm);
+
 /**
 * @brief
 * @param vmThread
@@ -1592,10 +1663,10 @@ initializeClassPath(J9JavaVM *vm, char *classPath, U_8 classPathSeparator, U_16 
  * @param[in] cpEntry pointer to J9ClassPathEntry to be initialized
  *
  * @return IDATA type of the entry which is one of the following
- * 		CPE_TYPE_DIRECTORY if its a a directory
- * 		CPE_TYPE_JAR if its a ZIP file, extraInfo contains the J9ZipFile
- * 		CPE_TYPE_JIMAGE if its a jimage file
- * 		CPE_TYPE_USUSABLE if its a bad entry, don't try to use it anymore
+ * 		CPE_TYPE_DIRECTORY if it's a directory
+ * 		CPE_TYPE_JAR if it's a ZIP file, extraInfo contains the J9ZipFile
+ * 		CPE_TYPE_JIMAGE if it's a jimage file
+ * 		CPE_TYPE_USUSABLE if it's a bad entry, don't try to use it anymore
  */
 IDATA
 initializeClassPathEntry (J9JavaVM * javaVM, J9ClassPathEntry *cpEntry);
@@ -1690,6 +1761,11 @@ setExceptionForErroredRomClass( J9ROMClass *romClass, J9VMThread *vmThread );
 
 /* ---------------- KeyHashTable.c ---------------- */
 
+/* Flag(s) used by hashClassTableStartDo()/hashClassTableNextDo() and set to J9HashTableState.flags
+ * to control whether to skip special classes, like hidden classes, in the hash table iteration. 
+ */
+#define J9_HASH_TABLE_STATE_FLAG_SKIP_HIDDEN 1
+
 /**
 * Searches classLoader for any loaded classes in a specific package
 *
@@ -1776,12 +1852,13 @@ hashClassTableReplace(J9VMThread* vmThread, J9ClassLoader *classLoader, J9Class 
 
 /**
 * @brief Iterate over the classes defined by or cached in the specified class loader
-* @param *classLoader
-* @param *walkState
+* @param *classLoader The class loader to use.
+* @param *walkState The J9HashTableState. 
+* @param flags Flags to control whether to skip special classes, like hidden classes, in the iteration.
 * @return J9Class*
 */
 J9Class*
-hashClassTableStartDo(J9ClassLoader *classLoader, J9HashTableState* walkState);
+hashClassTableStartDo(J9ClassLoader *classLoader, J9HashTableState* walkState, UDATA flags);
 
 /**
 * @brief Iterate over the classes defined by or cached in the specified class loader
@@ -1948,7 +2025,7 @@ mustReportEnterStepOrBreakpoint(J9JavaVM * vm);
 * @param object
 * @return IDATA
 */
-IDATA
+UDATA
 objectMonitorEnter(J9VMThread* vmStruct, j9object_t object);
 
 
@@ -2184,6 +2261,19 @@ UDATA
 addHiddenInstanceField(J9JavaVM *vm, const char *className, const char *fieldName, const char *fieldSignature, UDATA *offsetReturn);
 
 /**
+ * Report a hot field if the JIT has determined that the field has met appropriate thresholds to be determined a hot field. 
+ * Valid if dynamicBreadthFirstScanOrdering is enabled.
+ *
+ * @param vm[in] pointer to the J9JavaVM
+ * @param reducedCpuUtil normalized cpu utilization of the hot field for the method being compiled
+ * @param clazz pointer to the class where a hot field should be added
+ * @param fieldOffset value of the field offset that should be added as a hot field for the given class
+ * @param reducedFrequency normalized block frequency of the hot field for the method being compiled
+ */
+void
+reportHotField(J9JavaVM *javaVM, int32_t reducedCpuUtil, J9Class* clazz, uint8_t fieldOffset,  uint32_t reducedFrequency);
+
+/**
 * @brief
 * @param *vmStruct
 * @param *clazz
@@ -2235,6 +2325,17 @@ fieldOffsetsStartDo(J9JavaVM *vm, J9ROMClass *romClass, J9Class *superClazz, J9R
 #endif
 
 /**
+ * Initialize fields offsets into FCC
+ *
+ * @param[in] *currentThread the current thread
+ * @param[in] *clazz class
+ *
+ * @returns void
+ */
+void
+calculateFlattenedFieldAddresses(J9VMThread *currentThread, J9Class *clazz);
+
+/**
  * Initialize fields to default values when the class
  * contains unflattened flattenables.
  *
@@ -2247,6 +2348,19 @@ fieldOffsetsStartDo(J9JavaVM *vm, J9ROMClass *romClass, J9Class *superClazz, J9R
 void
 defaultValueWithUnflattenedFlattenables(J9VMThread *currentThread, J9Class *clazz, j9object_t instance);
 
+/**
+ * Initialize static fields to default values when the class
+ * contains flattenable statics. Currently none of the static fields are flattened.
+ *
+ * @param[in] currentThread the current thread
+ * @param[in] clazz the class being loaded
+ * @param[in] entry The FCC entry for the static field
+ * @param[in] entryClazz the clazz in the FCC entry for the static field
+ *
+ * @returns void
+ */
+void
+classPrepareWithWithUnflattenedFlattenables(J9VMThread *currentThread, J9Class *clazz, J9FlattenedClassCacheEntry *entry, J9Class *entryClazz);
 
 /**
  * Compare two objects for equality. This helper will perform a
@@ -2260,6 +2374,63 @@ defaultValueWithUnflattenedFlattenables(J9VMThread *currentThread, J9Class *claz
  */
 BOOLEAN
 valueTypeCapableAcmp(J9VMThread *currentThread, j9object_t lhs, j9object_t rhs);
+
+/**
+ * Determines if a name or a signature pointed by a J9UTF8 pointer is a Qtype.
+ *
+ * @param[in] utfWrapper J9UTF8 pointer that points to the name or the signature
+ *
+ * @return TRUE if the name or the signature pointed by the J9UTF8 pointer is a Qtype, FALSE otherwise
+ */
+BOOLEAN
+isNameOrSignatureQtype(J9UTF8 *utfWrapper);
+
+
+/**
+ * Determines if the classref c=signature is a Qtype. There is no validation performed
+ * to ensure that the cpIndex points at a classref.
+ *
+ * @param[in] cpContextClass ramClass that owns the constantpool being queried
+ * @param[in] cpIndex the CP index
+ *
+ * @return TRUE if classref is a Qtype, FALSE otherwise
+ */
+BOOLEAN
+isClassRefQtype(J9Class *cpContextClass, U_16 cpIndex);
+
+/**
+ * Performs an aaload operation on an object. Handles flattened and non-flattened cases.
+ *
+ * Assumes recieverObject is not null.
+ * All AIOB exceptions must be thrown before calling.
+ *
+ * Returns null if newObjectRef retrieval fails.
+ *
+ * If fast == false, special stack frame must be built and receiverObject must be pushed onto it.
+ *
+ * @param[in] currentThread thread token
+ * @param[in] receiverObject arrayObject
+ * @param[in] index array index
+ * @param[in] fast bool for fast or slow path
+ *
+ * @return array element
+ */
+j9object_t
+loadFlattenableArrayElement(J9VMThread *currentThread, j9object_t receiverObject, U_32 index, BOOLEAN fast);
+
+/**
+ * Performs an aastore operation on an object. Handles flattened and non-flattened cases.
+ *
+ * Assumes recieverObject and paramObject are not null.
+ * All AIOB exceptions must be thrown before calling.
+ *
+ * @param[in] currentThread thread token
+ * @param[in] receiverObject arrayObject
+ * @param[in] index array index
+ * @param[in] paramObject obj arg
+ */
+void
+storeFlattenableArrayElement(J9VMThread *currentThread, j9object_t receiverObject, U_32 index, j9object_t paramObject);
 
 /**
 * @brief Iterate over fields of the specified class in JVMTI order.
@@ -2313,6 +2484,107 @@ UDATA
 findIndexInFlattenedClassCache(J9FlattenedClassCache *flattenedClassCache, J9ROMNameAndSignature *nameAndSignature);
 #endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 
+/**
+ * Returns the offset of a qtype field.
+ *
+ * @param[in] fieldOwner the J9class that defines the field
+ * @param[in] field romfieldshape of the field
+ *
+ * @return field offset
+ */
+UDATA
+getFlattenableFieldOffset(J9Class *fieldOwner, J9ROMFieldShape *field);
+
+/**
+ * Returns if a field is flattened. `J9_IS_J9CLASS_FLATTENED` will be deprecated.
+ * This helper assumes field is a qtype.
+ *
+ * @param[in] fieldOwner the J9class that defines the field
+ * @param[in] field romfieldshape of the field
+ *
+ * @return TRUE if field is flattened, false otherwise
+ */
+BOOLEAN
+isFlattenableFieldFlattened(J9Class *fieldOwner, J9ROMFieldShape *field);
+
+/**
+ * Returns the type of an instance field. `J9_IS_J9CLASS_FLATTENED` will be deprecated.
+ * This helper assumes field is a qtype.
+ *
+ * @param[in] fieldOwner the J9class that defines the field
+ * @param[in] field romfieldshape of the field
+ *
+ * @return TRUE if field is flattened, false otherwise
+ */
+J9Class *
+getFlattenableFieldType(J9Class *fieldOwner, J9ROMFieldShape *field);
+
+/**
+ * Returns the size of an instance field. `J9_VALUETYPE_FLATTENED_SIZE` will be deprecated.
+ * This helper assumes field is a qtype.
+ *
+ * @param[in] currentThread thread token
+ * @param[in] fieldOwner the J9class that defines the field
+ * @param[in] fieldref cp ref of the field
+ *
+ * @return TRUE if field is flattened, false otherwise
+ */
+UDATA
+getFlattenableFieldSize(J9VMThread *currentThread, J9Class *fieldOwner, J9ROMFieldShape *field);
+
+/**
+ * Returns the size of an array element field. `J9_VALUETYPE_FLATTENED_SIZE`
+ * will be deprecated.
+ *
+ * @param[in] arrayClass containing elements
+ *
+ * @return size of the array element
+ */
+UDATA
+arrayElementSize(J9ArrayClass* arrayClass);
+
+/**
+ * Performs a getfield operation on an object. Handles flattened and non-flattened cases.
+ * This helper assumes that the cpIndex points to the fieldRef of a resolved Qtype. This helper
+ * also assumes that the cpIndex points to an instance field.
+ *
+ * @param currentThread thread token
+ * @param cpEntry the RAM cpEntry for the field, needs to be resolved
+ * @param receiver receiver object
+ * @param fastPath performs fastpath allocation, no GC. If this is false
+ * 			frame must be built before calling as GC may occur
+ *
+ * @return NULL if allocation fails, valuetype otherwise
+ */
+j9object_t
+getFlattenableField(J9VMThread *currentThread, J9RAMFieldRef *cpEntry, j9object_t receiver, BOOLEAN fastPath);
+
+/**
+ * Performs a clone operation on an object.
+ *
+ * @param currentThread thread token
+ * @param receiverClass j9class of original object
+ * @param original object to be cloned
+ * @param fastPath performs fastpath allocation, no GC. If this is false
+ * 			frame must be built before calling as GC may occur
+ *
+ * @return NULL if allocation fails, valuetype otherwise
+ */
+j9object_t
+cloneValueType(J9VMThread *currentThread, J9Class *receiverClass, j9object_t original, BOOLEAN fastPath);
+
+/**
+ * Performs a putfield operation on an object. Handles flattened and non-flattened cases.
+ * This helper assumes that the cpIndex points to the fieldRef of a resolved Qtype. This helper
+ * also assumes that the cpIndex points to an instance field.
+ *
+ * @param currentThread thread token
+ * @param cpEntry the RAM cpEntry for the field, needs to be resolved
+ * @param receiver receiver object
+ * @param paramObject parameter object
+ */
+void
+putFlattenableField(J9VMThread *currentThread, J9RAMFieldRef *cpEntry, j9object_t receiver, j9object_t paramObject);
 
 /**
 * @brief
@@ -2801,6 +3073,14 @@ freeMemorySegmentList(J9JavaVM *javaVM,J9MemorySegmentList *segmentList);
 void
 freeMemorySegmentListEntry(J9MemorySegmentList *segmentList, J9MemorySegment *segment);
 
+/**
+* @brief Iterate through the segmentList and pass the J9MemorySegment * to the segmentCallback
+* @param segmentList The J9MemorySegmentList to iterate through.  Must not be NULL
+* @param segmentCallBack The user supplied callback that operates on the segment.  Must not be NULL.
+* @param userData A void* passed through to the callback for tracking state
+*/
+void
+allSegmentsInMemorySegmentListDo(J9MemorySegmentList *segmentList, void (* segmentCallback)(J9MemorySegment*, void*), void *userData);
 
 /**
 * @brief
@@ -2973,11 +3253,15 @@ getStringUTF8Length(J9VMThread *vmThread,j9object_t string);
 * 	CLASSNAME_VALID_ARRARY - if it is valid and there is a '[' at beginning of class name string.
 *
 * @param[in] *vmThread current thread
-* @param[in] string the class name string
+* @param[in] className the class name string
+* @param[in] classNameLength the length of the class name string
+* @param[in] allowedBitsForClassName the allowed bits for a valid class name,
+*            including CLASSNAME_VALID_NON_ARRARY, CLASSNAME_VALID_ARRARY, or CLASSNAME_VALID.
+*
 * @return a UDATA to indicate the nature of incoming class name string, see descriptions above.
 */
 UDATA
-verifyQualifiedName(J9VMThread *vmThread, j9object_t string);
+verifyQualifiedName(J9VMThread *vmThread, U_8 *className, UDATA classNameLength, UDATA allowedBitsForClassName);
 
 
 /* ---------------- swalk.c ---------------- */
@@ -3153,7 +3437,7 @@ trace(J9VMThread *vmStruct);
 #endif /* J9VM_INTERP_TRACING || INTERP_UPDATE_VMCTRACING */ /* End File Level Build Flags */
 
 /* ---------------- visible.c ---------------- */
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 /**
  * Loads the nest host and ensures that the nest host belongs
  * to the same runtime package as the class. This function requires
@@ -3183,7 +3467,7 @@ loadAndVerifyNestHost(J9VMThread *vmThread, J9Class *clazz, UDATA options);
  */
 void
 setNestmatesError(J9VMThread *vmThread, J9Class *nestMember, J9Class *nestHost, IDATA errorCode);
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 /* ---------------- VMAccess.cpp ---------------- */
 
@@ -3953,7 +4237,9 @@ J9ROMMethod *
 * @brief Finds the rom class given a PC.  Also returns the classloader it belongs to.
 * @param vmThread
 * @param methodPC
-* @param resultClassLoader
+* @param resultClassLoader  This is the classLoader that owns the memory segment that the ROMClass was found in.
+*	For classes from the SharedClasses cache, this will always be the vm->systemClassLoader regardless of which
+*	J9ClassLoader actually loaded the class.
 * @return IDATA
 *
 * Returns the rom class, or NULL on failure.  resultClassLoader is filled in if non-null with the classloader associated.
@@ -3967,6 +4253,16 @@ typedef struct J9ObjectMonitorInfo {
 	IDATA depth;
 	UDATA count;
 } J9ObjectMonitorInfo;
+
+/**
+ * @brief See if an object is being waited on by targetThread
+ * @param currentThread
+ * @param targetThread
+ * @param obj
+ * @return BOOLEAN
+ */
+BOOLEAN
+objectIsBeingWaitedOn(J9VMThread *currentThread, J9VMThread *targetThread, j9object_t obj);
 
 /**
  * @brief Get the object monitors locked by a thread
@@ -4030,7 +4326,7 @@ queryLogOptions (J9JavaVM *vm, I_32 buffer_size, void *options, I_32 *data_size)
 UDATA
 setLogOptions (J9JavaVM *vm, char *options);
 
-/* -------------------- MHInterpreter.cpp ------------ */
+/* -------------------- NativeHelpers.cpp ------------ */
 
 /**
 * @brief
@@ -4087,26 +4383,6 @@ typedef enum {
  */
 void*
 J9_GetInterface(J9_INTERFACE_SELECTOR interfaceSelector, J9PortLibrary* portLib, void *userData);
-
-/* -------------------- BytecodeInterpreter.cpp ------------ */
-
-/**
-* @brief Execute the bytecode loop
-* @param currentThread
-* @return UDATA the action to take upon return to the builder interpreter
-*/
-UDATA  
-bytecodeLoop(J9VMThread *currentThread);
-
-/* -------------------- DebugBytecodeInterpreter.cpp ------------ */
-
-/**
-* @brief Execute the bytecode loop
-* @param currentThread
-* @return UDATA the action to take upon return to the builder interpreter
-*/
-UDATA  
-debugBytecodeLoop(J9VMThread *currentThread);
 
 /* -------------------- ClassInitialization.cpp ------------ */
 
@@ -4356,4 +4632,3 @@ throwNewJavaIoIOException(JNIEnv *env, const char *message);
 #endif
 
 #endif /* vm_api_h */
-

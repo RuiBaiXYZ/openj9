@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar17]*/
+/*[INCLUDE-IF Sidecar17 & !OPENJDK_METHODHANDLES]*/
 /*******************************************************************************
- * Copyright (c) 2009, 2009 IBM Corp. and others
+ * Copyright (c) 2009, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,6 +23,10 @@
 package java.lang.invoke;
 
 import static java.lang.invoke.MethodType.*;
+
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+import java.util.List;
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 
 /*
  * MethodHandle subclass responsible for dealing with constant values.
@@ -124,6 +128,13 @@ abstract class ConstantHandle extends MethodHandle {
 			return new ConstantIntHandle(methodType, value);
 		}
 	}
+
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+	@Override
+	boolean addRelatedMHs(List<MethodHandle> relatedMHs) {
+		return false;
+	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 }
 
 final class ConstantObjectHandle extends ConstantHandle {

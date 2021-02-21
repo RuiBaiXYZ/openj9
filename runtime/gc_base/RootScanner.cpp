@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -37,7 +37,6 @@
 #include "ClassHeapIterator.hpp"
 #include "ClassLoaderIterator.hpp"
 #include "Debug.hpp"
-#include "Dispatcher.hpp"
 #include "EnvironmentBase.hpp"
 #if defined(J9VM_GC_FINALIZATION)
 #include "FinalizeListManager.hpp"
@@ -58,6 +57,7 @@
 #include "ObjectHeapIteratorAddressOrderedList.hpp"
 #include "ObjectModel.hpp"
 #include "OwnableSynchronizerObjectList.hpp"
+#include "ParallelDispatcher.hpp"
 #include "PointerArrayIterator.hpp"
 #include "SlotObject.hpp"
 #include "StringTable.hpp"
@@ -187,16 +187,8 @@ MM_RootScanner::scanMonitorReferencesComplete(MM_EnvironmentBase *env)
 void
 MM_RootScanner::doMonitorLookupCacheSlot(j9objectmonitor_t* slotPtr)
 {
-	// TODO: Local version of compressObjectReferences() ?
-	// TODO: Add new lockword macros (pass boolean)
-	if (_env->compressObjectReferences()) {
-		if (0 != *(U_32*)slotPtr) {
-			*(U_32*)slotPtr = 0;
-		}
-	} else {
-		if (0 != *(UDATA*)slotPtr) {
-			*(UDATA*)slotPtr = 0;
-		}
+	if(0 != *slotPtr) {
+		*slotPtr = 0;
 	}
 }
 
@@ -253,9 +245,9 @@ MM_RootScanner::doStringCacheTableSlot(J9Object **slotPtr)
  * @todo Provide function documentation
  */
 void
-MM_RootScanner::doVMClassSlot(J9Class **slotPtr, GC_VMClassSlotIterator *vmClassSlotIterator)
+MM_RootScanner::doVMClassSlot(J9Class *classPtr)
 {
-	doClassSlot(slotPtr);
+	doClassSlot(classPtr);
 }
 
 /**
@@ -325,7 +317,7 @@ MM_RootScanner::scanVMClassSlots(MM_EnvironmentBase *env)
 		J9Class **slotPtr;
 
 		while((slotPtr = classSlotIterator.nextSlot()) != NULL) {
-			doVMClassSlot(slotPtr, &classSlotIterator);
+			doVMClassSlot(*slotPtr);
 		}
 
 		reportScanningEnded(RootScannerEntity_VMClassSlots);
@@ -337,7 +329,7 @@ MM_RootScanner::scanVMClassSlots(MM_EnvironmentBase *env)
  * This handler is called for every reference to a J9Class.
  */
 void
-MM_RootScanner::doClassSlot(J9Class** slotPtr)
+MM_RootScanner::doClassSlot(J9Class *classPtr)
 {
 	/* ignore class slots by default */
 }

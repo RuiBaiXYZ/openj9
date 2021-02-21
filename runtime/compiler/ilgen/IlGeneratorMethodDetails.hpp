@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -43,7 +43,7 @@ public:
    IlGeneratorMethodDetails() :
       J9::IlGeneratorMethodDetailsConnector() {}
 
-   IlGeneratorMethodDetails(J9Method * const method) :
+   IlGeneratorMethodDetails(J9Method* method) :
       J9::IlGeneratorMethodDetailsConnector(method) {}
 
    IlGeneratorMethodDetails(TR_ResolvedMethod *method) :
@@ -60,27 +60,50 @@ public:
 namespace J9
 {
 
-class DumpMethodDetails : public TR::IlGeneratorMethodDetails
+class JitDumpMethodDetails : public TR::IlGeneratorMethodDetails
    {
    // Objects cannot hold data of its own: must store in the _data union in TR::IlGeneratorMethodDetails
 
 public:
-   DumpMethodDetails(J9Method * const method) : TR::IlGeneratorMethodDetails(method) { }
-   DumpMethodDetails(TR_ResolvedMethod *method) : TR::IlGeneratorMethodDetails(method) { }
-   DumpMethodDetails(const DumpMethodDetails & other) : TR::IlGeneratorMethodDetails(other.getMethod()) { }
+   JitDumpMethodDetails(J9Method* method, TR::Options* optionsFromOriginalCompile, bool aotCompile)
+      : TR::IlGeneratorMethodDetails(method)
+      {
+      _optionsFromOriginalCompile = optionsFromOriginalCompile;
+      _data._aotCompile = aotCompile;
+      }
+      
+   JitDumpMethodDetails(const JitDumpMethodDetails& other)
+      : TR::IlGeneratorMethodDetails(other.getMethod())
+      {
+      _optionsFromOriginalCompile = other._optionsFromOriginalCompile;
+      _data._aotCompile = other._data._aotCompile;
+      }
 
-   virtual const char * name()     const { return "DumpMethod"; }
+   virtual const char * name()     const { return "JitDumpMethod"; }
 
-   virtual bool isOrdinaryMethod() const { return false; }
-   virtual bool isDumpMethod()     const { return true; }
+   virtual bool isOrdinaryMethod()   const { return false; }
+   virtual bool isJitDumpMethod()    const { return true; }
+   virtual bool isJitDumpAOTMethod() const { return _data._aotCompile; }
 
 
    virtual bool sameAs(TR::IlGeneratorMethodDetails & other, TR_FrontEnd *fe)
       {
-      return other.isDumpMethod() && sameMethod(other);
+      return other.isJitDumpMethod() && sameMethod(other);
       }
 
    virtual bool supportsInvalidation() { return false; }
+
+   /**
+    * \brief
+    * Gets the options used in the original compilation which we are trying to reproduce.
+    * 
+    * \returns
+    * The options from the original compile if it exists; \c NULL otherwise.
+    */
+   TR::Options* getOptionsFromOriginalCompile() const
+      {
+      return _optionsFromOriginalCompile;
+      }
    };
 
 
@@ -89,7 +112,7 @@ class MethodInProgressDetails : public TR::IlGeneratorMethodDetails
    // Objects cannot hold data of its own: must store in the _data union in TR::IlGeneratorMethodDetails
 
 public:
-   MethodInProgressDetails(J9Method * const method, int32_t byteCodeIndex) :
+   MethodInProgressDetails(J9Method* method, int32_t byteCodeIndex) :
       TR::IlGeneratorMethodDetails(method)
       {
       _data._byteCodeIndex = byteCodeIndex;
@@ -141,7 +164,7 @@ class NewInstanceThunkDetails : public TR::IlGeneratorMethodDetails
    // Objects cannot hold data of its own: must store in the _data union in TR::IlGeneratorMethodDetails
 
 public:
-   NewInstanceThunkDetails(J9Method * const method, J9Class *clazz) :
+   NewInstanceThunkDetails(J9Method* method, J9Class *clazz) :
       TR::IlGeneratorMethodDetails(method)
       {
       _data._class = clazz;
@@ -186,7 +209,7 @@ class ArchetypeSpecimenDetails : public TR::IlGeneratorMethodDetails
    // Objects cannot hold data of its own: must store in the _data union in TR::IlGeneratorMethodDetails
 
 public:
-   ArchetypeSpecimenDetails(J9Method * const method) : TR::IlGeneratorMethodDetails(method) { }
+   ArchetypeSpecimenDetails(J9Method* method) : TR::IlGeneratorMethodDetails(method) { }
    ArchetypeSpecimenDetails(TR_ResolvedMethod *method) : TR::IlGeneratorMethodDetails(method) { }
    ArchetypeSpecimenDetails(const ArchetypeSpecimenDetails &other) : TR::IlGeneratorMethodDetails(other) { }
 
@@ -215,13 +238,13 @@ class MethodHandleThunkDetails : public ArchetypeSpecimenDetails
    // Objects cannot hold data of its own: must store in the _data union in TR::IlGeneratorMethodDetails
 
 public:
-   MethodHandleThunkDetails(J9Method * const method, uintptrj_t *handleRef, uintptrj_t *argRef) :
+   MethodHandleThunkDetails(J9Method* method, uintptr_t *handleRef, uintptr_t *argRef) :
       ArchetypeSpecimenDetails(method)
       {
       _data._methodHandleData._handleRef = handleRef;
       _data._methodHandleData._argRef = argRef;
       }
-   MethodHandleThunkDetails(TR_ResolvedMethod *method, uintptrj_t *handleRef, uintptrj_t *argRef) :
+   MethodHandleThunkDetails(TR_ResolvedMethod *method, uintptr_t *handleRef, uintptr_t *argRef) :
       ArchetypeSpecimenDetails(method)
       {
       _data._methodHandleData._handleRef = handleRef;
@@ -238,8 +261,8 @@ public:
 
    virtual bool isMethodHandleThunk()  const { return true; }
 
-   uintptrj_t *getHandleRef()          const { return _data._methodHandleData._handleRef; }
-   uintptrj_t *getArgRef()             const { return _data._methodHandleData._argRef;    }
+   uintptr_t *getHandleRef()          const { return _data._methodHandleData._handleRef; }
+   uintptr_t *getArgRef()             const { return _data._methodHandleData._argRef;    }
 
    virtual bool sameAs(TR::IlGeneratorMethodDetails & other, TR_FrontEnd *fe)
       {
@@ -267,9 +290,9 @@ class ShareableInvokeExactThunkDetails : public MethodHandleThunkDetails
    // Objects cannot hold data of its own: must store in the _data union in TR::IlGeneratorMethodDetails
 
 public:
-   ShareableInvokeExactThunkDetails(J9Method * const method, uintptrj_t *handleRef, uintptrj_t *argRef) :
+   ShareableInvokeExactThunkDetails(J9Method* method, uintptr_t *handleRef, uintptr_t *argRef) :
       MethodHandleThunkDetails(method, handleRef, argRef) { }
-   ShareableInvokeExactThunkDetails(TR_ResolvedMethod *method, uintptrj_t *handleRef, uintptrj_t *argRef) :
+   ShareableInvokeExactThunkDetails(TR_ResolvedMethod *method, uintptr_t *handleRef, uintptr_t *argRef) :
       MethodHandleThunkDetails(method, handleRef, argRef) { }
    ShareableInvokeExactThunkDetails(const ShareableInvokeExactThunkDetails & other) :
       MethodHandleThunkDetails(other.getMethod(), other.getHandleRef(), other.getArgRef()) { }
@@ -288,9 +311,9 @@ class CustomInvokeExactThunkDetails : public MethodHandleThunkDetails
    // Objects cannot hold data of its own: must store in the _data union in TR::IlGeneratorMethodDetails
 
 public:
-   CustomInvokeExactThunkDetails(J9Method * const method, uintptrj_t *handleRef, uintptrj_t *argRef) :
+   CustomInvokeExactThunkDetails(J9Method* method, uintptr_t *handleRef, uintptr_t *argRef) :
       MethodHandleThunkDetails(method, handleRef, argRef) { }
-   CustomInvokeExactThunkDetails(TR_ResolvedMethod *method, uintptrj_t *handleRef, uintptrj_t *argRef) :
+   CustomInvokeExactThunkDetails(TR_ResolvedMethod *method, uintptr_t *handleRef, uintptr_t *argRef) :
       MethodHandleThunkDetails(method, handleRef, argRef) { }
    CustomInvokeExactThunkDetails(const CustomInvokeExactThunkDetails & other) :
       MethodHandleThunkDetails(other.getMethod(), other.getHandleRef(), other.getArgRef()) { }

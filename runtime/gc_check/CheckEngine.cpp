@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -45,13 +45,13 @@
 #include "CheckReporter.hpp"
 #include "CheckReporterTTY.hpp"
 #include "ClassModel.hpp"
+#include "ForwardedHeader.hpp"
 #include "GCExtensions.hpp"
 #include "HeapRegionDescriptor.hpp"
 #include "ModronTypes.hpp"
 #include "ObjectModel.hpp"
 #include "ObjectAccessBarrier.hpp"
 #include "ScanFormatter.hpp"
-#include "ScavengerForwardedHeader.hpp"
 #include "SublistPool.hpp"
 #include "SublistPuddle.hpp"
 
@@ -286,9 +286,9 @@ GC_CheckEngine::checkJ9ObjectPointer(J9JavaVM *javaVM, J9Object *objectPtr, J9Ob
 		if ((regionType & MEMORY_TYPE_NEW) || extensions->isVLHGC()) {
 			// TODO: ideally, we should only check this in the evacuate segment
 			// TODO: do some safety checks first -- is there enough room in the segment?
-			MM_ScavengerForwardedHeader scavengerForwardedHeader(objectPtr, extensions);
-			if (scavengerForwardedHeader.isForwardedPointer()) {
-				*newObjectPtr = scavengerForwardedHeader.getForwardedObject();
+			MM_ForwardedHeader forwardedHeader(objectPtr, extensions->compressObjectReferences());
+			if (forwardedHeader.isForwardedPointer()) {
+				*newObjectPtr = forwardedHeader.getForwardedObject();
 				
 				if (_cycle->getMiscFlags() & J9MODRON_GCCHK_VERBOSE) {
 					PORT_ACCESS_FROM_PORT(_portLibrary);
@@ -762,7 +762,7 @@ GC_CheckEngine::checkClassHeap(J9JavaVM *javaVM, J9Class *clazz, J9MemorySegment
 	/*
 	 * Process class slots in the class
 	 */
-	GC_ClassIteratorClassSlots classIteratorClassSlots(clazz);
+	GC_ClassIteratorClassSlots classIteratorClassSlots(javaVM, clazz);
 	J9Class** classSlotPtr;
 	while((classSlotPtr = classIteratorClassSlots.nextSlot()) != NULL) {
 		int state = classIteratorClassSlots.getState();
@@ -1333,7 +1333,7 @@ void GC_CheckEngine::endCheckCycle(J9JavaVM *javaVM)
 }
 
 /**
- * Advance the the next stage of checking.
+ * Advance to the next stage of checking.
  * Sets the context for the next stage of checking.  Called every time verification
  * moves to a new structure.
  *

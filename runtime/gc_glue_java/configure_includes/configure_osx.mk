@@ -28,6 +28,7 @@ CONFIGURE_ARGS += \
 	--enable-OMRTHREAD_LIB_UNIX \
 	--enable-OMR_ARCH_X86 \
 	--enable-OMR_ENV_DATA64 \
+	--enable-OMR_GC_DOUBLE_MAP_ARRAYLETS \
 	--enable-OMR_ENV_LITTLE_ENDIAN \
 	--enable-OMR_GC_IDLE_HEAP_MANAGER \
 	--enable-OMR_GC_TLH_PREFETCH_FTA \
@@ -37,10 +38,10 @@ CONFIGURE_ARGS += \
 
 ifeq (osx_x86-64_cmprssptrs, $(SPEC))
 	CONFIGURE_ARGS += \
-		--enable-OMR_GC_COMPRESSED_POINTERS
+		OMR_GC_POINTER_MODE=compressed
 else
 	CONFIGURE_ARGS += \
-		--enable-OMR_GC_FULL_POINTERS
+		OMR_GC_POINTER_MODE=full
 endif
 
 CONFIGURE_ARGS += libprefix=lib exeext= solibext=.dylib arlibext=.a objext=.o

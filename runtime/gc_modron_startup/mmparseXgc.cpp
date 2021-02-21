@@ -1100,6 +1100,16 @@ j9gc_initialize_parse_gc_colon(J9JavaVM *javaVM, char **scan_start)
 #endif /* defined(OMR_GC_VLHGC_CONCURRENT_COPY_FORWARD) */
 #endif /* defined(J9VM_GC_VLHGC) */
 
+#if defined(J9VM_GC_MODRON_SCAVENGER) || defined(J9VM_GC_VLHGC)
+	/* If dynamicBreadthFirstScanOrdering is enabled, set scavengerScanOrdering and other required options */
+	if(try_scan(scan_start, "dynamicBreadthFirstScanOrdering")) {
+		extensions->scavengerScanOrdering = MM_GCExtensions::OMR_GC_SCAVENGER_SCANORDERING_DYNAMIC_BREADTH_FIRST;
+		/* Below options are required options for dynamicBreadthFirstScanOrdering */
+		extensions->scavengerAlignHotFields = false;
+		goto _exit;
+	}
+#endif /* defined(J9VM_GC_MODRON_SCAVENGER) || defined (J9VM_GC_VLHGC) */
+
 #if defined(J9VM_GC_MODRON_SCAVENGER)
 	if (try_scan(scan_start, "scanCacheSize=")) {
 		/* Read in restricted scan cache size */
@@ -1122,7 +1132,6 @@ j9gc_initialize_parse_gc_colon(J9JavaVM *javaVM, char **scan_start)
 		extensions->scavengerScanOrdering = MM_GCExtensions::OMR_GC_SCAVENGER_SCANORDERING_BREADTH_FIRST;
 		goto _exit;
 	}
-		
 #endif /* J9VM_GC_MODRON_SCAVENGER */
 
 	if(try_scan(scan_start, "alwaysCallWriteBarrier")) {
@@ -1265,25 +1274,25 @@ gcParseXgcArguments(J9JavaVM *vm, char *optArg)
 			}
 			continue;
 		}
-		if (try_scan(&scan_start, "finalizeMasterPriority=")) {
-			if(!scan_udata_helper(vm, &scan_start, &extensions->finalizeMasterPriority, "finalizeMasterPriority=")) {
+		if (try_scan(&scan_start, "finalizeMainPriority=")) {
+			if(!scan_udata_helper(vm, &scan_start, &extensions->finalizeMainPriority, "finalizeMainPriority=")) {
 				returnValue = JNI_EINVAL;
 				break;
 			}
-			if((extensions->finalizeMasterPriority < J9THREAD_PRIORITY_USER_MIN) || (extensions->finalizeMasterPriority > J9THREAD_PRIORITY_USER_MAX)) {
-				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_INTEGER_OUT_OF_RANGE, "-Xgc:finalizeMasterPriority", (UDATA)J9THREAD_PRIORITY_USER_MIN, (UDATA)J9THREAD_PRIORITY_USER_MAX);
+			if((extensions->finalizeMainPriority < J9THREAD_PRIORITY_USER_MIN) || (extensions->finalizeMainPriority > J9THREAD_PRIORITY_USER_MAX)) {
+				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_INTEGER_OUT_OF_RANGE, "-Xgc:finalizeMainPriority", (UDATA)J9THREAD_PRIORITY_USER_MIN, (UDATA)J9THREAD_PRIORITY_USER_MAX);
 				returnValue = JNI_EINVAL;
 				break;
 			}
 			continue;
 		}
-		if (try_scan(&scan_start, "finalizeSlavePriority=")) {
-			if(!scan_udata_helper(vm, &scan_start, &extensions->finalizeSlavePriority, "finalizeSlavePriority=")) {
+		if (try_scan(&scan_start, "finalizeWorkerPriority=")) {
+			if(!scan_udata_helper(vm, &scan_start, &extensions->finalizeWorkerPriority, "finalizeWorkerPriority=")) {
 				returnValue = JNI_EINVAL;
 				break;
 			}
-			if((extensions->finalizeSlavePriority < J9THREAD_PRIORITY_USER_MIN) || (extensions->finalizeSlavePriority > J9THREAD_PRIORITY_USER_MAX)) {
-				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_INTEGER_OUT_OF_RANGE, "-Xgc:finalizeSlavePriority", (UDATA)J9THREAD_PRIORITY_USER_MIN, (UDATA)J9THREAD_PRIORITY_USER_MAX);
+			if((extensions->finalizeWorkerPriority < J9THREAD_PRIORITY_USER_MIN) || (extensions->finalizeWorkerPriority > J9THREAD_PRIORITY_USER_MAX)) {
+				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_INTEGER_OUT_OF_RANGE, "-Xgc:finalizeWorkerPriority", (UDATA)J9THREAD_PRIORITY_USER_MIN, (UDATA)J9THREAD_PRIORITY_USER_MAX);
 				returnValue = JNI_EINVAL;
 				break;
 			}

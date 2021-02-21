@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -48,6 +48,18 @@ if(OMR_ARCH_X86)
 		"-I${CMAKE_CURRENT_SOURCE_DIR}/x/i386/runtime/"
 	)
 	omr_append_flags(CMAKE_ASM_NASM_FLAGS ${asm_inc_dirs})
+	# For whatever reason cmake does not apply compile definitions when building nasm objects.
+	# The if guard is here in case they ever start doing so.
+	if(NOT CMAKE_ASM_NASM_COMPILE_OBJECT MATCHES "<DEFINES>")
+		# Tack on defines immediately following the compiler name.
+		string(REPLACE
+			"<CMAKE_ASM_NASM_COMPILER>"
+			"<CMAKE_ASM_NASM_COMPILER> <DEFINES>"
+			CMAKE_ASM_NASM_COMPILE_OBJECT
+			"${CMAKE_ASM_NASM_COMPILE_OBJECT}"
+		)
+
+	endif()
 endif()
 
 # Using the linker option -static-libgcc results in an error on OSX. The option -static-libstdc++ is unused. Therefore
@@ -70,57 +82,18 @@ set_property(DIRECTORY PROPERTY COMPILE_DEFINITIONS ${compile_defs})
 
 omr_add_tracegen(env/j9jit.tdf)
 
-# this is a workaround because the jit code is inconsistent about how it includes the tracegen files
-# It only really works if we put it in the source tree
+# this is a workaround because the jit code includes the tracegen header as <env/ut_j9jit.h>
 add_custom_command(
-	OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/env/ut_j9jit.h
+	OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/env/ut_j9jit.h
 	DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/ut_j9jit.h
-	COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_BINARY_DIR}/ut_j9jit.h" "${CMAKE_CURRENT_SOURCE_DIR}/env/ut_j9jit.h"
+	COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_BINARY_DIR}/ut_j9jit.h" "${CMAKE_CURRENT_BINARY_DIR}/env/ut_j9jit.h"
 	VERBATIM
 )
-add_custom_target(j9jit_tracegen DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/env/ut_j9jit.h)
+add_custom_target(j9jit_tracegen DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/env/ut_j9jit.h)
 
-# J9VM_OPT_JITSERVER and protobuf
+# J9VM_OPT_JITSERVER
 if(J9VM_OPT_JITSERVER)
-	message(STATUS "JITServer is supported")
-
-	include(FindProtobuf)
-	set(Protobuf_USE_STATIC_LIBS ON)
-	find_package(Protobuf REQUIRED)
-
-	if(PROTOBUF_FOUND)
-		include_directories(${PROTOBUF_INCLUDE_DIRS})
-		string(REPLACE
-			"${CMAKE_SHARED_LIBRARY_PREFIX}protobuf${J9VM_OLD_SHARED_SUFFIX}"
-			"${CMAKE_STATIC_LIBRARY_PREFIX}protobuf${CMAKE_STATIC_LIBRARY_SUFFIX}"
-			PROTOBUF_LIBRARY
-			${PROTOBUF_LIBRARY})
-		message(STATUS "Protobuf include path: ${PROTOBUF_INCLUDE_DIRS}")
-		message(STATUS "Protobuf library: ${PROTOBUF_LIBRARY}")
-	else()
-		message(FATAL_ERROR "Protobuf not found")
-	endif()
-
-	find_program(PROTOC "protoc")
-	if(PROTOC-NOTFOUND)
-		message(FATAL_ERROR "'protoc' not found")
-	endif(PROTOC-NOTFOUND)
-
-	add_custom_command(
-			OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/net/gen/compile.pb.h ${CMAKE_CURRENT_SOURCE_DIR}/net/gen/compile.pb.cpp
-			DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/net/protos/compile.proto
-			COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_SOURCE_DIR}/net/gen
-			COMMAND ${PROTOC} -I=${CMAKE_CURRENT_SOURCE_DIR}/net/protos --cpp_out=${CMAKE_CURRENT_SOURCE_DIR}/net/gen ${CMAKE_CURRENT_SOURCE_DIR}/net/protos/compile.proto
-			COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/net/gen/compile.pb.cc ${CMAKE_CURRENT_SOURCE_DIR}/net/gen/compile.pb.cpp
-			VERBATIM
-	)
-
-	add_custom_target(j9jit_proto DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/net/gen/compile.pb.h ${CMAKE_CURRENT_SOURCE_DIR}/net/gen/compile.pb.cpp)
-
-	if(OPENSSL_CFLAGS)
-		set(J9_CFLAGS "${J9_CFLAGS} ${OPENSSL_CFLAGS}")
-		set(J9_CXXFLAGS "${J9_CXXFLAGS} ${OPENSSL_CFLAGS}")
-	endif()
+	message(STATUS "JITServer is enabled")
 
 	if(OPENSSL_BUNDLE_LIB_PATH) # --enable-openssl-bundling
 		set(OPENSSL_ROOT_DIR ${OPENSSL_BUNDLE_LIB_PATH})
@@ -129,7 +102,6 @@ if(J9VM_OPT_JITSERVER)
 		set(OPENSSL_ROOT_DIR ${OPENSSL_DIR})
 	endif()
 
-	include(FindOpenSSL)
 	find_package(OpenSSL REQUIRED)
 	include_directories(${OPENSSL_INCLUDE_DIR})
 endif()
@@ -171,22 +143,12 @@ add_subdirectory(ras)
 add_subdirectory(runtime)
 
 if(J9VM_OPT_JITSERVER)
-	j9jit_files(${CMAKE_CURRENT_SOURCE_DIR}/net/gen/compile.pb.cpp)
 	add_subdirectory(net)
 endif()
 
-# Should this be conditional?
-if(TR_HOST_ARCH STREQUAL "x" OR TR_TARGET_ARCH STREQUAL "x")
-	add_subdirectory(x)
-endif()
-if(TR_HOST_ARCH STREQUAL "p" OR TR_TARGET_ARCH STREQUAL "p")
-	add_subdirectory(p)
-endif()
-if(TR_HOST_ARCH STREQUAL "z" OR TR_TARGET_ARCH STREQUAL "z")
-	add_subdirectory(z)
-endif()
-if(TR_HOST_ARCH STREQUAL "arm" OR TR_TARGET_ARCH STREQUAL "arm")
-	add_subdirectory(arm)
+add_subdirectory(${TR_HOST_ARCH})
+if(NOT TR_TARGET_ARCH STREQUAL TR_HOST_ARCH)
+	add_subdirectory(${TR_TARGET_ARCH})
 endif()
 
 # Some files in OMR provide duplicate or extra functionality not needed
@@ -234,7 +196,7 @@ set(TARGET_DEFINES
 # though that would also involve teaching MASM2GAS and
 # PASM2ASM about target includes.
 #
-# In the mean time, like the makefiles, this is is using
+# In the mean time, like the makefiles, this is using
 # the includes from the SDK
 set(J9_INCLUDES
 	# From jitinclude.mk
@@ -260,6 +222,8 @@ set(J9_INCLUDES
 # Makefiles
 set(J9_SHAREDFLAGS
 	${OMR_PLATFORM_COMPILE_OPTIONS}
+)
+set(J9_CFLAGS
 	${OMR_PLATFORM_C_COMPILE_OPTIONS}
 )
 set(J9_CXXFLAGS
@@ -267,8 +231,7 @@ set(J9_CXXFLAGS
 	${OMR_PLATFORM_CXX_COMPILE_OPTIONS}
 )
 if(OMR_OS_LINUX OR OMR_OS_OSX)
-	set(J9_SHAREDFLAGS
-		${J9_SHAREDFLAGS}
+	list(APPEND J9_SHAREDFLAGS
 		-fno-strict-aliasing
 		-Wno-deprecated
 		-Wno-enum-compare
@@ -281,31 +244,24 @@ if(OMR_OS_LINUX OR OMR_OS_OSX)
 
 	# Platform specific CXX flags, also derived from the
 	# Makefiles
-	set(J9_CXXFLAGS
-		${J9_CXXFLAGS}
+	list(APPEND J9_CXXFLAGS
 		-fno-threadsafe-statics
 		-Wno-invalid-offsetof
 	)
 	if(NOT J9VM_OPT_JITSERVER)
-		set(J9_CXXFLAGS
-			${J9_CXXFLAGS}
-			-fno-rtti
-		)
+		list(APPEND J9_CXXFLAGS -fno-rtti)
 	endif()
 
-	set(J9_CFLAGS
-		${J9_CFLAGS}
-		-std=gnu89
-	)
+	list(APPEND J9_CFLAGS -std=gnu89)
 elseif(OMR_OS_WINDOWS)
-	set(J9_SHAREDFLAGS
+	list(APPEND J9_SHAREDFLAGS
 		-D_WIN32
 		-DWIN32
 		-DSUPPORTS_THREAD_LOCAL
 		-DWINDOWS
 	)
 elseif(OMR_OS_AIX)
-	set(J9_SHAREDFLAGS
+	list(APPEND J9_SHAREDFLAGS
 		-DAIXPPC
 		-DRS6000
 		-D_XOPEN_SOURCE_EXTENDED=1
@@ -313,9 +269,20 @@ elseif(OMR_OS_AIX)
 		-DSUPPORTS_THREAD_LOCAL
 	)
 	if(OMR_ENV_DATA64)
-		set(J9_SHAREDFLAGS -q64)
+		list(APPEND J9_SHAREDFLAGS -q64)
+		if(OMR_TOOLCONFIG STREQUAL "xlc")
+			# Modify the arch tuning value we inherit from omr
+			list(REMOVE_ITEM TR_COMPILE_OPTIONS "-qarch=pwr7")
+			list(APPEND TR_COMPILE_OPTIONS "-qarch=ppc64grsq")
+
+			if(CMAKE_C_COMPILER_IS_XLCLANG)
+				# xlclang/xlclang++ options
+				list(APPEND SPP_FLAGS -qlanglvl=extc99)
+				set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -lc++")
+			endif()
+		endif()
 	else()
-		set(J9_SHAREDFLAGS -q32)
+		list(APPEND J9_SHAREDFLAGS -q32)
 	endif()
 else()
 	message(SEND_ERROR "unsupported platform")
@@ -332,6 +299,7 @@ set(CMAKE_C_FLAGS "${J9_CFLAGS_STR}")
 
 create_omr_compiler_library(NAME j9jit
 	SHARED
+	OUTPUT_NAME j9jit${J9VM_VERSION_SUFFIX}
 	OBJECTS ${J9_FILES} ${J9JIT_FILES} ${NOT_EXFRRED}
 	DEFINES J9_PROJECT_SPECIFIC ${TARGET_DEFINES}
 	INCLUDES ${J9_INCLUDES}
@@ -343,10 +311,6 @@ add_dependencies(j9jit
 	j9jit_tracegen
 	j9jit_generate
 )
-
-if(J9VM_OPT_JITSERVER)
-	add_dependencies(j9jit j9jit_proto)
-endif()
 
 target_link_libraries(j9jit
 	PRIVATE
@@ -363,10 +327,6 @@ target_link_libraries(j9jit
 		j9thr
 		${CMAKE_DL_LIBS}
 )
-
-if(J9VM_OPT_JITSERVER)
-	target_link_libraries(j9jit PRIVATE ${PROTOBUF_LIBRARY})
-endif()
 
 # This is a bit hokey, but cmake can't track the fact that files are generated across directories.
 # Note: while these are only needed on z, setting the properties unconditionally has no ill-effect.
@@ -385,6 +345,9 @@ if(OMR_OS_LINUX)
 	target_link_libraries(j9jit PRIVATE m)
 elseif(OMR_OS_WINDOWS)
 	target_sources(j9jit PRIVATE build/scripts/j9jit.def)
+elseif(OMR_OS_AIX)
+	set_property(TARGET j9jit APPEND_STRING PROPERTY
+		LINK_FLAGS " -Wl,-bE:${CMAKE_CURRENT_SOURCE_DIR}/build/scripts/j9jit.aix.exp")
 endif()
 if((OMR_TOOLCONFIG STREQUAL "gnu") AND ALLOWS_STATIC_LIBCPP)
 	# We assume that if the compiler allows -static-libstdc++

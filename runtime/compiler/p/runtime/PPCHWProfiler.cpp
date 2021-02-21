@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -31,6 +31,7 @@
 #include "env/jittypes.h"
 #include "infra/Annotations.hpp"
 #include "env/VMJ9.h"
+#include "env/VerboseLog.hpp"
 #include "p/runtime/PPCHWProfilerPrivate.hpp"
 #include "control/CompilationRuntime.hpp"
 
@@ -623,7 +624,7 @@ static void processMethodHotness(J9VMThread *vmThread, J9JITConfig *jitConfig, T
    }
 
 void
-TR_PPCHWProfiler::processBufferRecords(J9VMThread *vmThread, uint8_t *bufferStart, uintptrj_t size, uintptrj_t bufferFilledSize, uint32_t dataTag)
+TR_PPCHWProfiler::processBufferRecords(J9VMThread *vmThread, uint8_t *bufferStart, uintptr_t size, uintptr_t bufferFilledSize, uint32_t dataTag)
    {
    TR_PPCHWProfilingConfigs config = (TR_PPCHWProfilingConfigs)(dataTag & 0xFFFF);
    uint32_t                 pmc = dataTag >> 16;

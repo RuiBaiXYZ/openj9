@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -107,10 +107,13 @@ static jvmtiTest jvmtiTestList[] =
 	{ "decomp002", decomp002, "com.ibm.jvmti.tests.decompResolveFrame.decomp002",             "Intermittent single stepping throught some code" },
 	{ "decomp003", decomp003, "com.ibm.jvmti.tests.decompResolveFrame.decomp003",             "Decompile at exception catch at various levels of inlining" },
 	{ "decomp004", decomp004, "com.ibm.jvmti.tests.decompResolveFrame.decomp004",             "Decompile a synchronized method" },
+	{ "decomp005", decomp005, "com.ibm.jvmti.tests.decompResolveFrame.decomp005",             "Decompile at exception catch with an inlined synchronized method" },
 	{ "fw001",     fw001,     "com.ibm.jvmti.tests.fieldwatch.fw001",                         "Test field watch" },
 	{ "vmd001",    vmd001,    "com.ibm.jvmti.tests.vmDump.vmd001",                            "VM Dump tests" },
 	{ "glc001",    glc001,    "com.ibm.jvmti.tests.getLoadedClasses.glc001",                  "Verify correct return of all relevant loaded classes" },
 	{ "rtc001",    rtc001,    "com.ibm.jvmti.tests.retransformClasses.rtc001",                "RetransformClasses on a class loaded by sun.misc.Unsafe" },
+	{ "rtc002",    rtc002,    "com.ibm.jvmti.tests.retransformClasses.rtc002",                "RetransformClasses on a class with Annotations" },
+	{ "rtc003",    rtc003,    "com.ibm.jvmti.tests.retransformClasses.rtc003",                "RetransformClasses on an interface class which is implemented" },
 	{ "att001",    att001,    "com.ibm.jvmti.tests.attachOptionsTest.att001",                 "sanity test for late attach" },
 	{ "log001",    log001,    "com.ibm.jvmti.tests.log.log001",                               "Log tests" },
 	{ "jlm001",    jlm001,    "com.ibm.jvmti.tests.javaLockMonitoring.jlm001",                "Java lock monitoring - JlmSet, JlmDump, and JlmDumpStats" },

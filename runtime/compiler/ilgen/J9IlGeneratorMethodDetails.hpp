@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -35,9 +35,10 @@ namespace J9 { typedef J9::IlGeneratorMethodDetails IlGeneratorMethodDetailsConn
 #include "ilgen/OMRIlGeneratorMethodDetails.hpp"
 
 #include <stdint.h>
-#include "infra/Annotations.hpp"
+#include "control/Options.hpp"
 #include "env/IO.hpp"
 #include "env/jittypes.h"
+#include "infra/Annotations.hpp"
 
 class J9Class;
 class J9Method;
@@ -81,7 +82,7 @@ public:
       _method = NULL;
       }
 
-   IlGeneratorMethodDetails(J9Method * const method) :
+   IlGeneratorMethodDetails(J9Method* method) :
       OMR::IlGeneratorMethodDetailsConnector(),
       _method(method)
    { }
@@ -104,7 +105,8 @@ public:
    virtual const char * name() const { return "OrdinaryMethod"; }
 
    virtual bool isOrdinaryMethod()     const { return true; }
-   virtual bool isDumpMethod()         const { return false; }
+   virtual bool isJitDumpMethod()      const { return false; }
+   virtual bool isJitDumpAOTMethod()   const { return false; }
    virtual bool isNewInstanceThunk()   const { return false; }
    virtual bool isMethodInProgress()   const { return false; }
    virtual bool isArchetypeSpecimen()  const { return false; }
@@ -117,7 +119,7 @@ public:
    IlGeneratorMethodDetailsType getType() const;
 #endif /* defined(J9VM_OPT_JITSERVER) */
    virtual const J9ROMClass *getRomClass() const;
-   virtual const J9ROMMethod *getRomMethod() const;
+   virtual const J9ROMMethod *getRomMethod(TR_J9VMBase *fe);
 
 
    virtual TR_IlGenerator *getIlGenerator(TR::ResolvedMethodSymbol *methodSymbol,
@@ -149,11 +151,14 @@ protected:
       int32_t _byteCodeIndex;
       struct
          {
-         uintptrj_t *_handleRef;
-         uintptrj_t *_argRef;
+         uintptr_t *_handleRef;
+         uintptr_t *_argRef;
          } _methodHandleData;
+      bool _aotCompile;
       } _data;
 
+   /// A cached options object from the original (crashed) compilation thread
+   TR::Options *_optionsFromOriginalCompile;
    };
 
 // Replay compilation support that must not be used by anyone else because it breaks encapsulation

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -29,6 +29,7 @@
 #include "control/Options.hpp"
 #include "compile/SymbolReferenceTable.hpp"
 #include "env/VMJ9.h"
+#include "env/VerboseLog.hpp"
 #include "runtime/J9Profiler.hpp"
 #include "exceptions/RuntimeFailure.hpp"
 #if defined(J9VM_OPT_JITSERVER)
@@ -111,6 +112,12 @@ J9::Recompilation::setupMethodInfo()
       // has a compilation level set in it (by virtue of a previous compilation)
       //
       _methodInfo = getExistingMethodInfo(_compilation->getCurrentMethod());
+#if defined(J9VM_OPT_JITSERVER)
+      if (comp()->getPersistentInfo()->getRemoteCompilationMode() == JITServer::CLIENT)
+         {
+         TR_ASSERT_FATAL(_methodInfo->profilingDisabled(), "Profiling is not supported in JITServer");
+         }
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
       if (!comp()->fej9()->canRecompileMethodWithMatchingPersistentMethodInfo(comp()) &&
           !comp()->isGPUCompilation())
@@ -200,6 +207,12 @@ J9::Recompilation::findOrCreateProfileInfo()
          }
       }
    return profileInfo;
+   }
+
+TR_PersistentProfileInfo *
+J9::Recompilation::getProfileInfo()
+   {
+   return _bodyInfo->getProfileInfo();
    }
 
 void
@@ -581,7 +594,7 @@ TR_PersistentMethodInfo::TR_PersistentMethodInfo(TR::Compilation *comp) :
       comp->cg()->jitAddPicToPatchOnClassRedefinition((void*)_methodInfo, (void*)&_methodInfo, false);
       }
 
-   if (comp->getOption(TR_DisableProfiling))
+   if (comp->getOption(TR_DisableProfiling) || comp->fej9()->isAOT_DEPRECATED_DO_NOT_USE())
       {
       setDisableProfiling();
       }
@@ -753,11 +766,17 @@ J9::Recompilation::persistentJittedBodyInfoFromString(const std::string &bodyInf
    bodyInfo->setMethodInfo(methodInfo);
    bodyInfo->setProfileInfo(NULL);
    bodyInfo->setMapTable(NULL);
+   resetPersistentProfileInfo(methodInfo);
+   return bodyInfo;
+   }
+
+void
+J9::Recompilation::resetPersistentProfileInfo(TR_PersistentMethodInfo *methodInfo)
+   {
    methodInfo->setOptimizationPlan(NULL);
    // Cannot use setter because it calls the destructor on the old profile data,
    // which is a client pointer
    methodInfo->_recentProfileInfo = NULL;
    methodInfo->_bestProfileInfo = NULL;
-   return bodyInfo;
    }
 #endif /* defined(J9VM_OPT_JITSERVER) */

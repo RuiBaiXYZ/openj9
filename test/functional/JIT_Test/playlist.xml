@@ -1,7 +1,6 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
+<?xml version='1.0' encoding='UTF-8'?>
 <!--
-	Copyright (c) 2016, 2020 IBM Corp. and others
+	Copyright (c) 2016, 2021 IBM Corp. and others
 
 	This program and the accompanying materials are made available under
 	the terms of the Eclipse Public License 2.0 which accompanies this
@@ -21,7 +20,6 @@
 
 	SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
-
 <playlist xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../TKG/playlist.xsd">
 	<!-- jit.test.jitt tests start here -->
 	<test>
@@ -46,7 +44,6 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>stringConcatOptTest</testCaseName>
 		<variations>
@@ -69,7 +66,6 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>jit_jitt</testCaseName>
 		<variations>
@@ -117,7 +113,31 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
+	<test>
+		<testCaseName>jit_jitt_array</testCaseName>
+		<variations>
+			<variation>-Xjit:count=0</variation>
+			<variation>-Xjit:disableAsyncCompilation,count=1</variation>
+		</variations>
+		<command> $(JAVA_COMMAND) $(JVM_OPTIONS) \
+	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)jitt.jar$(Q) \
+	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
+	-testnames \
+	arrayTest \
+	-groups $(TEST_GROUP) \
+	-excludegroups $(DEFAULT_EXCLUDE); \
+	$(TEST_STATUS)</command>
+		<levels>
+			<level>sanity</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
+	</test>
 	<test>
 		<testCaseName>jit_compareAndBranch</testCaseName>
 		<variations>
@@ -142,7 +162,6 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>jit_jitt_openj9_none_SCC</testCaseName>
 		<variations>
@@ -189,7 +208,55 @@
 			<impl>openj9</impl>
 		</impls>
 	</test>
-
+	<test>
+		<testCaseName>jit_jitt_none_SCC</testCaseName>
+		<variations>
+			<variation>-Xjit:noJitUntilMain,count=0,assumeStrictFP,optlevel=warm,gcOnResolve,rtResolve -verbose:stackwalk=0 -Xdump</variation>
+			<variation>-Xrs -Xjit:noJitUntilMain,count=0,assumeStrictFP,optlevel=warm,gcOnResolve,rtResolve -verbose:stackwalk=0 -Xdump</variation>
+			<variation>-Xrs:sync -Xjit:noJitUntilMain,count=0,assumeStrictFP,optlevel=warm,gcOnResolve,rtResolve -verbose:stackwalk=0 -Xdump</variation>
+			<variation>-Xrs:async -Xjit:noJitUntilMain,count=0,assumeStrictFP,optlevel=warm,gcOnResolve,rtResolve -verbose:stackwalk=0 -Xdump</variation>
+		</variations>
+		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) -Xshareclasses:none \
+	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)jitt.jar$(Q) \
+	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
+	-testnames \
+	arrayTest,\
+	assemblerTest,\
+	castingTest,\
+	cfgTest,\
+	crashesTest,\
+	ctresolvesTest,\
+	exceptionsTest,\
+	fieldsTest,\
+	floatsTest,\
+	gcTest,\
+	geCastingTest,\
+	immedOpTest,\
+	invokeTest,\
+	mathTest,\
+	math2Test,\
+	miscTest,\
+	os390LinkageTest,\
+	promotionTest,\
+	resolvesTest,\
+	sieveTest,\
+	transitionsTest \
+	-groups $(TEST_GROUP) \
+	-excludegroups $(DEFAULT_EXCLUDE); \
+	$(TEST_STATUS)</command>
+		<levels>
+			<level>sanity</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<subsets>
+			<subset>11+</subset>
+		</subsets>
+		<impls>
+			<impl>ibm</impl>
+		</impls>
+	</test>
 	<test>
 		<testCaseName>jit_jitt_XCEEHDLR</testCaseName>
 		<variations>
@@ -238,7 +305,6 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<!-- jit.test.jar tests start here -->
 	<test>
 		<testCaseName>jit_jar</testCaseName>
@@ -264,7 +330,6 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<!-- jit.test.tr start here -->
 	<test>
 		<testCaseName>jit_tr</testCaseName>
@@ -307,7 +372,6 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>StringPeepholeTest</testCaseName>
 		<variations>
@@ -321,7 +385,6 @@
 	-groups $(TEST_GROUP) \
 	-excludegroups $(DEFAULT_EXCLUDE); \
 	$(TEST_STATUS)</command>
-		<platformRequirements>^arch.arm</platformRequirements>
 		<levels>
 			<level>sanity</level>
 		</levels>
@@ -334,7 +397,56 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
+	<test>
+		<testCaseName>SIMDCommonedAddressTest</testCaseName>
+		<variations>
+			<variation>-Xjit:count=50,limit={*testSIMDCommonedAddress*},optLevel=scorching,disableAsyncCompilation</variation>
+		</variations>
+		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
+        -cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)jitt.jar$(Q) \
+        org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
+        -testnames \
+        SIMDCommonedAddressTest \
+        -groups $(TEST_GROUP) \
+        -excludegroups $(DEFAULT_EXCLUDE); \
+        $(TEST_STATUS)</command>
+		<levels>
+			<level>sanity</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<aot>nonapplicable</aot>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
+	</test>
+	<test>
+		<testCaseName>SIMDOptTest</testCaseName>
+		<variations>
+			<variation>-Xjit:count=100,limit={*testSimpleLoopSIMD*},optLevel=scorching,disableAsyncCompilation</variation>
+		</variations>
+		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
+	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)jitt.jar$(Q) \
+	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
+	-testnames \
+	SIMDOptTest \
+	-groups $(TEST_GROUP) \
+	-excludegroups $(DEFAULT_EXCLUDE); \
+	$(TEST_STATUS)</command>
+		<levels>
+			<level>sanity</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<aot>nonapplicable</aot>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
+	</test>
 	<!-- jit.test.hw tests start here -->
 	<test>
 		<testCaseName>jit_hw</testCaseName>
@@ -363,11 +475,10 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>jit_hwWarm</testCaseName>
 		<variations>
-			<variation>-Xdump:java -Xjit:optlevel=warm,count=0</variation>
+			<variation>Mode110 -Xdump:java -Xjit:optlevel=warm,count=0</variation>
 		</variations>
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)jitt.jar$(Q) \
@@ -377,7 +488,7 @@
 	-groups $(TEST_GROUP) \
 	-excludegroups $(DEFAULT_EXCLUDE); \
 	$(TEST_STATUS)</command>
-		<platformRequirements>os.linux,^vm.cmprssptrs,^arch.arm</platformRequirements>
+		<platformRequirements>os.linux,^arch.arm</platformRequirements>
 		<levels>
 			<level>extended</level>
 		</levels>
@@ -389,7 +500,6 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<!-- jit.test.ra tests start here -->
 	<test>
 		<testCaseName>jit_ra</testCaseName>
@@ -418,7 +528,6 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<!-- jit.test.vich tests start here -->
 	<test>
 		<testCaseName>jit_vich</testCaseName>
@@ -465,8 +574,7 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
-<!-- jit.test.recognizedMethod tests start here -->
+	<!-- jit.test.recognizedMethod tests start here -->
 	<test>
 		<testCaseName>jit_recognizedMethod</testCaseName>
 		<variations>
@@ -492,14 +600,13 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<!-- JITServer tests start here. -->
 	<test>
 		<testCaseName>testJITServer</testCaseName>
 		<!-- Variations are passed to the client via the CLIENT_PROGRAM property from $JVM_OPTIONS; neither the test harness nor the server care about these. -->
 		<variations>
-			<variation>NoOptions</variation>
-			<variation>-Xshareclasses:none -Xjit:optLevel=hot</variation>
+			<variation>Mode610</variation>
+			<variation>Mode610 -Xshareclasses:none -Xjit:optLevel=hot</variation>
 		</variations>
 		<!-- Check if the JITServer launcher exists and if so start the test and
 			 - specify the executables for the client and server via the CLIENT_EXE and SERVER_EXE properties respectively,
@@ -511,7 +618,7 @@
 		-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)jitt.jar$(Q) \
 		-DSERVER_EXE=$(Q)$(TEST_JDK_BIN)$(D)jitserver$(Q) \
 		-DCLIENT_EXE=$(JAVA_COMMAND) \
-		-DCLIENT_PROGRAM=$(SQ)$(JVM_OPTIONS) -cp $(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)jitt.jar -DjarTesterArgs=$(TEST_RESROOT)$(D)jitt.jar org.testng.TestNG -d $(REPORTDIR)$(D)client $(TEST_RESROOT)$(D)testng.xml -testnames JarTesterTest -groups $(TEST_GROUP) -excludegroups $(DEFAULT_EXCLUDE)$(SQ) \
+		-DCLIENT_PROGRAM=$(SQ)$(JVM_OPTIONS) -cp $(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)jitt.jar -DjarTesterArgs=$(Q)-loopforever $(TEST_RESROOT)$(D)jitt.jar$(Q) org.testng.TestNG -d $(REPORTDIR)$(D)client $(TEST_RESROOT)$(D)testng.xml -testnames JarTesterTest -groups $(TEST_GROUP) -excludegroups $(DEFAULT_EXCLUDE)$(SQ) \
 		org.testng.TestNG \
 		-d $(REPORTDIR) \
 		$(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
@@ -523,7 +630,6 @@
 		echo $(Q)$(TEST_JDK_BIN)$(D)jitserver doesn't exist; assuming this JDK does not support JITServer and trivially passing the test.$(Q); \
 	fi; \
 	$(TEST_STATUS)</command>
-		<disabled>https://github.com/eclipse/openj9/issues/8806</disabled>
 		<platformRequirements>os.linux,arch.x86,bits.64</platformRequirements>
 		<levels>
 			<level>sanity</level>

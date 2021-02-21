@@ -148,18 +148,7 @@ class PrivateLinkage : public J9::PrivateLinkage
     *
     * @return : the instruction cursor after the load sequence
     */
-   TR::Instruction *loadStackParametersToLinkageRegisters(TR::Instruction *cursor);
-
-   /**
-    * @brief Stores parameters passed in linkage registers to the stack where the
-    *        method body expects to find them.
-    *
-    * @param[in] cursor : the instruction cursor to begin inserting copy instructions
-    * @param[in] parmsHaveBeenStored : true if the parameters have been stored to the stack
-    *
-    * @return The instruction cursor after copies inserted.
-    */
-   TR::Instruction *copyParametersToHomeLocation(TR::Instruction *cursor, bool parmsHaveBeenStored);
+   virtual TR::Instruction *loadStackParametersToLinkageRegisters(TR::Instruction *cursor);
 
    /**
     * @brief Stores parameters passed in linkage registers to the stack. This method is used only in FSD mode.
@@ -168,7 +157,7 @@ class PrivateLinkage : public J9::PrivateLinkage
     *
     * @return The instruction cursor after copies inserted.
     */
-   TR::Instruction *saveParametersToStack(TR::Instruction *cursor);
+   virtual TR::Instruction *saveParametersToStack(TR::Instruction *cursor);
 
    /**
     * @brief Builds method arguments
@@ -220,12 +209,12 @@ class PrivateLinkage : public J9::PrivateLinkage
    /**
     * @brief J9 private linkage override of OMR function
     */
-   virtual intptrj_t entryPointFromCompiledMethod();
+   virtual intptr_t entryPointFromCompiledMethod();
 
    /**
     * @brief J9 private linkage override of OMR function
     */
-   virtual intptrj_t entryPointFromInterpretedMethod();
+   virtual intptr_t entryPointFromInterpretedMethod();
 
    /**
     * J9 private linkage override of OMR function
@@ -266,6 +255,10 @@ class PrivateLinkage : public J9::PrivateLinkage
     */
    TR::Instruction *_jittedMethodEntryPoint;
 
+   private:
+
+   // Tactical GRA
+   static uint32_t _globalRegisterNumberToRealRegisterMap[];
    };
 
 

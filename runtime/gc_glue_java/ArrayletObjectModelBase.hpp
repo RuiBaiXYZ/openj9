@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -41,13 +41,13 @@ class GC_ArrayletObjectModelBase
 * Data members
 */
 private:
-#if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
-	bool _compressObjectReferences;
-#endif /* defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS) */
 #if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
 	bool _enableDoubleMapping; /** Allows arraylets to be double mapped */
 #endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
 protected:
+#if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
+	bool _compressObjectReferences;
+#endif /* defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS) */
 	OMR_VM *_omrVM; 	/**< used so that we can pull the arrayletLeafSize and arrayletLeafLogSize for arraylet sizing calculations */
 	void * _arrayletRangeBase; /**< The base heap range of where discontiguous arraylets are allowed. */
 	void * _arrayletRangeTop; /**< The top heap range of where discontiguous arraylets are allowed. */
@@ -88,15 +88,7 @@ public:
 	MMINLINE bool
 	compressObjectReferences()
 	{
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-#if defined(OMR_GC_FULL_POINTERS)
-		return _compressObjectReferences;
-#else /* OMR_GC_FULL_POINTERS */
-		return true;
-#endif /* OMR_GC_FULL_POINTERS */
-#else /* OMR_GC_COMPRESSED_POINTERS */
-		return false;
-#endif /* OMR_GC_COMPRESSED_POINTERS */
+		return OMR_COMPRESS_OBJECT_REFERENCES(_compressObjectReferences);
 	}
 
 	/**
@@ -240,19 +232,13 @@ public:
 	 * @return the number of arraylets used for an array of dataSizeInBytes bytes
 	 */
 	MMINLINE UDATA
-	numArraylets(UDATA unadjustedDataSizeInBytes)
+	numArraylets(UDATA dataSizeInBytes)
 	{
 		UDATA leafSize = _omrVM->_arrayletLeafSize;
 		UDATA numberOfArraylets = 1;
 		if (UDATA_MAX != leafSize) {
 			UDATA leafSizeMask = leafSize - 1;
 			UDATA leafLogSize = _omrVM->_arrayletLeafLogSize;
-
-			/* We add one to unadjustedDataSizeInBytes to ensure that it's always possible to determine the address
-			 * of the after-last element without crashing. Handle the case of UDATA_MAX specially, since we use that
-			 * for any object whose size overflows the address space.
-			 */
-			UDATA dataSizeInBytes = (UDATA_MAX == unadjustedDataSizeInBytes) ? UDATA_MAX : (unadjustedDataSizeInBytes + 1);
 
 			/* CMVC 135307 : following logic for calculating the leaf count would not overflow dataSizeInBytes.
 			 * the assumption is leaf size is order of 2. It's identical to:

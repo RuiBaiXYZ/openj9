@@ -133,7 +133,7 @@ TR_EscapeAnalysis::TR_EscapeAnalysis(TR::OptimizationManager *manager)
    _dememoizationSymRef = NULL;
 
    _createStackAllocations   = true;
-   _createLocalObjects       = comp()->target().cpu.isX86() || comp()->target().cpu.isPower() || comp()->target().cpu.isZ();
+   _createLocalObjects       = cg()->supportsStackAllocations();
    _desynchronizeCalls       = true;
 #if CHECK_MONITORS
    /* monitors */
@@ -1076,6 +1076,24 @@ int32_t TR_EscapeAnalysis::performAnalysisOnce()
                traceMsg(comp(), "   Make [%p] non-local because we can't have locking when candidate escapes in cold blocks\n", candidate->_node);
             }
 
+         // Value type fields of objects created with a NEW bytecode must be initialized
+         // with their default values.  EA is not yet set up to perform such iniitialization
+         // if the value type's own fields have not been inlined into the class that
+         // has a field of that type, so remove the candidate from consideration.
+         if (candidate->_kind == TR::New)
+            {
+            TR_OpaqueClassBlock *clazz = (TR_OpaqueClassBlock *)candidate->_node->getFirstChild()->getSymbol()->getStaticSymbol()->getStaticAddress();
+
+            if (!TR::Compiler->cls.isZeroInitializable(clazz))
+               {
+               if (trace())
+                  traceMsg(comp(), "   Fail [%p] because the candidate is not zero initializable (that is, it has a field of a value type whose fields have not been inlined into this candidate's class)\n", candidate->_node);
+               rememoize(candidate);
+               _candidates.remove(candidate);
+               continue;
+               }
+            }
+
          // If a contiguous candidate has reference slots, then stack-allocating it means putting
          // stores in the first block of the method.  If the first block is really hot, those stores
          // are expensive, and stack-allocation is probably not worthwhile.
@@ -1156,7 +1174,8 @@ int32_t TR_EscapeAnalysis::performAnalysisOnce()
          {
          // Array Candidates for contiguous allocation that have unresolved
          // base classes must be rejected, since we cannot initialize the array
-         // header
+         // header.  If the component type is a value type, reject the array
+         // as we can't initialize the elements to the default value yet.
          //
          if (candidate->isContiguousAllocation())
             {
@@ -1168,6 +1187,18 @@ int32_t TR_EscapeAnalysis::performAnalysisOnce()
                   traceMsg(comp(), "   Fail [%p] because base class is unresolved\n", candidate->_node);
                rememoize(candidate);
                _candidates.remove(candidate);
+               }
+            else
+               {
+               TR_OpaqueClassBlock *clazz = (TR_OpaqueClassBlock*)classNode->getSymbol()->castToStaticSymbol()->getStaticAddress();
+
+               if (TR::Compiler->cls.isValueTypeClass(clazz))
+                  {
+                  if (trace())
+                     traceMsg(comp(), "   Fail [%p] because array has value type elements\n", candidate->_node);
+                  rememoize(candidate);
+                  _candidates.remove(candidate);
+                  }
                }
             }
          }
@@ -4435,7 +4466,7 @@ void TR_EscapeAnalysis::checkEscapeViaNonCall(TR::Node *node, TR::NodeChecklist&
                if ((!_nonColdLocalObjectsValueNumbers ||
                     !_notOptimizableLocalObjectsValueNumbers ||
                     !resolvedBaseObject ||
-                    (comp()->useCompressedPointers() && (TR::Compiler->om.compressedReferenceShift() > 3) && !comp()->target().cpu.isX86() && !comp()->target().cpu.isPower() && !comp()->target().cpu.isZ()) ||
+                    (comp()->useCompressedPointers() && (TR::Compiler->om.compressedReferenceShift() > 3) && !cg()->supportsStackAllocations()) ||
                     !resolvedBaseObject->getOpCode().hasSymbolReference() ||
                     !_nonColdLocalObjectsValueNumbers->get(_valueNumberInfo->getValueNumber(resolvedBaseObject)) ||
                     (((node->getSymbolReference()->getSymbol()->getRecognizedField() != TR::Symbol::Java_lang_String_value) ||
@@ -5139,7 +5170,8 @@ int32_t TR_EscapeAnalysis::sniffCall(TR::Node *callNode, TR::ResolvedMethodSymbo
        */
       if (ilgenFailed)
          {
-         traceMsg(comp(), "   (IL generation failed)\n");
+         if (trace())
+            traceMsg(comp(), "   (IL generation failed)\n");
          static char *disableHCRCallPeeking = feGetEnv("TR_disableEAHCRCallPeeking");
          if (!isPeekableCall
              && disableHCRCallPeeking == NULL

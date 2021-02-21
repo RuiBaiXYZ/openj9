@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -118,12 +118,8 @@ static int32_t numberOfRegisterCandidate(TR::Node *depNode, TR_RegisterKinds kin
 TR::Instruction *OMR::ARM::TreeEvaluator::generateVFTMaskInstruction(TR::CodeGenerator *cg, TR::Node *node, TR::Register *dstReg, TR::Register *srcReg, TR::Instruction *prev)
    {
    TR_J9VMBase *fej9 = (TR_J9VMBase *) (cg->fe());
-   uintptrj_t mask = TR::Compiler->om.maskOfObjectVftField();
-#ifdef OMR_GC_COMPRESSED_POINTERS
-   bool isCompressed = true;
-#else
-   bool isCompressed = false;
-#endif
+   uintptr_t mask = TR::Compiler->om.maskOfObjectVftField();
+
    if (~mask == 0)
       {
       // no mask instruction required
@@ -932,7 +928,7 @@ static void genHeapAlloc(TR::CodeGenerator  *cg,
                          TR::LabelSymbol     *callLabel,
                          int32_t            allocSize)
    {
-   if (TR::Options::getCmdLineOptions()->realTimeGC())
+   if (cg->comp()->getOptions()->realTimeGC())
       {
       TR_ASSERT(0, "genHeapAlloc() not supported for RT");
       return;

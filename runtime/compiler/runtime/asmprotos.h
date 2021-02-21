@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -86,6 +86,13 @@ JIT_HELPER(jitMonitorExit);  // asm calling-convention helper
 JIT_HELPER(jitNewArray);  // asm calling-convention helper
 JIT_HELPER(jitNewInstanceImplAccessCheck);  // asm calling-convention helper
 JIT_HELPER(jitNewObject);  // asm calling-convention helper
+JIT_HELPER(jitGetFlattenableField);  // asm calling-convention helper
+JIT_HELPER(jitWithFlattenableField);  // asm calling-convention helper
+JIT_HELPER(jitPutFlattenableField);  // asm calling-convention helper
+JIT_HELPER(jitGetFlattenableStaticField);  // asm calling-convention helper
+JIT_HELPER(jitPutFlattenableStaticField);  // asm calling-convention helper
+JIT_HELPER(jitLoadFlattenableArrayElement);  // asm calling-convention helper
+JIT_HELPER(jitStoreFlattenableArrayElement);  // asm calling-convention helper
 JIT_HELPER(jitAcmpHelper);  // asm calling-convention helper
 JIT_HELPER(jitNewValue);  // asm calling-convention helper
 JIT_HELPER(jitObjectHashCode);  // asm calling-convention helper
@@ -104,6 +111,7 @@ JIT_HELPER(jitResolveFieldSetter);  // asm calling-convention helper
 JIT_HELPER(jitResolveFieldDirect);  // asm calling-convention helper
 JIT_HELPER(jitResolveFieldSetterDirect);  // asm calling-convention helper
 JIT_HELPER(jitResolveHandleMethod);  // asm calling-convention helper
+JIT_HELPER(jitResolveFlattenableField);  // asm calling-convention helper
 JIT_HELPER(jitResolveInterfaceMethod);  // asm calling-convention helper
 JIT_HELPER(jitResolveInvokeDynamic);  // asm calling-convention helper
 JIT_HELPER(jitResolveMethodHandle);  // asm calling-convention helper
@@ -128,6 +136,7 @@ JIT_HELPER(jitThrowArrayStoreExceptionWithIP);  // asm calling-convention helper
 JIT_HELPER(jitThrowClassCastException);  // asm calling-convention helper
 JIT_HELPER(jitThrowCurrentException);  // asm calling-convention helper
 JIT_HELPER(jitThrowException);  // asm calling-convention helper
+JIT_HELPER(jitThrowUnreportedException);  // asm calling-convention helper
 JIT_HELPER(jitThrowExceptionInInitializerError);  // asm calling-convention helper
 JIT_HELPER(jitThrowInstantiationException);  // asm calling-convention helper
 JIT_HELPER(jitThrowNullPointerException);  // asm calling-convention helper

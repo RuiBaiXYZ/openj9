@@ -34,6 +34,7 @@
 #include "stackwalk.h"
 #include "control/Recompilation.hpp"
 #include "control/RecompilationInfo.hpp"
+#include "control/CompilationRuntime.hpp"
 #include "env/ProcessorInfo.hpp"
 #include "infra/Monitor.hpp"
 #include "infra/MonitorTable.hpp"
@@ -89,6 +90,8 @@ extern "C" UDATA jitPPCHandler(J9VMThread* vmThread, U_32 sigType, void* sigInfo
 extern "C" UDATA jit390Handler(J9VMThread* vmThread, U_32 sigType, void* sigInfo);
 #elif defined(TR_HOST_X86) && defined(TR_TARGET_X86) && defined(TR_TARGET_64BIT)
 extern "C" UDATA jitAMD64Handler(J9VMThread* vmThread, U_32 sigType, void* sigInfo);
+#elif defined(TR_HOST_ARM64) && defined(TR_TARGET_ARM64)
+extern "C" UDATA jitARM64Handler(J9VMThread* vmThread, U_32 sigType, void* sigInfo);
 #endif
 #endif
 
@@ -218,9 +221,11 @@ J9JITConfig * codert_onload(J9JavaVM * javaVM)
    /* Should use portlib */
 #if defined(TR_HOST_X86)
    jitConfig->codeCacheAlignment = 32;
-#elif defined(TR_HOST_64BIT) || defined(TR_HOST_S390)
-   // 390 31-bit may generate 64-bit instruction (i.e. CGRL) which requires
-   // doubleword alignment for its operands
+#elif defined(TR_HOST_S390)
+   // On IBM Z, it can generate load and store quadword instructions from 
+   // Snippet. This requires quadword alignment.
+   jitConfig->codeCacheAlignment = 16;
+#elif defined(TR_HOST_64BIT)
    jitConfig->codeCacheAlignment = 8;
 #else
    jitConfig->codeCacheAlignment = 4;
@@ -451,47 +456,55 @@ void codert_init_helpers_and_targets(J9JITConfig * jitConfig, char isSMP)
    }
 #endif
 
-   jitConfig->jitGetExceptionTableFromPC = jitGetExceptionTableFromPC;
-   jitConfig->jitGetStackMapFromPC = getStackMapFromJitPC;
-   jitConfig->jitGetInlinerMapFromPC = jitGetInlinerMapFromPC;
-   jitConfig->getJitInlineDepthFromCallSite = getJitInlineDepthFromCallSite;
-   jitConfig->getJitInlinedCallInfo = getJitInlinedCallInfo;
-   jitConfig->getStackMapFromJitPC = getStackMapFromJitPC;
-   jitConfig->getFirstInlinedCallSite = getFirstInlinedCallSite;
-   jitConfig->getNextInlinedCallSite = getNextInlinedCallSite;
-   jitConfig->hasMoreInlinedMethods = hasMoreInlinedMethods;
-   jitConfig->getInlinedMethod = getInlinedMethod;
-   jitConfig->getByteCodeIndex = getByteCodeIndex;
-   jitConfig->getByteCodeIndexFromStackMap = getByteCodeIndexFromStackMap;
-   jitConfig->getCurrentByteCodeIndexAndIsSameReceiver = getCurrentByteCodeIndexAndIsSameReceiver;
-   jitConfig->getJitRegisterMap = getJitRegisterMap;
-   jitConfig->jitReportDynamicCodeLoadEvents = jitReportDynamicCodeLoadEvents;
-#if (defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390) || defined(TR_HOST_ARM) || defined(TR_HOST_ARM64))
-   jitConfig->jitClassesRedefined = jitClassesRedefined;
-   jitConfig->jitFlushCompilationQueue = jitFlushCompilationQueue;
+   TR::CompilationInfo * compInfo = TR::CompilationInfo::get(jitConfig);
+
+#if defined(J9VM_OPT_JITSERVER)
+   if (compInfo->getPersistentInfo()->getRemoteCompilationMode() != JITServer::SERVER)
 #endif
-   jitConfig->jitDiscardPendingCompilationsOfNatives = jitDiscardPendingCompilationsOfNatives;
-   jitConfig->jitMethodBreakpointed = jitMethodBreakpointed;
+      {
+      jitConfig->jitGetExceptionTableFromPC = jitGetExceptionTableFromPC;
+      jitConfig->jitGetStackMapFromPC = getStackMapFromJitPC;
+      jitConfig->jitGetInlinerMapFromPC = jitGetInlinerMapFromPC;
+      jitConfig->getJitInlineDepthFromCallSite = getJitInlineDepthFromCallSite;
+      jitConfig->getJitInlinedCallInfo = getJitInlinedCallInfo;
+      jitConfig->getStackMapFromJitPC = getStackMapFromJitPC;
+      jitConfig->getFirstInlinedCallSite = getFirstInlinedCallSite;
+      jitConfig->getNextInlinedCallSite = getNextInlinedCallSite;
+      jitConfig->hasMoreInlinedMethods = hasMoreInlinedMethods;
+      jitConfig->getInlinedMethod = getInlinedMethod;
+      jitConfig->getByteCodeIndex = getByteCodeIndex;
+      jitConfig->getByteCodeIndexFromStackMap = getByteCodeIndexFromStackMap;
+      jitConfig->getCurrentByteCodeIndexAndIsSameReceiver = getCurrentByteCodeIndexAndIsSameReceiver;
+      jitConfig->getJitRegisterMap = getJitRegisterMap;
+      jitConfig->jitReportDynamicCodeLoadEvents = jitReportDynamicCodeLoadEvents;
+#if (defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390) || defined(TR_HOST_ARM) || defined(TR_HOST_ARM64))
+      jitConfig->jitClassesRedefined = jitClassesRedefined;
+      jitConfig->jitFlushCompilationQueue = jitFlushCompilationQueue;
+#endif
+      jitConfig->jitDiscardPendingCompilationsOfNatives = jitDiscardPendingCompilationsOfNatives;
+      jitConfig->jitMethodBreakpointed = jitMethodBreakpointed;
+      }
    jitConfig->jitIllegalFinalFieldModification = jitIllegalFinalFieldModification;
 
-   initializeCodertFunctionTable(javaVM);
+      initializeCodertFunctionTable(javaVM);
 
-   #ifndef J9SW_NEEDS_JIT_2_INTERP_THUNKS
-      jitConfig->jitSendTargetTable = &jit2InterpreterSendTargetTable;
-   #endif
+#ifndef J9SW_NEEDS_JIT_2_INTERP_THUNKS
+   jitConfig->jitSendTargetTable = &jit2InterpreterSendTargetTable;
+#endif
 
-   #if defined(J9VM_PORT_SIGNAL_SUPPORT) && defined(J9VM_INTERP_NATIVE_SUPPORT)
-      #if defined(TR_HOST_X86) && defined(TR_TARGET_X86) && !defined(TR_TARGET_64BIT)
-         jitConfig->jitSignalHandler = jitX86Handler;
-      #elif defined(TR_HOST_POWER) && defined(TR_TARGET_POWER)
-         jitConfig->jitSignalHandler = jitPPCHandler;
-      #elif defined(TR_HOST_S390) && defined(TR_TARGET_S390)
-         jitConfig->jitSignalHandler = jit390Handler;
-      #elif defined(TR_HOST_X86) && defined(TR_TARGET_X86) && defined(TR_TARGET_64BIT)
-         jitConfig->jitSignalHandler = jitAMD64Handler;
-      #endif
-   #endif
-
+#if defined(J9VM_PORT_SIGNAL_SUPPORT) && defined(J9VM_INTERP_NATIVE_SUPPORT)
+#if defined(TR_HOST_X86) && defined(TR_TARGET_X86) && !defined(TR_TARGET_64BIT)
+   jitConfig->jitSignalHandler = jitX86Handler;
+#elif defined(TR_HOST_POWER) && defined(TR_TARGET_POWER)
+   jitConfig->jitSignalHandler = jitPPCHandler;
+#elif defined(TR_HOST_S390) && defined(TR_TARGET_S390)
+   jitConfig->jitSignalHandler = jit390Handler;
+#elif defined(TR_HOST_X86) && defined(TR_TARGET_X86) && defined(TR_TARGET_64BIT)
+   jitConfig->jitSignalHandler = jitAMD64Handler;
+#elif defined(TR_HOST_ARM64) && defined(TR_TARGET_ARM64)
+   jitConfig->jitSignalHandler = jitARM64Handler;
+#endif
+#endif
 
 #if defined(J9VM_JIT_DYNAMIC_LOOP_TRANSFER)
    jitConfig->isDLTReady = jitLookupDLT;

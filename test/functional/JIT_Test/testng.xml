@@ -46,6 +46,7 @@
       <class name="jit.test.jitt.array.intArrayLoadStore"/>
       <class name="jit.test.jitt.array.intArrayLoadStoreConstIndices"/>
       <class name="jit.test.jitt.array.shortArrayLoadStore"/>
+      <class name="jit.test.jitt.array.multianewarray"/>
     </classes>
   </test>
   <test name="assemblerTest">
@@ -434,7 +435,17 @@
       <class name="jit.test.tr.signExtensionA.SignExtElimTest" />
     </classes>
   </test>
-  <test name="StringPeepholeTest">
+  <test name="SIMDCommonedAddressTest">
+         <classes>
+           <class name="jit.test.tr.SIMDOpts.SIMDCommonedAddressTest" />
+         </classes>
+  </test>
+  <test name="SIMDOptTest">
+	 <classes>
+	   <class name="jit.test.tr.SIMDOpts.SIMDOptTest" />
+	 </classes>
+  </test>
+	<test name="StringPeepholeTest">
     <classes>
       <class name="jit.test.tr.stringPeephole.BigDecimalToStringTest" />
     </classes>
@@ -559,6 +570,7 @@
     <classes>
       <class name="jit.test.recognizedMethod.TestJavaLangStrictMath" />
       <class name="jit.test.recognizedMethod.TestJavaLangMath" />
+      <class name="jit.test.recognizedMethod.TestRecognizedCallTransformer" />
     </classes>
   </test>
 

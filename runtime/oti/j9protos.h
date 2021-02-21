@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -1094,8 +1094,6 @@ extern J9_CFUNC UDATA * getNextStackMapFrame(U_32 *stackMap, UDATA *previousFram
 extern J9_CFUNC void  jitResetAllUntranslateableMethods (J9VMThread *vmThread);
 #endif /* J9VM_JIT_FULL_SPEED_DEBUG &&  J9VM_INTERP_NATIVE_SUPPORT */
 
-extern J9_CFUNC IDATA dumpJitInfo(J9VMThread *thread, char *label, J9RASdumpContext *context);
-
 extern J9_CFUNC void  jitConvertStoredDoubleRegisterToSingle (U_64 * doublePtr, U_32 * singlePtr);
 #endif /* _J9VMJITDEBUGHELPERS_ */
 
@@ -1213,6 +1211,7 @@ extern J9_CFUNC j9object_t resolveMethodTypeRef (J9VMThread *vmThread, J9Constan
 extern J9_CFUNC j9object_t resolveMethodTypeRefInto(J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags, J9RAMMethodTypeRef *ramCPEntry);
 extern J9_CFUNC j9object_t resolveMethodHandleRef (J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags);
 extern J9_CFUNC j9object_t resolveMethodHandleRefInto(J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags, J9RAMMethodHandleRef *ramCPEntry);
+extern J9_CFUNC j9object_t resolveOpenJDKInvokeHandle (J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags);
 extern J9_CFUNC j9object_t resolveInvokeDynamic (J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags);
 extern J9_CFUNC j9object_t resolveConstantDynamic (J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags);
 #endif /* _J9VMRESOLVESUPPORT_ */
@@ -1237,8 +1236,8 @@ extern J9_CFUNC j9object_t  methodToString (J9VMThread * vmThread, J9Method* met
 /* J9VMTasukiMonitor*/
 #ifndef _J9VMTASUKIMONITOR_
 #define _J9VMTASUKIMONITOR_
-extern J9_CFUNC IDATA  objectMonitorEnterBlocking (J9VMThread *currentThread);
-extern J9_CFUNC IDATA  objectMonitorEnterNonBlocking (J9VMThread *currentThread, j9object_t object);
+extern J9_CFUNC UDATA  objectMonitorEnterBlocking (J9VMThread *currentThread);
+extern J9_CFUNC UDATA  objectMonitorEnterNonBlocking (J9VMThread *currentThread, j9object_t object);
 extern J9_CFUNC void  monitorExitWriteBarrier ();
 extern J9_CFUNC void  incrementCancelCounter (J9Class *clazz);
 #endif /* _J9VMTASUKIMONITOR_ */
@@ -1305,6 +1304,7 @@ extern J9_CFUNC void  JNICALL sidecarInvokeReflectConstructorImpl (J9VMThread *v
 extern J9_CFUNC void  JNICALL sendFromMethodDescriptorString (J9VMThread *vmThread, J9UTF8 *descriptor, J9ClassLoader *classLoader, J9Class *appendArgType);
 extern J9_CFUNC void  JNICALL sendResolveMethodHandle (J9VMThread *vmThread, UDATA cpIndex, J9ConstantPool *ramCP, J9Class *definingClass, J9ROMNameAndSignature* nameAndSig);
 extern J9_CFUNC void  JNICALL sendForGenericInvoke (J9VMThread *vmThread, j9object_t methodHandle, j9object_t methodType, UDATA dropFirstArg);
+extern J9_CFUNC void  JNICALL sendResolveOpenJDKInvokeHandle (J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, I_32 refKind, J9Class *resolvedClass, J9ROMNameAndSignature* nameAndSig);
 extern J9_CFUNC void  JNICALL sendResolveConstantDynamic (J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, J9ROMNameAndSignature* nameAndSig, U_16* bsmData);
 extern J9_CFUNC void  JNICALL sendResolveInvokeDynamic (J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA callSiteIndex, J9ROMNameAndSignature* nameAndSig, U_16* bsmData);
 extern J9_CFUNC void  JNICALL jitFillOSRBuffer (struct J9VMThread *vmContext, void *osrBlock);
@@ -1332,7 +1332,6 @@ extern J9_CFUNC void  jitExclusiveVMShutdownPending (J9VMThread *vmThread);
 extern J9_CFUNC void*  getNextInlinedCallSite (J9JITExceptionTable * metaData, void * inlinedCallSite);
 extern J9_CFUNC void*  jitGetStackMapFromPC (J9JavaVM * javaVM, struct J9JITExceptionTable * exceptionTable, UDATA jitPC);
 extern J9_CFUNC void  jitAddPicToPatchOnClassUnload (void *classPointer, void *addressToBePatched);
-extern J9_CFUNC UDATA  jitSignalHandler (J9VMThread *vmStruct, U_32 gpType, void* gpInfo);
 #endif /* J9VM_INTERP_NATIVE_SUPPORT */
 #endif /* _J9VMNATIVEHELPERSLARGE_ */
 

@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
 /*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+ * Copyright (c) 2019, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -38,7 +38,7 @@ public class DiagnosticProperties {
 	private final Properties baseProperties;
 
 	/**
-	 * Master prefix for property keys
+	 * Main prefix for property keys
 	 */
 	public static final String OPENJ9_DIAGNOSTICS_PREFIX = "openj9_diagnostics."; //$NON-NLS-1$
 
@@ -369,10 +369,10 @@ public class DiagnosticProperties {
 	 * Encode information about an exception into properties.
 	 *
 	 * @param e Exception object
-	 * @return Properties object
+	 * @return DiagnosticProperties object
 	 */
-	public static Properties makeExceptionProperties(Exception e) {
-		Properties props = new Properties();
+	public static DiagnosticProperties makeExceptionProperties(Exception e) {
+		DiagnosticProperties props = new DiagnosticProperties();
 		props.put(IPC.PROPERTY_DIAGNOSTICS_ERROR, Boolean.toString(true));
 		props.put(IPC.PROPERTY_DIAGNOSTICS_ERRORTYPE, e.getClass().getName());
 		String msg = e.getMessage();

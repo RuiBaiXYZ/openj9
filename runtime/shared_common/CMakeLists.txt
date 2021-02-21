@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2019 IBM Corp. and others
+# Copyright (c) 2017, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -22,7 +22,7 @@
 
 omr_add_tracegen(j9shr.tdf)
 
-add_library(j9shrcommon STATIC
+j9vm_add_library(j9shrcommon STATIC
 	AttachedDataManagerImpl.cpp
 	ByteDataManagerImpl.cpp
 	CacheLifecycleManager.cpp
@@ -34,13 +34,11 @@ add_library(j9shrcommon STATIC
 	CompositeCache.cpp
 	hookhelpers.cpp
 	Manager.cpp
-	ManagerHintTable.cpp
 	Managers.cpp
 	OSCache.cpp
 	OSCacheFile.cpp
 	OSCachemmap.cpp
 	OSCachesysv.cpp
-	OSCachevmem.cpp
 	ROMClassManagerImpl.cpp
 	ROMClassResourceManager.cpp
 	SCImplementedAPI.cpp

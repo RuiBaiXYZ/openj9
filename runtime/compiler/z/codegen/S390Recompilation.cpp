@@ -111,7 +111,7 @@ TR_S390Recompilation::generatePrePrologue()
       return NULL;
       }
 
-   TR::Compilation* comp = TR::comp();
+   TR::Compilation *comp = this->comp();
 
    TR::CodeGenerator* cg = comp->cg();
 
@@ -187,19 +187,17 @@ TR_S390Recompilation::generatePrePrologue()
 
       samplingRecompileMethodAddressMemRef->setOffset(offsetFromEPRegisterValueToSamplingRecompileMethod);
 
-      TR::SymbolReference* helperSymRef = cg->symRefTab()->findOrCreateRuntimeHelper(TR_S390samplingRecompileMethod, false, false, false);
+      TR::SymbolReference* helperSymRef = cg->symRefTab()->findOrCreateRuntimeHelper(TR_S390samplingRecompileMethod);
 
       // AOT relocation for the interpreter glue address
       TR::S390EncodingRelocation* encodingRelocation = new (cg->trHeapMemory()) TR::S390EncodingRelocation(TR_AbsoluteHelperAddress, helperSymRef);
 
-      TR::Compilation* comp = cg->comp();
-
       AOTcgDiag4(comp, "Add encodingRelocation = %p reloType = %p symbolRef = %p helperId = %x\n", encodingRelocation, encodingRelocation->getReloType(), encodingRelocation->getSymbolReference(), TR_S390samplingRecompileMethod);
 
-      const intptrj_t samplingRecompileMethodAddress = reinterpret_cast<intptrj_t>(helperSymRef->getMethodAddress());
+      const intptr_t samplingRecompileMethodAddress = reinterpret_cast<intptr_t>(helperSymRef->getMethodAddress());
 
       // Encode the address of the sampling method
-      if (cg->comp()->target().is64Bit())
+      if (comp->target().is64Bit())
          {
          cursor = generateDataConstantInstruction(cg, TR::InstOpCode::DC, node, UPPER_4_BYTES(samplingRecompileMethodAddress), cursor);
          cursor->setEncodingRelocation(encodingRelocation);
@@ -240,11 +238,11 @@ TR_S390Recompilation::generatePrePrologue()
 
    AOTcgDiag3(comp, "Add encodingRelocation = %p reloType = %p symbolRef = %p\n", encodingRelocation, encodingRelocation->getReloType(), encodingRelocation->getSymbolReference());
 
-   const intptrj_t bodyInfoAddress = reinterpret_cast<intptrj_t>(getJittedBodyInfo());
+   const intptr_t bodyInfoAddress = reinterpret_cast<intptr_t>(getJittedBodyInfo());
 
    // Encode the persistent body info address. Note that we must generate this irregardless of whether we are sampling
    // or not as the counting recompilation generated in the prologue will use this location.
-   if (cg->comp()->target().is64Bit())
+   if (comp->target().is64Bit())
       {
       cursor = generateDataConstantInstruction(cg, TR::InstOpCode::DC, node, UPPER_4_BYTES(bodyInfoAddress), cursor);
       cursor->setEncodingRelocation(encodingRelocation);
@@ -315,7 +313,7 @@ TR_S390Recompilation::generatePrologue(TR::Instruction* cursor)
       return cursor;
       }
 
-   TR::Compilation* comp = TR::comp();
+   TR::Compilation *comp = this->comp();
 
    TR::CodeGenerator* cg = comp->cg();
 
@@ -403,16 +401,16 @@ TR_S390Recompilation::generatePrologue(TR::Instruction* cursor)
 
    TR::Instruction* countingRecompileMethodAddressDataConstant = NULL;
 
-   TR::SymbolReference* helperSymRef = cg->symRefTab()->findOrCreateRuntimeHelper(TR_S390countingRecompileMethod, false, false, false);
+   TR::SymbolReference* helperSymRef = cg->symRefTab()->findOrCreateRuntimeHelper(TR_S390countingRecompileMethod);
 
    // AOT relocation for the helper address
    TR::S390EncodingRelocation* encodingRelocation = new (cg->trHeapMemory()) TR::S390EncodingRelocation(TR_AbsoluteHelperAddress, NULL);
 
    AOTcgDiag4(comp, "Add encodingRelocation = %p reloType = %p symbolRef = %p helperId = %x\n", encodingRelocation, encodingRelocation->getReloType(), encodingRelocation->getSymbolReference(), TR_S390countingRecompileMethod);
 
-   const intptrj_t countingRecompileMethodAddress = reinterpret_cast<intptrj_t>(helperSymRef->getMethodAddress());
+   const intptr_t countingRecompileMethodAddress = reinterpret_cast<intptr_t>(helperSymRef->getMethodAddress());
 
-   if (cg->comp()->target().is64Bit())
+   if (comp->target().is64Bit())
       {
       cursor = generateDataConstantInstruction(cg, TR::InstOpCode::DC, node, UPPER_4_BYTES(countingRecompileMethodAddress), cursor);
       cursor->setEncodingRelocation(encodingRelocation);
@@ -488,16 +486,16 @@ TR_S390Recompilation::generatePrologue(TR::Instruction* cursor)
 
    TR::Instruction* countingPatchCallSiteAddressDataConstant = NULL;
 
-   helperSymRef = cg->symRefTab()->findOrCreateRuntimeHelper(TR_S390countingPatchCallSite, false, false, false);
+   helperSymRef = cg->symRefTab()->findOrCreateRuntimeHelper(TR_S390countingPatchCallSite);
 
    // AOT relocation for the helper address
    encodingRelocation = new (cg->trHeapMemory()) TR::S390EncodingRelocation(TR_AbsoluteHelperAddress, NULL);
 
    AOTcgDiag4(comp, "Add encodingRelocation = %p reloType = %p symbolRef = %p helperId = %x\n", encodingRelocation, encodingRelocation->getReloType(), encodingRelocation->getSymbolReference(), TR_S390countingPatchCallSite);
 
-   const intptrj_t countingPatchCallSiteAddress = reinterpret_cast<intptrj_t>(helperSymRef->getMethodAddress());
+   const intptr_t countingPatchCallSiteAddress = reinterpret_cast<intptr_t>(helperSymRef->getMethodAddress());
 
-   if (cg->comp()->target().is64Bit())
+   if (comp->target().is64Bit())
       {
       cursor = generateDataConstantInstruction(cg, TR::InstOpCode::DC, node, UPPER_4_BYTES(countingPatchCallSiteAddress), cursor);
       cursor->setEncodingRelocation(encodingRelocation);

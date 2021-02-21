@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -188,12 +188,15 @@ public:
 		bool const compressed = _extensions->compressObjectReferences();
 		J9ThreadAbstractMonitor * monitor = (J9ThreadAbstractMonitor*)objectMonitor->monitor;
 		omrobjectptr_t objectPtr = (omrobjectptr_t )monitor->userData;
+		_env->getGCEnvironment()->_scavengerJavaStats._monitorReferenceCandidates += 1;
+		
 		if(_scavenger->isObjectInEvacuateMemory(objectPtr)) {
 			MM_ForwardedHeader forwardedHeader(objectPtr, compressed);
 			omrobjectptr_t forwardPtr = forwardedHeader.getForwardedObject();
 			if(NULL != forwardPtr) {
 				monitor->userData = (uintptr_t)forwardPtr;
 			} else {
+				_env->getGCEnvironment()->_scavengerJavaStats._monitorReferenceCleared += 1;
 				monitorReferenceIterator->removeSlot();
 				/* We must call objectMonitorDestroy (as opposed to omrthread_monitor_destroy) when the
 				 * monitor is not internal to the GC
@@ -222,7 +225,7 @@ public:
 		 * However Concurrent Scavenger runs might be interlaced with STW Scavenger time to time
 		 * (for example for reducing amount of floating garbage)
 		 */
-		if (!_scavenger->isConcurrentInProgress())
+		if (!_scavenger->isConcurrentCycleInProgress())
 #endif /* defined(OMR_GC_CONCURRENT_SCAVENGER) */
 		{
 			MM_RootScanner::scanJNIWeakGlobalReferences(env);

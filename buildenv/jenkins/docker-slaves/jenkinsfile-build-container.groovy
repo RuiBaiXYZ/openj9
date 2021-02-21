@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2019 IBM Corp. and others
+ * Copyright (c) 2018, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,10 +26,10 @@ def OS = (params.OS) ? params.OS : "unknown"
 def validArch = ["x86", "s390x", "ppc64le"]
 def DOCKER_URL = (params.DOCKER_URL) ? params.DOCKER_URL : "https://hub.docker.com/r"
 
-if(params.ghprbPullId) {
+if (params.ghprbPullId) {
     PARSE = "${ghprbCommentBody}".toLowerCase().split()
-    for(i = 0; i < PARSE.length - 4; i++) {
-        if(PARSE[i] == "jenkins" && PARSE[i+1] == "build" && PARSE[i+2] == "docker") {
+    for (i = 0; i < PARSE.length - 4; i++) {
+        if (PARSE[i] == "jenkins" && PARSE[i+1] == "build" && PARSE[i+2] == "docker") {
             ARCH = PARSE[i+3]
             OS = PARSE[i+4]
             break
@@ -37,8 +37,28 @@ if(params.ghprbPullId) {
     }
 }
 
-if("${OS}" == "unknown" || !(validArch.contains(ARCH))) {
+if ("${OS}" == "unknown" || !(validArch.contains(ARCH))) {
     error("Invalid Parameters. Either ARCH:'${ARCH}' or OS:'${OS}' were not declared properly")
+}
+
+def BUILD_OPTS = ""
+if ("${OS}" == "centos6.9") {
+    if ("${ARCH}" == "x86") {
+        BUILD_OPTS = "--dist=centos --version=6.9"
+    }
+} else if ("${OS}" == "centos7") {
+    if ("${ARCH}" == "ppc64le" || "${ARCH}" == "x86") {
+        BUILD_OPTS = "--dist=centos --version=7"
+    }
+} else if ("${OS}" == "ubuntu16") {
+    BUILD_OPTS = "--dist=ubuntu --version=16.04"
+} else if ("${OS}" == "ubuntu18") {
+    BUILD_OPTS = "--dist=ubuntu --version=18.04"
+} else if ("${OS}" == "ubuntu20") {
+    BUILD_OPTS = "--dist=ubuntu --version=20.04"
+}
+if ("${BUILD_OPTS}" == "") {
+    error("Invalid Parameters. OS:'${OS}' is not supported on ${ARCH}")
 }
 
 def NODE = (params.NODE) ? params.NODE : "sw.tool.docker && hw.arch.${ARCH}"
@@ -62,22 +82,22 @@ timeout(time: 5, unit: 'HOURS') {
                     }
                 }
                 stage("Build") {
-                    if(params.ghprbPullId) {
-                        TAGS = "-t ${REPOSITORY}:PR${ghprbPullId}"
+                    if (params.ghprbPullId) {
+                        TAGS = "--tag=${REPOSITORY}:PR${ghprbPullId}"
                     } else {
-                        TAGS = "-t ${REPOSITORY}:${BUILD_NUMBER} -t ${REPOSITORY}:latest"
+                        TAGS = "--tag=${REPOSITORY}:${BUILD_NUMBER} --tag=${REPOSITORY}:latest"
                     }
-                    dir("buildenv/jenkins/docker-slaves/${ARCH}/${OS}") {
+                    dir("buildenv/docker") {
                         sh "cp ${WORKSPACE}/buildenv/jenkins/authorized_keys ./"
-                        sh "touch ./known_hosts"
-                        if(env.KNOWN_HOSTS){
-                            sh "ssh-keyscan ${KNOWN_HOSTS} >> ./known_hosts"
+                        sh "touch known_hosts"
+                        if (env.KNOWN_HOSTS) {
+                            sh "ssh-keyscan ${KNOWN_HOSTS} >> known_hosts"
                         }
-                        sh "docker build -f Dockerfile ${TAGS} ."
+                        sh "bash mkdocker.sh --build ${BUILD_OPTS} ${TAGS}"
                     }
                 }
                 stage("Push") {
-                    def CREDENTIALS_ID = (params.credentialsId) ? params.credentialsId : '7fb9f8f0-14bf-469a-9132-91db4dd80c48'
+                    def CREDENTIALS_ID = (params.credentialsId) ? params.credentialsId : 'docker-login'
                     def DOCKER_LOGIN_URL = (params.DOCKER_LOGIN_URL) ? params.DOCKER_LOGIN_URL : ""
                     sh 'docker images'
                     withCredentials([usernamePassword(credentialsId: CREDENTIALS_ID, passwordVariable: 'PASS', usernameVariable: 'USER')]) {

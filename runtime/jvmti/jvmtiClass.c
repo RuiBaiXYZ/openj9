@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -82,21 +82,22 @@ static jvmtiError jvmtiGetConstantPool_addInvokeDynamic(jvmtiGcp_translation *tr
 static jint
 jvmtiGetLoadedClassesCount(J9JavaVM * vm)
 {
+	J9InternalVMFunctions const * const vmfuncs = vm->internalVMFunctions;
 	J9ClassWalkState classWalkState;
 	jint classCount = 0;
-	J9Class *clazz;
+	J9Class *clazz = NULL;
 
 	/* Count classes (ignore primitive types and old versions of redefined classes) */
-	clazz = vm->internalVMFunctions->allLiveClassesStartDo(&classWalkState, vm, NULL);
+	clazz = vmfuncs->allLiveClassesStartDo(&classWalkState, vm, NULL);
 	while (clazz) {
 		if (J9ROMCLASS_IS_PRIMITIVE_TYPE(clazz->romClass) == 0) {
 			if ((J9CLASS_FLAGS(clazz) & J9AccClassHotSwappedOut) == 0) {
 				classCount++;
 			}
 		}
-		clazz = vm->internalVMFunctions->allLiveClassesNextDo(&classWalkState);
+		clazz = vmfuncs->allLiveClassesNextDo(&classWalkState);
 	}
-	vm->internalVMFunctions->allLiveClassesEndDo(&classWalkState);
+	vmfuncs->allLiveClassesEndDo(&classWalkState);
 
 	return classCount;
 }
@@ -114,6 +115,7 @@ jvmtiGetLoadedClasses(jvmtiEnv* env,
 	PORT_ACCESS_FROM_JAVAVM(vm);
 	jclass *rv_classes = NULL;
 	jint rv_class_count = 0;
+	J9InternalVMFunctions const * const vmfuncs = vm->internalVMFunctions;
 
 	Trc_JVMTI_jvmtiGetLoadedClasses_Entry(env);
 
@@ -123,7 +125,7 @@ jvmtiGetLoadedClasses(jvmtiEnv* env,
 		jint lastClassCount;
 		J9Class *clazz;
 
-		vm->internalVMFunctions->internalEnterVMFromJNI(currentThread);
+		vmfuncs->internalEnterVMFromJNI(currentThread);
 
 		ENSURE_PHASE_LIVE(env);
 
@@ -144,7 +146,7 @@ jvmtiGetLoadedClasses(jvmtiEnv* env,
 			jint i = 0;
 
 			/* Copy class references (ignore primitive types and old versions of redefined classes) */
-			clazz = vm->internalVMFunctions->allLiveClassesStartDo(&classWalkState, vm, NULL);
+			clazz = vmfuncs->allLiveClassesStartDo(&classWalkState, vm, NULL);
 			while (clazz) {
 				/* Check if we need more memory */
 				if (i == lastClassCount) {
@@ -156,7 +158,7 @@ jvmtiGetLoadedClasses(jvmtiEnv* env,
 						/* realloc failed - need to free the original allocation */
 						j9mem_free_memory(classRefs);
 						classRefs = NULL;
-						vm->internalVMFunctions->allLiveClassesEndDo(&classWalkState);
+						vmfuncs->allLiveClassesEndDo(&classWalkState);
 						omrthread_monitor_exit(vm->classTableMutex);
 						rc = JVMTI_ERROR_OUT_OF_MEMORY;
 						goto done;
@@ -166,13 +168,13 @@ jvmtiGetLoadedClasses(jvmtiEnv* env,
 
 				if (J9ROMCLASS_IS_PRIMITIVE_TYPE(clazz->romClass) == 0) {
 					if ((J9CLASS_FLAGS(clazz) & J9AccClassHotSwappedOut) == 0) {
-						classRefs[i++] = (jclass)vm->internalVMFunctions->j9jni_createLocalRef((JNIEnv *) currentThread, J9VM_J9CLASS_TO_HEAPCLASS(clazz));
+						classRefs[i++] = (jclass)vmfuncs->j9jni_createLocalRef((JNIEnv *) currentThread, J9VM_J9CLASS_TO_HEAPCLASS(clazz));
 					}
 				}
 
-				clazz = vm->internalVMFunctions->allLiveClassesNextDo(&classWalkState);
+				clazz = vmfuncs->allLiveClassesNextDo(&classWalkState);
 			}
-			vm->internalVMFunctions->allLiveClassesEndDo(&classWalkState);
+			vmfuncs->allLiveClassesEndDo(&classWalkState);
 
 			jvmtiData->lastClassCount = (UDATA) i;
 			rv_class_count = i;
@@ -182,7 +184,7 @@ jvmtiGetLoadedClasses(jvmtiEnv* env,
 		omrthread_monitor_exit(vm->classTableMutex);
 
 done:
-		vm->internalVMFunctions->internalExitVMToJNI(currentThread);
+		vmfuncs->internalExitVMToJNI(currentThread);
 	}
 
 	if (NULL != class_count_ptr) {
@@ -202,12 +204,8 @@ jvmtiGetClassLoaderClasses(jvmtiEnv* env,
 	jclass** classes_ptr)
 {
 	J9JavaVM * vm = JAVAVM_FROM_ENV(env);
-	J9VMThread * currentThread;
-	J9ClassLoader * loader;
-	jvmtiError rc;
-	J9HashTableState walkState;
-	J9Class* clazz;
-	PORT_ACCESS_FROM_JAVAVM(vm);
+	J9VMThread * currentThread = NULL;
+	jvmtiError rc = JVMTI_ERROR_NONE;
 	jint rv_class_count = 0;
 	jclass *rv_classes = NULL;
 
@@ -215,9 +213,15 @@ jvmtiGetClassLoaderClasses(jvmtiEnv* env,
 
 	rc = getCurrentVMThread(vm, &currentThread);
 	if (rc == JVMTI_ERROR_NONE) {
-		J9JVMTIClassStats stats;
+		J9InternalVMFunctions const * const vmFuncs = vm->internalVMFunctions;
+		J9ClassLoader *loader = NULL;
+		J9Class *clazz = NULL;
+		PORT_ACCESS_FROM_JAVAVM(vm);
+		J9JVMTIClassStats stats = {0};
+		J9HashTableState hashWalkState = {0};
+		J9Class **primitiveArray = NULL;
 
-		vm->internalVMFunctions->internalEnterVMFromJNI(currentThread);
+		vmFuncs->internalEnterVMFromJNI(currentThread);
 
 		ENSURE_PHASE_LIVE(env);
 
@@ -237,39 +241,49 @@ jvmtiGetClassLoaderClasses(jvmtiEnv* env,
 
 		omrthread_monitor_enter(vm->classTableMutex);
 
-		memset(&stats, 0, sizeof(J9JVMTIClassStats));
-
 		stats.vm = vm;
 		stats.currentThread = currentThread;
-
 		/* Search for classes who have this class loader as the initiating loader (wind up count) */
-		clazz = vm->internalVMFunctions->hashClassTableStartDo(loader, &walkState);
+		clazz = vmFuncs->hashClassTableStartDo(loader, &hashWalkState, J9_HASH_TABLE_STATE_FLAG_SKIP_HIDDEN);
 		while (clazz != NULL) {
 			countInitiatedClass(clazz, &stats);
-			clazz = vm->internalVMFunctions->hashClassTableNextDo(&walkState);
+			clazz = vmFuncs->hashClassTableNextDo(&hashWalkState);
 		}
+
+		/* The base type primitive array classes must also be added */
+		primitiveArray = &vm->booleanArrayClass;
+		do {
+			countInitiatedClass(*primitiveArray, &stats);
+			primitiveArray += 1;
+		} while (primitiveArray <= &vm->longArrayClass);
 
 		stats.classRefs = j9mem_allocate_memory(stats.classCount * sizeof(jclass), J9MEM_CATEGORY_JVMTI_ALLOCATE);
 		if (stats.classRefs == NULL) {
 			rc = JVMTI_ERROR_OUT_OF_MEMORY;
 		} else {
-
 			/* Save count before it gets modified below... */
 			rv_class_count = (jint) stats.classCount;
 			rv_classes = stats.classRefs;
 
 			/* Record classes who have this class loader as the initiating loader (wind down count) */
-			clazz = vm->internalVMFunctions->hashClassTableStartDo(loader, &walkState);
+			clazz = vmFuncs->hashClassTableStartDo(loader, &hashWalkState, J9_HASH_TABLE_STATE_FLAG_SKIP_HIDDEN);
 			while (clazz != NULL) {
 				copyInitiatedClass(clazz, &stats);
-				clazz = vm->internalVMFunctions->hashClassTableNextDo(&walkState);
+				clazz = vmFuncs->hashClassTableNextDo(&hashWalkState);
 			}
+
+			/* The base type primitive array classes must also be added */
+			primitiveArray = &vm->booleanArrayClass;
+			do {
+				copyInitiatedClass(*primitiveArray, &stats);
+				primitiveArray += 1;
+			} while (primitiveArray <= &vm->longArrayClass);
 		}
 
 		omrthread_monitor_exit(vm->classTableMutex);
 
 done:
-		vm->internalVMFunctions->internalExitVMToJNI(currentThread);
+		vmFuncs->internalExitVMToJNI(currentThread);
 	}
 
 	if (NULL != class_count_ptr) {
@@ -1159,107 +1173,106 @@ redefineClassesCommon(jvmtiEnv* env,
 		/* Recreate the RAM classes for all classes */
 
 		rc = recreateRAMClasses(currentThread, classPairs, methodPairs, extensionsUsed, !extensionsEnabled);
-		if (rc == JVMTI_ERROR_NONE) {
+		if (rc != JVMTI_ERROR_NONE) {
+			goto failedWithVMAccess;
+		}
+		if (!extensionsEnabled) {
+			/* Fast HCR path - where the J9Class is redefined in place. */
 
-			if (!extensionsEnabled) {
-				/* Fast HCR path - where the J9Class is redefined in place. */
+			/* Add method equivalences for the methods that were re-defined (reverse of before!). Propagate any equivalent resolved callsites. */
+			rc = fixMethodEquivalencesAndCallSites(currentThread, classPairs, jitEventDataPtr, TRUE, &methodEquivalences, extensionsUsed);
+			if (rc != JVMTI_ERROR_NONE) {
+				goto failedWithVMAccess;
+			}
+			/* Fix the vTables of all subclasses */
+			fixVTables_forNormalRedefine(currentThread, classPairs, methodPairs, TRUE, &methodEquivalences);
 
-				/* Add method equivalences for the methods that were re-defined (reverse of before!). Propagate any equivalent resolved callsites. */
-				rc = fixMethodEquivalencesAndCallSites(currentThread, classPairs, jitEventDataPtr, TRUE, &methodEquivalences, extensionsUsed);
-				if (rc != JVMTI_ERROR_NONE) {
-					goto failed;
-				}
-				/* Fix the vTables of all subclasses */
-				fixVTables_forNormalRedefine(currentThread, classPairs, methodPairs, TRUE, &methodEquivalences);
+			/* Update method references in DirectHandles */
+			fixDirectHandles(currentThread, classPairs, methodPairs);
 
-				/* Update method references in DirectHandles */
-				fixDirectHandles(currentThread, classPairs, methodPairs);
+			/* Fix JNI */
+			fixJNIRefs(currentThread, classPairs, TRUE, extensionsUsed);
 
-				/* Fix JNI */
-				fixJNIRefs(currentThread, classPairs, TRUE, extensionsUsed);
+			/* Fix resolved constant pool references to point to new methods. */
+			fixConstantPoolsForFastHCR(currentThread, classPairs, methodPairs);
 
-				/* Fix resolved constant pool references to point to new methods. */
-				fixConstantPoolsForFastHCR(currentThread, classPairs, methodPairs);
+			/* Flush the reflect method cache */
+			flushClassLoaderReflectCache(currentThread, classPairs);
 
-				/* Flush the reflect method cache */
-				flushClassLoaderReflectCache(currentThread, classPairs);
+			/* Store the method remap indices for redefined interface classes */
+			updateInterfaceMethodOrdering(currentThread, class_count, specifiedClasses);
 
-				/* Store the method remap indices for redefined interface classes */
-				updateInterfaceMethodOrdering(currentThread, class_count, specifiedClasses);
+			/* Indicate that a redefine has occurred */
+			vm->hotSwapCount += 1;
 
-				/* Indicate that a redefine has occurred */
-				vm->hotSwapCount += 1;
+			/* Notify the JIT about redefined classes */
+			jitClassRedefineEvent(currentThread, &jitEventData, FALSE);
 
-				/* Notify the JIT about redefined classes */
-				jitClassRedefineEvent(currentThread, &jitEventData, FALSE);
+		} else {
 
-			} else {
+			/* Clear/suspend all breakpoints in the classes being replaced */
+			clearBreakpointsInClasses(currentThread, classPairs);
 
-				/* Clear/suspend all breakpoints in the classes being replaced */
-				clearBreakpointsInClasses(currentThread, classPairs);
+			/* Fix static refs */
+			fixStaticRefs(currentThread, classPairs, extensionsUsed);
 
-				/* Fix static refs */
-				fixStaticRefs(currentThread, classPairs, extensionsUsed);
- 
-				/* Update heap references */
-				fixHeapRefs(vm, classPairs);
+			/* Update heap references */
+			fixHeapRefs(vm, classPairs);
 
-				/* Update method references in DirectHandles */
-				fixDirectHandles(currentThread, classPairs, methodPairs);
- 
-				/* Copy preserved values */
-				copyPreservedValues(currentThread, classPairs, extensionsUsed);
+			/* Update method references in DirectHandles */
+			fixDirectHandles(currentThread, classPairs, methodPairs);
 
-				/* Update the componentType and leafComponentType fields of array classes */
-				fixArrayClasses(currentThread, classPairs);
+			/* Copy preserved values */
+			copyPreservedValues(currentThread, classPairs, extensionsUsed);
 
-				/* Fix JNI */
-				fixJNIRefs(currentThread, classPairs, FALSE, extensionsUsed);
+			/* Update the componentType and leafComponentType fields of array classes */
+			fixArrayClasses(currentThread, classPairs);
 
-				/* Update the iTables of any classes which implement a replaced interface */
-				fixITables(currentThread, classPairs);
+			/* Fix JNI */
+			fixJNIRefs(currentThread, classPairs, FALSE, extensionsUsed);
 
-				/* Fix subclass hierarchy */
-				fixSubclassHierarchy(currentThread, classPairs);
- 
-				/* Unresolve all classes */
-				unresolveAllClasses(currentThread, classPairs, methodPairs, extensionsUsed);
- 
-				/* Update method equivalences. Propagate any equivalent resolved callsites. */
-				rc = fixMethodEquivalencesAndCallSites(currentThread, classPairs, jitEventDataPtr, FALSE, &methodEquivalences, extensionsUsed);
-				if (rc != JVMTI_ERROR_NONE) {
-					goto failed;
-				}
-				/* Fix the vTables of all subclasses */
-				if (!extensionsUsed) {
-					fixVTables_forNormalRedefine(currentThread, classPairs, methodPairs, FALSE, &methodEquivalences);
-				}
+			/* Update the iTables of any classes which implement a replaced interface */
+			fixITables(currentThread, classPairs);
 
-				/* Restore breakpoints in the implicitly replaced classes */
-				restoreBreakpointsInClasses(currentThread, classPairs);
+			/* Fix subclass hierarchy */
+			fixSubclassHierarchy(currentThread, classPairs);
 
-				/* Flush the reflect method cache */
-				flushClassLoaderReflectCache(currentThread, classPairs);
+			/* Unresolve all classes */
+			unresolveAllClasses(currentThread, classPairs, methodPairs, extensionsUsed);
 
-				/* Fix watched fields */
-				fixWatchedFields(vm, classPairs);
+			/* Update method equivalences. Propagate any equivalent resolved callsites. */
+			rc = fixMethodEquivalencesAndCallSites(currentThread, classPairs, jitEventDataPtr, FALSE, &methodEquivalences, extensionsUsed);
+			if (rc != JVMTI_ERROR_NONE) {
+				goto failedWithVMAccess;
+			}
+			/* Fix the vTables of all subclasses */
+			if (!extensionsUsed) {
+				fixVTables_forNormalRedefine(currentThread, classPairs, methodPairs, FALSE, &methodEquivalences);
+			}
 
-				/* Indicate that a redefine has occurred */
-				vm->hotSwapCount += 1;
+			/* Restore breakpoints in the implicitly replaced classes */
+			restoreBreakpointsInClasses(currentThread, classPairs);
 
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
-				/* Update nests with redefined nest tops */
-				fixNestMembers(currentThread, classPairs);
-#endif /* defined(J9VM_OPT_VALHALLA_NESTMATES) */
+			/* Flush the reflect method cache */
+			flushClassLoaderReflectCache(currentThread, classPairs);
+
+			/* Fix watched fields */
+			fixWatchedFields(vm, classPairs);
+
+			/* Indicate that a redefine has occurred */
+			vm->hotSwapCount += 1;
+
+#if JAVA_SPEC_VERSION >= 11
+			/* Update nests with redefined nest tops */
+			fixNestMembers(currentThread, classPairs);
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 #ifdef J9VM_INTERP_NATIVE_SUPPORT
-				/* Notify the JIT about redefined classes */
-				jitClassRedefineEvent(currentThread, &jitEventData, extensionsEnabled);
+			/* Notify the JIT about redefined classes */
+			jitClassRedefineEvent(currentThread, &jitEventData, extensionsEnabled);
 #endif
-			}
 		}
 		notifyGCOfClassReplacement(currentThread, classPairs, !extensionsEnabled);
-		hashTableFree(classPairs);
 	}
 
 	J9JVMTI_DATA_FROM_VM(vm)->flags = J9JVMTI_DATA_FROM_VM(vm)->flags & ~J9JVMTI_FLAG_REDEFINE_CLASS_EXTENSIONS_USED;
@@ -1267,6 +1280,10 @@ redefineClassesCommon(jvmtiEnv* env,
 	if (rc == JVMTI_ERROR_NONE) {
 		TRIGGER_J9HOOK_VM_CLASSES_REDEFINED(vm->hookInterface, currentThread);
 	}
+
+failedWithVMAccess:
+
+	hashTableFree(classPairs);
 
 	if (safePoint) {
 		vm->internalVMFunctions->releaseSafePointVMAccess(currentThread);
@@ -1351,7 +1368,10 @@ countInitiatedClass(J9Class * clazz, J9JVMTIClassStats * results)
 	if (((J9CLASS_FLAGS(clazz) & J9AccClassHotSwappedOut) == 0) &&
 		((J9ROMCLASS_IS_PRIMITIVE_TYPE(clazz->romClass)) == 0)) {
 
-		results->classCount++;
+		do {
+			results->classCount += 1;
+			clazz = clazz->arrayClass;
+		} while (NULL != clazz);
 	}
 
 	return 0;
@@ -1366,16 +1386,22 @@ copyInitiatedClass(J9Class * clazz, J9JVMTIClassStats * results)
 		(J9ROMCLASS_IS_PRIMITIVE_TYPE(clazz->romClass) == 0)) {
 
 		J9JavaVM * vm = results->vm;
+		J9InternalVMFunctions const * const vmFuncs = vm->internalVMFunctions;
 		JNIEnv * jniEnv = (JNIEnv *)results->currentThread;
-		jint slot = (jint)results->classCount - 1;
 
-		/* Reverse fill */
-		if (slot >= 0) {
-			j9object_t classObject = J9VM_J9CLASS_TO_HEAPCLASS(clazz);
-			
-			results->classRefs[slot] = (jclass)vm->internalVMFunctions->j9jni_createLocalRef(jniEnv, classObject);
-			results->classCount = slot;
-		}
+		do {
+			jint slot = (jint)results->classCount - 1;
+
+			/* Reverse fill */
+			if (slot >= 0) {
+				j9object_t classObject = J9VM_J9CLASS_TO_HEAPCLASS(clazz);
+				
+				results->classRefs[slot] = (jclass)vmFuncs->j9jni_createLocalRef(jniEnv, classObject);
+				results->classCount = slot;
+			}
+
+			clazz = clazz->arrayClass;
+		} while (NULL != clazz);
 	}
 
 	return 0;

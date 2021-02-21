@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -49,7 +49,6 @@ TR_RelocationTarget::isOrderedPairRelocation(TR_RelocationRecord *reloRecord, TR
    switch (reloRecord->type(reloTarget))
       {
       case TR_AbsoluteMethodAddressOrderedPair :
-      case TR_ConstantPoolOrderedPair :
          return true;
       default:
       	return false;
@@ -156,7 +155,7 @@ TR_RelocationTarget::loadCPIndex(uint8_t *reloLocation)
    return 0;
    }
 
-uintptrj_t
+uintptr_t
 TR_RelocationTarget::loadThunkCPIndex(uint8_t *reloLocation)
    {
    TR_ASSERT(0, "Error: loadThunkCPIndex not implemented in relocation target base class");
@@ -256,12 +255,6 @@ void
 TR_RelocationTarget::patchNonVolatileFieldMemoryFence(J9ROMFieldShape* resolvedField, UDATA cpAddr, U_8 descriptorByte, U_8 *instructionAddress, U_8 *snippetStartAddress, J9JavaVM *javaVM)
    {
    TR_ASSERT(0, "Error: patchNonVolatileFieldMemoryFence not implemented in relocation target base class");
-   }
-
-void
-TR_RelocationTarget::patchMTIsolatedOffset(uint32_t offset, uint8_t *reloLocation)
-   {
-   TR_ASSERT(0, "Error: patchMTIsolatedOffset not implemented in relocation target base class");
    }
 
 void

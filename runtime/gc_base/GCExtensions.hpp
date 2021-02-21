@@ -69,7 +69,7 @@ class GC_FinalizeListManager;
 class MM_ReferenceObjectList;
 #endif /* J9VM_GC_REALTIME */
 
-#if defined(J9VM_GC_IDLE_HEAP_MANAGER)
+#if defined(OMR_GC_IDLE_HEAP_MANAGER)
 class MM_IdleGCManager;
 #endif
 
@@ -140,8 +140,8 @@ public:
 	MM_ObjectAccessBarrier* accessBarrier;
 
 #if defined(J9VM_GC_FINALIZATION)
-	UDATA finalizeMasterPriority; /**< cmd line option to set finalize master thread priority */
-	UDATA finalizeSlavePriority; /**< cmd line option to set finalize slave thread priority */
+	UDATA finalizeMainPriority; /**< cmd line option to set finalize main thread priority */
+	UDATA finalizeWorkerPriority; /**< cmd line option to set finalize worker thread priority */
 #endif /* J9VM_GC_FINALIZATION */
 
 	MM_ClassLoaderManager* classLoaderManager; /**< Pointer to the gc's classloader manager to process classloaders/classes */
@@ -180,7 +180,7 @@ public:
 
 	bool _HeapManagementMXBeanBackCompatibilityEnabled;
 
-#if defined(J9VM_GC_IDLE_HEAP_MANAGER)
+#if defined(OMR_GC_IDLE_HEAP_MANAGER)
 	MM_IdleGCManager* idleGCManager; /**< Manager which registers for VM Runtime State notification & manages free heap on notification */
 #endif
 
@@ -298,8 +298,8 @@ public:
 		, _stringTableListToTreeThreshold(1024)
 		, maxSoftReferenceAge(32)
 #if defined(J9VM_GC_FINALIZATION)
-		, finalizeMasterPriority(J9THREAD_PRIORITY_NORMAL)
-		, finalizeSlavePriority(J9THREAD_PRIORITY_NORMAL)
+		, finalizeMainPriority(J9THREAD_PRIORITY_NORMAL)
+		, finalizeWorkerPriority(J9THREAD_PRIORITY_NORMAL)
 #endif /* J9VM_GC_FINALIZATION */
 		, classLoaderManager(NULL)
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
@@ -312,7 +312,7 @@ public:
 		, _asyncCallbackKey(-1)
 		, _TLHAsyncCallbackKey(-1)
 		, _HeapManagementMXBeanBackCompatibilityEnabled(false)
-#if defined(J9VM_GC_IDLE_HEAP_MANAGER)
+#if defined(OMR_GC_IDLE_HEAP_MANAGER)
 		, idleGCManager(NULL)
 #endif
 		, maxRAMPercent(0.0) /* this would get overwritten by user specified value */

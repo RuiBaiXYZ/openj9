@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Copyright (c) 2018, 2019 IBM Corp. and others
+Copyright (c) 2018, 2020 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -117,6 +117,9 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<project id="compiler"/>
 	</source>
 	<flags>
+		<flag id="interp_atomicFreeJni" value="true"/>
+		<flag id="interp_atomicFreeJniUsesFlush" value="true"/>
+		<flag id="interp_twoPassExclusive" value="true"/>
 		<flag id="arch_x86" value="true"/>
 		<flag id="build_SE6_package" value="true"/>
 		<flag id="build_dropToHursley" value="true"/>
@@ -131,8 +134,8 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="env_littleEndian" value="true"/>
 		<flag id="gc_batchClearTLH" value="true"/>
 		<flag id="gc_debugAsserts" value="true"/>
-		<flag id="gc_idleHeapManager" value="true"/>
 		<flag id="gc_inlinedAllocFields" value="true"/>
+		<flag id="gc_enableDoubleMap" value="true"/>
 		<flag id="gc_minimumObjectSize" value="true"/>
 		<flag id="gc_tlhPrefetchFTA" value="true"/>
 		<flag id="graph_cmdLineTester" value="true"/>
@@ -220,7 +223,6 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="opt_jvmti" value="true"/>
 		<flag id="opt_jxeLoadSupport" value="true"/>
 		<flag id="opt_memoryCheckSupport" value="true"/>
-		<flag id="opt_methodHandle" value="true"/>
 		<flag id="opt_multiVm" value="true"/>
 		<flag id="opt_panama" value="false"/>
 		<flag id="opt_reflect" value="true"/>

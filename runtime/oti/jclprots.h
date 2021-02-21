@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -27,9 +27,7 @@
 extern "C" {
 #endif
 
-
 #include "jcl.h"
-
 
 jint initializeJCLSystemProperties(J9JavaVM * vm);
 
@@ -362,6 +360,9 @@ Java_com_ibm_lang_management_internal_ExtendedGarbageCollectorMXBeanImpl_getLast
 /* BBjclNativesCommonClassLoader*/
 jboolean JNICALL Java_java_lang_ClassLoader_isVerboseImpl (JNIEnv *env, jclass clazz);
 jclass JNICALL Java_java_lang_ClassLoader_defineClassImpl (JNIEnv *env, jobject receiver, jstring className, jbyteArray classRep, jint offset, jint length, jobject protectionDomain);
+#if JAVA_SPEC_VERSION >= 15
+jclass JNICALL Java_java_lang_ClassLoader_defineClassImpl1(JNIEnv *env, jobject receiver, jclass hostClass, jstring className, jbyteArray classRep, jobject protectionDomain, jboolean init, jint flags, jobject classData);
+#endif /* JAVA_SPEC_VERSION >= 15 */
 jboolean JNICALL Java_java_lang_ClassLoader_foundJavaAssertOption (JNIEnv *env, jclass ignored);
 jint JNICALL Java_com_ibm_oti_vm_BootstrapClassLoader_addJar(JNIEnv *env, jobject receiver, jbyteArray jarPath);
 
@@ -412,9 +413,9 @@ Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getMaxHeapSizeLimitI
 extern J9_CFUNC jlong JNICALL
 Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getMinHeapSizeImpl (JNIEnv *env, jobject beanInstance);
 extern J9_CFUNC jlong JNICALL
-Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getGCMasterThreadCpuUsedImpl(JNIEnv *env, jobject beanInstance);
+Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getGCMainThreadCpuUsedImpl(JNIEnv *env, jobject beanInstance);
 extern J9_CFUNC jlong JNICALL
-Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getGCSlaveThreadsCpuUsedImpl(JNIEnv *env, jobject beanInstance);
+Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getGCWorkerThreadsCpuUsedImpl(JNIEnv *env, jobject beanInstance);
 extern J9_CFUNC jint JNICALL 
 Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getMaximumGCThreadsImpl(JNIEnv *env, jobject beanInstance);
 extern J9_CFUNC jint JNICALL 
@@ -661,7 +662,7 @@ void JNICALL
 Java_sun_misc_Unsafe_setMemory__Ljava_lang_Object_2JJB(JNIEnv *env, jobject receiver, jobject obj, jlong offset, jlong size, jbyte value);
 void JNICALL Java_sun_misc_Unsafe_registerNatives(JNIEnv *env, jclass clazz);
 void JNICALL Java_jdk_internal_misc_Unsafe_registerNatives(JNIEnv *env, jclass clazz);
-jboolean JNICALL Java_jdk_internal_misc_Unsafe_shouldBeInitialized(JNIEnv *env, jobject receiver, jclass clazz);
+jboolean JNICALL Java_sun_misc_Unsafe_shouldBeInitialized(JNIEnv *env, jobject receiver, jclass clazz);
 jint JNICALL Java_sun_misc_Unsafe_pageSize(JNIEnv *env, jobject receiver);
 jint JNICALL Java_sun_misc_Unsafe_getLoadAverage(JNIEnv *env, jobject receiver, jdoubleArray loadavg, jint nelems);
 jboolean JNICALL Java_sun_misc_Unsafe_unalignedAccess0(JNIEnv *env, jobject receiver);
@@ -677,6 +678,13 @@ void JNICALL Java_jdk_internal_misc_Unsafe_copySwapMemory0(JNIEnv *env, jobject 
 jobject JNICALL Java_jdk_internal_misc_Unsafe_compareAndExchangeObjectVolatile(JNIEnv *env, jobject receiver, jobject obj1, jlong size, jobject obj2, jobject obj3);
 jint JNICALL Java_jdk_internal_misc_Unsafe_compareAndExchangeIntVolatile(JNIEnv *env, jobject receiver, jobject obj1, jlong size1, jint size2, jint size3);
 jlong JNICALL Java_jdk_internal_misc_Unsafe_compareAndExchangeLongVolatile(JNIEnv *env, jobject receiver, jobject obj1, jlong size1, jlong size2, jlong size3);
+
+/* vector natives */
+jint JNICALL
+Java_jdk_internal_vm_vector_VectorSupport_registerNatives(JNIEnv *env, jclass clazz);
+jint JNICALL
+Java_jdk_internal_vm_vector_VectorSupport_getMaxLaneCount(JNIEnv *env, jclass clazz, jclass elementType);
+
 
 /* BBjclNativesCommonVM*/
 jint JNICALL Java_com_ibm_oti_vm_VM_getBootClassPathCount (JNIEnv * env, jclass clazz);
@@ -708,7 +716,7 @@ UDATA initializeRequiredClasses(J9VMThread *vmThread, char* libName);
 /* J9SourceJclDefineClass*/
 extern J9_CFUNC jclass 
 defineClassCommon (JNIEnv *env, jobject classLoaderObject,
-	jstring className, jbyteArray classRep, jint offset, jint length, jobject protectionDomain, UDATA options, J9Class *hostClass, J9ClassPatchMap *patchMap);
+	jstring className, jbyteArray classRep, jint offset, jint length, jobject protectionDomain, UDATA *options, J9Class *hostClass, J9ClassPatchMap *patchMap, BOOLEAN validateName);
 
 /* BBjclNativesCommonAccessController*/
 jboolean JNICALL Java_java_security_AccessController_initializeInternal (JNIEnv *env, jclass thisClz);
@@ -895,10 +903,10 @@ jobject JNICALL Java_java_security_AccessController_getCallerPD(JNIEnv* env, jcl
 jobject JNICALL Java_com_ibm_oti_vm_VM_getClassNameImpl(JNIEnv *env, jclass recv, jclass jlClass);
 jobject JNICALL Java_java_lang_Class_getDeclaredFieldImpl(JNIEnv *env, jobject recv, jstring jname);
 jarray JNICALL Java_java_lang_Class_getDeclaredFieldsImpl(JNIEnv *env, jobject recv);
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 jobject JNICALL Java_java_lang_Class_getNestHostImpl(JNIEnv *env, jobject recv);
 jobject JNICALL Java_java_lang_Class_getNestMembersImpl(JNIEnv *env, jobject recv);
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 /* sun_misc_Perf.c */
 void JNICALL Java_sun_misc_Perf_registerNatives(JNIEnv *env, jclass klass);
@@ -937,10 +945,34 @@ Java_java_lang_invoke_MethodHandles_findNativeAddress(JNIEnv *env, jclass jlClas
 
 /* java_dyn_methodtype.c */
 jobject JNICALL Java_java_lang_invoke_MethodType_makeTenured(JNIEnv *env, jclass clazz, jobject receiverObject);
+#if JAVA_SPEC_VERSION >= 15
+extern J9_CFUNC void JNICALL
+Java_java_lang_invoke_MethodHandleNatives_checkClassBytes(JNIEnv *env, jclass jlClass, jbyteArray classRep);
+#endif /* JAVA_SPEC_VERSION >= 15 */
+
+/* java_lang_invoke_MethodHandleNatives.cpp */
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+void JNICALL Java_java_lang_invoke_MethodHandleNatives_init(JNIEnv *env, jclass clazz, jobject self, jobject ref);
+void JNICALL Java_java_lang_invoke_MethodHandleNatives_expand(JNIEnv *env, jclass clazz, jobject self);
+jobject JNICALL Java_java_lang_invoke_MethodHandleNatives_resolve(JNIEnv *env, jclass clazz, jobject self, jclass caller, jboolean speculativeResolve);
+jint JNICALL Java_java_lang_invoke_MethodHandleNatives_getMembers(JNIEnv *env, jclass clazz, jclass defc, jstring matchName, jstring matchSig, jint matchFlags, jclass caller, jint skip, jobjectArray results);
+jlong JNICALL Java_java_lang_invoke_MethodHandleNatives_objectFieldOffset(JNIEnv *env, jclass clazz, jobject self);
+jlong JNICALL Java_java_lang_invoke_MethodHandleNatives_staticFieldOffset(JNIEnv *env, jclass clazz, jobject self);
+jobject JNICALL Java_java_lang_invoke_MethodHandleNatives_staticFieldBase(JNIEnv *env, jclass clazz, jobject self);
+jobject JNICALL Java_java_lang_invoke_MethodHandleNatives_getMemberVMInfo(JNIEnv *env, jclass clazz, jobject self);
+void JNICALL Java_java_lang_invoke_MethodHandleNatives_setCallSiteTargetNormal(JNIEnv *env, jclass clazz, jobject callsite, jobject target);
+void JNICALL Java_java_lang_invoke_MethodHandleNatives_setCallSiteTargetVolatile(JNIEnv *env, jclass clazz, jobject callsite, jobject target);
+void JNICALL Java_java_lang_invoke_MethodHandleNatives_copyOutBootstrapArguments(JNIEnv *env, jclass clazz, jclass caller, jintArray indexInfo, jint start, jint end, jobjectArray buf, jint pos, jboolean resolve, jobject ifNotAvailable);
+void JNICALL Java_java_lang_invoke_MethodHandleNatives_clearCallSiteContext(JNIEnv *env, jclass clazz, jobject context);
+jint JNICALL Java_java_lang_invoke_MethodHandleNatives_getNamedCon(JNIEnv *env, jclass clazz, jint which, jobjectArray name);
+void JNICALL Java_java_lang_invoke_MethodHandleNatives_registerNatives(JNIEnv *env, jclass clazz);
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 
 /* java_lang_invoke_VarHandle.c */
+#if defined(J9VM_OPT_METHOD_HANDLE)
 jlong JNICALL Java_java_lang_invoke_FieldVarHandle_lookupField(JNIEnv *env, jobject handle, jclass lookupClass, jstring name, jstring signature, jclass type, jboolean isStatic, jclass accessClass);
 jlong JNICALL Java_java_lang_invoke_FieldVarHandle_unreflectField(JNIEnv *env, jobject handle, jobject reflectField, jboolean isStatic);
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
 jobject JNICALL Java_java_lang_invoke_VarHandle_get(JNIEnv *env, jobject handle, jobject args);
 void JNICALL Java_java_lang_invoke_VarHandle_set(JNIEnv *env, jobject handle, jobject args);
 jobject JNICALL Java_java_lang_invoke_VarHandle_getVolatile(JNIEnv *env, jobject handle, jobject args);
@@ -1002,11 +1034,11 @@ jfloat JNICALL Java_sun_reflect_ConstantPool_getFloatAt0(JNIEnv *env, jobject un
 jdouble JNICALL Java_sun_reflect_ConstantPool_getDoubleAt0(JNIEnv *env, jobject unusedObject, jobject constantPoolOop, jint cpIndex);
 jobject JNICALL Java_sun_reflect_ConstantPool_getStringAt0(JNIEnv *env, jobject unusedObject, jobject constantPoolOop, jint cpIndex);
 jobject JNICALL Java_sun_reflect_ConstantPool_getUTF8At0(JNIEnv *env, jobject unusedObject, jobject constantPoolOop, jint cpIndex);
-jint JNICALL Java_java_lang_invoke_MethodHandle_getCPTypeAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex);
-jobject JNICALL Java_java_lang_invoke_MethodHandle_getCPMethodTypeAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex);
-jobject JNICALL Java_java_lang_invoke_MethodHandle_getCPMethodHandleAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex);
-jobject JNICALL Java_java_lang_invoke_MethodHandle_getCPClassNameAt(JNIEnv *env, jobject unusedObject, jobject constantPoolOop, jint cpIndex);
-jobject JNICALL Java_java_lang_invoke_MethodHandle_getCPConstantDynamicAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex);
+jint JNICALL Java_java_lang_invoke_MethodHandleResolver_getCPTypeAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex);
+jobject JNICALL Java_java_lang_invoke_MethodHandleResolver_getCPMethodTypeAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex);
+jobject JNICALL Java_java_lang_invoke_MethodHandleResolver_getCPMethodHandleAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex);
+jobject JNICALL Java_java_lang_invoke_MethodHandleResolver_getCPClassNameAt(JNIEnv *env, jobject unusedObject, jobject constantPoolOop, jint cpIndex);
+jobject JNICALL Java_java_lang_invoke_MethodHandleResolver_getCPConstantDynamicAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex);
 jint JNICALL Java_jdk_internal_reflect_ConstantPool_getClassRefIndexAt0(JNIEnv *env, jobject unusedObject, jobject constantPoolOop, jint cpIndex);
 jint JNICALL Java_jdk_internal_reflect_ConstantPool_getNameAndTypeRefIndexAt0(JNIEnv *env, jobject unusedObject, jobject constantPoolOop, jint cpIndex);
 jobject JNICALL Java_jdk_internal_reflect_ConstantPool_getNameAndTypeRefInfoAt0(JNIEnv *env, jobject unusedObject, jobject constantPoolOop, jint cpIndex);
@@ -1049,6 +1081,10 @@ void JNICALL Java_java_lang_Thread_yield(JNIEnv *env, jclass threadClass);
 /* java_lang_Class.c */
 jboolean JNICALL
 Java_java_lang_Class_isClassADeclaredClass(JNIEnv *env, jobject jlClass, jobject aClass);
+#if JAVA_SPEC_VERSION >= 15
+jboolean JNICALL
+Java_java_lang_Class_isHiddenImpl(JNIEnv *env, jobject recv);
+#endif /* JAVA_SPEC_VERSION >= 15 */
 
 /* Virtualization_management_HypervisorMXBean */
 extern J9_CFUNC jint JNICALL
@@ -1161,31 +1197,19 @@ Java_com_ibm_lang_management_internal_JvmCpuMonitor_getThreadCategoryImpl(JNIEnv
 jint JNICALL
 Java_com_ibm_oti_vm_VM_markCurrentThreadAsSystemImpl(JNIEnv *env);
 
-/* mgmtprocessor.c */
-/**
- * Makes the Port Library function j9sysinfo_get_number_CPUs_by_type(type) available
- * for JCL. The valid types are (defined in j9port.h):
- *  - PHYSICAL: Number of physical CPU's on this platform
- * 	- BOUND: Number of physical CPU's bound to this process
- * 	- TARGET: Number of CPU's that should be used by the process. This is normally BOUND, but is overridden by ActiveCPUs if set.
- *
- * @param[in] type Flag to indicate the information type (see function description).
- *
- * @return The number of CPUs, qualified by the argument <code>type</code>.
- */
-jint JNICALL
-Java_com_ibm_lang_management_internal_ProcessorMXBeanImpl_getNumberCPUsImpl(JNIEnv *env, jobject o, jint type);
-/**
- * Makes the Port Library function j9sysinfo_set_number_user_specified_CPUs(number) available
- * for JCL.
- *
- * @param[in] number Number of user-specified active CPUs (non-negative).
- */
+#if JAVA_SPEC_VERSION >= 16
+jboolean JNICALL
+Java_java_lang_ref_Reference_refersTo(JNIEnv *env, jobject reference, jobject target);
+
 void JNICALL
-Java_com_ibm_lang_management_internal_ProcessorMXBeanImpl_setNumberActiveCPUsImpl(JNIEnv *env, jobject o, jint number);
+Java_jdk_internal_misc_ScopedMemoryAccess_registerNatives(JNIEnv *env, jclass clazz);
+
+jboolean JNICALL
+Java_jdk_internal_misc_ScopedMemoryAccess_closeScope0(JNIEnv *env, jobject instance, jobject scope, jobject exception);
+#endif /* JAVA_SPEC_VERSION >= 16 */
 
 #ifdef __cplusplus
-}
+} /* extern "C" */
 #endif
 
 #endif /* JCLPROTS_H */

@@ -38,6 +38,10 @@
 #include "exceptions/AOTFailure.hpp"
 #include "runtime/J9Runtime.hpp"
 
+#if defined(J9VM_OPT_JITSERVER)
+class ClientSessionData;
+#endif
+
 #define SVM_ASSERT_LOCATION_INNER(line) __FILE__ ":" #line
 #define SVM_ASSERT_LOCATION(line) SVM_ASSERT_LOCATION_INNER(line)
 
@@ -635,8 +639,17 @@ public:
 
    SymbolValidationManager(TR::Region &region, TR_ResolvedMethod *compilee);
 
+   struct SystemClassNotWorthRemembering
+      {
+      const char *_className;
+      TR_OpaqueClassBlock *_clazz;
+      bool _checkIsSuperClass;
+      };
+
+   #define WELL_KNOWN_CLASS_COUNT 9
+
    void populateWellKnownClasses();
-   bool validateWellKnownClasses(const uintptrj_t *wellKnownClassChainOffsets);
+   bool validateWellKnownClasses(const uintptr_t *wellKnownClassChainOffsets);
    bool isWellKnownClass(TR_OpaqueClassBlock *clazz);
    bool classCanSeeWellKnownClasses(TR_OpaqueClassBlock *clazz);
    const void *wellKnownClassChainOffsets() { return _wellKnownClassChainOffsets; }
@@ -701,7 +714,7 @@ public:
 
 
 
-   bool validateClassByNameRecord(uint16_t classID, uint16_t beholderID, uintptrj_t *classChain);
+   bool validateClassByNameRecord(uint16_t classID, uint16_t beholderID, uintptr_t *classChain);
    bool validateProfiledClassRecord(uint16_t classID, void *classChainIdentifyingLoader, void *classChainForClassBeingValidated);
    bool validateClassFromCPRecord(uint16_t classID, uint16_t beholderID, uint32_t cpIndex);
    bool validateDefiningClassFromCPRecord(uint16_t classID, uint16_t beholderID, uint32_t cpIndex, bool isStatic);
@@ -709,7 +722,7 @@ public:
    bool validateArrayClassFromComponentClassRecord(uint16_t arrayClassID, uint16_t componentClassID);
    bool validateSuperClassFromClassRecord(uint16_t superClassID, uint16_t childClassID);
    bool validateClassInstanceOfClassRecord(uint16_t classOneID, uint16_t classTwoID, bool objectTypeIsFixed, bool castTypeIsFixed, bool wasInstanceOf);
-   bool validateSystemClassByNameRecord(uint16_t systemClassID, uintptrj_t *classChain);
+   bool validateSystemClassByNameRecord(uint16_t systemClassID, uintptr_t *classChain);
    bool validateClassFromITableIndexCPRecord(uint16_t classID, uint16_t beholderID, uint32_t cpIndex);
    bool validateDeclaringClassFromFieldOrStaticRecord(uint16_t definingClassID, uint16_t beholderID, int32_t cpIndex);
    bool validateConcreteSubClassFromClassRecord(uint16_t childClassID, uint16_t superClassID);
@@ -757,10 +770,17 @@ public:
 
    static bool assertionsAreFatal();
 
+   static int getSystemClassesNotWorthRememberingCount();
+
 #if defined(J9VM_OPT_JITSERVER)
    std::string serializeSymbolToIDMap();
    void deserializeSymbolToIDMap(const std::string &symbolToIdStr);
+   static void populateSystemClassesNotWorthRemembering(ClientSessionData *clientData);
 #endif /* defined(J9VM_OPT_JITSERVER) */
+
+   SystemClassNotWorthRemembering *getSystemClassNotWorthRemembering(int idx);
+
+   static const int SYSTEM_CLASSES_NOT_WORTH_REMEMBERING_COUNT = 2;
 
 private:
 
@@ -904,7 +924,7 @@ private:
    typedef std::set<ClassFromAnyCPIndex, LessClassFromAnyCPIndex, ClassFromAnyCPIndexAlloc> ClassFromAnyCPIndexSet;
    ClassFromAnyCPIndexSet _classesFromAnyCPIndex;
 
-   TR_OpaqueClassBlock *_jlthrowable;
+   static SystemClassNotWorthRemembering _systemClassesNotWorthRemembering[];
    };
 
 }

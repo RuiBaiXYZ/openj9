@@ -132,7 +132,6 @@ class ARM64MonitorExitSnippet : public TR::ARM64HelperCallSnippet
     */
    TR::LabelSymbol *getDecLabel() { return _decLabel; }
    };
-
 }
 
 #endif

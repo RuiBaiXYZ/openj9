@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+ * Copyright (c) 2019, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -91,7 +91,7 @@ J9::ARM64::UnresolvedDataSnippet::emitSnippetBody()
    {
    uint8_t *cursor = cg()->getBinaryBufferCursor();
    TR_RuntimeHelper helper = getHelper();
-   TR::SymbolReference *glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(helper, false, false, false);
+   TR::SymbolReference *glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(helper);
 
    getSnippetLabel()->setCodeLocation(cursor);
 
@@ -175,7 +175,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::UnresolvedDataSnippet * snippet)
    cursor += sizeof(intptr_t);
 
    printPrefix(pOutFile, NULL, cursor, sizeof(intptr_t));
-   trfprintf(pOutFile, ".dword \t" POINTER_PRINTF_FORMAT "\t\t; Constant pool address", *(intptrj_t *)cursor);
+   trfprintf(pOutFile, ".dword \t" POINTER_PRINTF_FORMAT "\t\t; Constant pool address", *(intptr_t *)cursor);
    cursor += sizeof(intptr_t);
 
    printPrefix(pOutFile, NULL, cursor, 4);

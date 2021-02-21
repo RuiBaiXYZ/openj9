@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2019 IBM Corp. and others
+# Copyright (c) 2017, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -25,6 +25,8 @@ add_subdirectory(testjvmtiB)
 add_subdirectory(testlibA)
 add_subdirectory(testlibB)
 
+set(OMR_ENHANCED_WARNINGS OFF)
+set(OMR_WARNINGS_AS_ERRORS OFF)
 
 #TODO: this is how its done in the module.xml, but its probably a toolchain thing
 if(OMR_OS_LINUX)
@@ -35,7 +37,7 @@ elseif(OMR_OS_AIX)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -qpic -brtl -bexpall")
 endif()
 
-add_executable(testjep178_static
+j9vm_add_executable(testjep178_static
     static_agents.c
     static_libraries.c
     testjep178.c
@@ -48,7 +50,7 @@ target_link_libraries(testjep178_static
         ${CMAKE_DL_LIBS}
 )
 
-add_executable(testjep178_dynamic
+j9vm_add_executable(testjep178_dynamic
     testjep178.c
 )
 target_link_libraries(testjep178_dynamic

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -246,7 +246,16 @@ static intptr_t getAIXPPCDescription(struct J9PortLibrary *portLibrary, J9Proces
 #if !defined(__power_9)
 #define POWER_9 0x20000 /* Power 9 class CPU */
 #define __power_9() (_system_configuration.implementation == POWER_9)
+#if defined(J9OS_I5) && !defined(J9OS_I5_V6R1)
+#define PPI9 0x4E
+#define __phy_proc_imp_9() (_system_configuration.phys_implementation == PPI9)
+#endif /* defined(J9OS_I5) && !defined(J9OS_I5_V6R1) */
 #endif /* !defined(__power_9) */
+
+#if !defined(__power_10)
+#define POWER_10 0x40000 /* Power 10 class CPU */
+#define __power_10() (_system_configuration.implementation == POWER_10)
+#endif /* !defined(__power_10) */
 
 #if defined(J9OS_I5_V6R1) /* vmx_version id only available since TL4 */
 #define __power_vsx() (_system_configuration.vmx_version > 1)
@@ -266,6 +275,10 @@ static intptr_t getAIXPPCDescription(struct J9PortLibrary *portLibrary, J9Proces
 static BOOLEAN testSTFLE(struct J9PortLibrary *portLibrary, uint64_t stfleBit);
 static intptr_t getS390Description(struct J9PortLibrary *portLibrary, J9ProcessorDesc *desc);
 #endif /* defined(S390) || defined(J9ZOS390) || defined(J9ZTPF) */
+
+#if defined(RISCV64)
+static intptr_t getRISCV64Description(struct J9PortLibrary *portLibrary, J9ProcessorDesc *desc);
+#endif /* defined(RISCV64) */
 
 #if (defined(LINUXPPC) || defined(AIXPPC))
 static J9ProcessorArchitecture mapPPCProcessor(const char *processorName);
@@ -430,6 +443,8 @@ j9sysinfo_get_processor_description(struct J9PortLibrary *portLibrary, J9Process
 		rc = getAIXPPCDescription(portLibrary, desc);
 #elif (defined(S390) || defined(J9ZOS390))
 		rc = getS390Description(portLibrary, desc);
+#elif defined(RISCV64)
+		rc = getRISCV64Description(portLibrary, desc);
 #endif
 	}
 
@@ -556,6 +571,8 @@ mapPPCProcessor(const char *processorName)
 		rc = PROCESSOR_PPC_P8;
 	} else if (0 == strncasecmp(processorName, "power9", 6)) {
 		rc = PROCESSOR_PPC_P9;
+	} else if (0 == strncasecmp(processorName, "power10", 7)) {
+                rc = PROCESSOR_PPC_P10;
 	}
 
 	return rc;
@@ -607,6 +624,8 @@ getAIXPPCDescription(struct J9PortLibrary *portLibrary, J9ProcessorDesc *desc)
 		desc->processor = PROCESSOR_PPC_P8;
 	} else if (__power_9()) {
 		desc->processor = PROCESSOR_PPC_P9;
+	} else if (__power_10()) {
+                desc->processor = PROCESSOR_PPC_P10;
 	} else {
 		desc->processor = PROCESSOR_PPC_UNKNOWN;
 	}
@@ -622,7 +641,13 @@ getAIXPPCDescription(struct J9PortLibrary *portLibrary, J9ProcessorDesc *desc)
 		desc->physicalProcessor = PROCESSOR_PPC_P7;
 	} else if (__phy_proc_imp_8()) {
 		desc->physicalProcessor = PROCESSOR_PPC_P8;
-	} else {
+	}
+#if defined(J9OS_I5)
+	else if (__phy_proc_imp_9()) {
+		desc->physicalProcessor = PROCESSOR_PPC_P9;
+	}
+#endif
+	else {
 		desc->physicalProcessor = desc->processor;
 	}
 #else
@@ -1187,6 +1212,24 @@ getS390Description(struct J9PortLibrary *portLibrary, J9ProcessorDesc *desc)
 }
 #endif /* (defined(S390) || defined(J9ZOS390)) */
 
+#if defined(RISCV64)
+/**
+ * @internal
+ * Populates J9ProcessorDesc *desc on RISC-V
+ *
+ * @param[in] desc pointer to the struct that will contain the CPU type and features.
+ *
+ * @return 0 on success, -1 on failure
+ */
+static intptr_t
+getRISCV64Description(struct J9PortLibrary *portLibrary, J9ProcessorDesc *desc)
+{
+	desc->processor = PROCESOR_RISCV64_UNKNOWN;
+	desc->physicalProcessor = desc->processor;
+	return 0;
+}
+#endif /* defined(RISCV64) */
+
 BOOLEAN
 j9sysinfo_processor_has_feature(struct J9PortLibrary *portLibrary, J9ProcessorDesc *desc, uint32_t feature)
 {
@@ -1300,7 +1343,7 @@ openAndReadInfo(struct J9PortLibrary *portLibrary, char* pathBuffer, size_t path
 	return status;
 }
 
-#if (defined(J9X86) || defined(J9HAMMER))
+#if (defined(J9X86) || defined(J9HAMMER) || defined(RISCV64))
 
 char const *cpuPathPattern = "/sys/devices/system/cpu/cpu%d/cache/";
 char const *indexPattern = "index%d/";
@@ -1313,7 +1356,7 @@ char const *indexPattern = "index%d/";
 /**
  * Scan the /sys filesystem for the correct descriptor and read it.
  * Stop when a descriptor matching the CPU, level, and one of the types in cacheType matches.
- * Note that if if the cache is unified, it will match a query for any type.
+ * Note that if the cache is unified, it will match a query for any type.
  * @param [in]  portLibrary port library
  * @param [in]  cpu which CPU to query
  * @param [in]  level which cache level to query. Must be >= 1
@@ -1543,7 +1586,7 @@ getCacheLevels(struct J9PortLibrary *portLibrary, const int32_t cpu)
 	} while (!finish);
 	return result;
 }
-/*  (defined(J9X86) || defined(J9HAMMER) ) */
+/*  (defined(J9X86) || defined(J9HAMMER) || defined(RISCV64)) */
 #elif  defined(AIXPPC)
 static int32_t
 getCacheLevels(struct J9PortLibrary *portLibrary,
@@ -1551,6 +1594,11 @@ getCacheLevels(struct J9PortLibrary *portLibrary,
 {
 	return 2;
 }
+/* getsystemcfg() isn't supported on i 7.1 so there's no need to define the 
+ * functions `getCacheTypes` & `getCacheSize` on the i-series platforms
+ */
+#if !defined(J9OS_I5_V6R1)
+
 
 static int32_t
 getCacheTypes(struct J9PortLibrary *portLibrary,
@@ -1575,7 +1623,6 @@ getCacheSize(struct J9PortLibrary *portLibrary,
 	const int32_t cpu, const int32_t level, const int32_t cacheType, const J9CacheQueryCommand query)
 {
 	int32_t result = J9PORT_ERROR_SYSINFO_NOT_SUPPORTED;
-
 	switch (level) {
 	case 1: {
 		/* Note: AIX has split I/D level 1 cache.  Querying UCACHE is invalid. */
@@ -1615,6 +1662,7 @@ getCacheSize(struct J9PortLibrary *portLibrary,
 	}
 	return result;
 }
+#endif /* defined(J9OS_I5_V6R1) */
 #endif /* defined(AIXPPC) */
 
 /*
@@ -1627,6 +1675,24 @@ j9sysinfo_get_cache_info(struct J9PortLibrary *portLibrary, const J9CacheInfoQue
 {
 	int32_t result = J9PORT_ERROR_SYSINFO_NOT_SUPPORTED;
 	Trc_PRT_sysinfo_get_cache_info_enter(query->cmd, query->cpu, query->level, query->cacheType);
+
+#if defined(RISCV64)
+	{
+		/* We need to avoid checking the cache directory as the cache info doesn't exist
+		 * on Linux booted via QEMU (the emulator) while is literally supported on the
+		 * hardware (e.g. HiFive U540). In such case, there is no padding adjustment for
+		 * class objects even if the -XX:-RestrictContended option is specified on the
+		 * command line.
+		 */
+		DIR* cacheDir = opendir("/sys/devices/system/cpu/cpu0/cache");
+		if (NULL != cacheDir) {
+			closedir(cacheDir);
+		} else {
+			Trc_PRT_sysinfo_get_cache_info_exit(result);
+			return result;
+		}
+	}
+#endif
 
 #if defined(OSX)
 	OMRPORT_ACCESS_FROM_J9PORT(portLibrary);
@@ -1642,11 +1708,34 @@ j9sysinfo_get_cache_info(struct J9PortLibrary *portLibrary, const J9CacheInfoQue
 		result = J9PORT_ERROR_SYSINFO_NOT_SUPPORTED;
 		break;
 	}
-#elif (defined(J9X86) || defined(J9HAMMER) || defined(AIXPPC))
+#elif defined(J9OS_I5_V6R1)
+	switch (query->cmd) {
+	case J9PORT_CACHEINFO_QUERY_LEVELS:
+		result =  getCacheLevels(portLibrary, query->cpu);
+		break;
+	case J9PORT_CACHEINFO_QUERY_LINESIZE:
+	case J9PORT_CACHEINFO_QUERY_CACHESIZE:
+	case J9PORT_CACHEINFO_QUERY_TYPES:
+	default:
+		result = J9PORT_ERROR_SYSINFO_NOT_SUPPORTED;
+		break;
+	}
+#elif (defined(J9X86) || defined(J9HAMMER) || defined(AIXPPC) || defined(RISCV64))
 	switch (query->cmd) {
 	case J9PORT_CACHEINFO_QUERY_LINESIZE:
 	case J9PORT_CACHEINFO_QUERY_CACHESIZE:
 		result =  getCacheSize(portLibrary, query->cpu, query->level, query->cacheType, query->cmd);
+
+#if defined(RISCV64)
+	/* The L1 data cache at "cache/index1" is set up from "/sys/devices/system/cpu/cpu1" on some Linux distro
+	 * (e.g. Debian_riscv) rather than "/sys/devices/system/cpu/cpu0" in which "cache/index1" doesn't exist.
+	 * Note: this is a temporary solution specific to Debian_riscv which won't be used or simply
+	 * removed once we confirm "cpu0/cache/index1" does exist on the latest version of Debian_riscv.
+	 */
+	if (result < 0) {
+		result =  getCacheSize(portLibrary, query->cpu + 1, query->level, query->cacheType, query->cmd);
+	}
+#endif /* defined(RISCV64) */
 		break;
 	case J9PORT_CACHEINFO_QUERY_TYPES:
 		result =  getCacheTypes(portLibrary, query->cpu, query->level);
@@ -1668,6 +1757,24 @@ j9sysinfo_get_cache_info(struct J9PortLibrary *portLibrary, const J9CacheInfoQue
 			omrcpu_get_cache_line_size(&result);
 #endif
 		}
+#elif defined(LINUX) && defined(J9AARCH64)
+	if ((query->cmd == J9PORT_CACHEINFO_QUERY_LINESIZE)
+	&& (query->cacheType == J9PORT_CACHEINFO_DCACHE)
+	&& (query->level == 1)
+	) {
+		/* L1 data cache line size */
+		int32_t rc = (int32_t)sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+		if (rc > 0) {
+			result = rc;
+		} else if (rc == 0) {
+			/*
+			 * Cache line size is unavailable on some systems
+			 * Use 64 as the default value because Arm Cortex ARMv8-A cores
+			 * have L1 data cache lines of that size
+			 */
+			result = 64;
+		}
+	}
 #endif
 	Trc_PRT_sysinfo_get_cache_info_exit(result);
 	return result;

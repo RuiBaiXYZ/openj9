@@ -1,6 +1,5 @@
-
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -47,7 +46,8 @@ class MM_CopyForwardCompactGroup;
 class MM_CopyForwardGMPCardCleaner;
 class MM_CopyForwardNoGMPCardCleaner;
 class MM_CopyForwardVerifyScanner;
-class MM_Dispatcher;
+class MM_ForwardedHeader;
+class MM_ParallelDispatcher;
 class MM_HeapRegionManager;
 class MM_HeapRegionDescriptorVLHGC;
 class MM_InterRegionRememberedSet;
@@ -60,7 +60,6 @@ class MM_CopyForwardSchemeAbortScanner;
 class MM_CopyForwardSchemeRootScanner;
 class MM_CopyForwardSchemeRootClearer;
 class MM_CopyForwardSchemeTask;
-class MM_ScavengerForwardedHeader;
 
 /**
  * Copy Forward scheme used for highly mobile partial collection operations.
@@ -114,7 +113,7 @@ private:
 	UDATA _minCacheSize;  /**< Minimum size in bytes that will be returned as a general purpose cache area */
 	UDATA _maxCacheSize;  /**< Maximum size in bytes that will be requested for a general purpose cache area */
 
-	MM_Dispatcher *_dispatcher;
+	MM_ParallelDispatcher *_dispatcher;
 	
 	MM_CopyScanCacheListVLHGC _cacheFreeList;  /**< Caches which are not bound to heap memory and available to be populated */
 	MM_CopyScanCacheListVLHGC *_cacheScanLists;  /**< An array of per-node caches which contains objects still to be scanned (1+node_count elements in array)*/
@@ -469,9 +468,8 @@ private:
 
 	/**
 	 * @param doesObjectNeedHash[out]		True, if object need to store hashcode in hashslot
-	 * @param isObjectGrowingHashSlot[out]	True, if object need to grow size for hashslot
 	 */
-	MMINLINE void calculateObjectDetailsForCopy(MM_ScavengerForwardedHeader* forwardedHeader, UDATA *objectCopySizeInBytes, UDATA *objectReserveSizeInBytes, bool *doesObjectNeedHash, bool *isObjectGrowingHashSlot);
+	MMINLINE void calculateObjectDetailsForCopy(MM_ForwardedHeader* forwardedHeader, UDATA *objectCopySizeInBytes, UDATA *objectReserveSizeInBytes, bool *doesObjectNeedHash);
 
 	/**
 	 * Remove any remaining regions from the reserved allocation list.
@@ -509,7 +507,7 @@ private:
 	 * Insert the specified tail candidate into the tail candidate list.  The implementation assumes that the calling thread can modify 
 	 * regionList without locking it so the callsite either needs to have locked the list or be single-threaded.
 	 * @param env[in] The GC thread
-	 * @param regionList[in] The region list to which tailRegion should be added as a a tail candidate
+	 * @param regionList[in] The region list to which tailRegion should be added as a tail candidate
 	 * @param tailRegion[in] The region to add
 	 */
 	void insertTailCandidate(MM_EnvironmentVLHGC* env, MM_ReservedRegionListHeader* regionList, MM_HeapRegionDescriptorVLHGC *tailRegion);
@@ -639,7 +637,7 @@ private:
 	 * Handling of Work Packets overflow case
 	 * Active STW Card Based Overflow Handler only.
 	 * For other types of STW Overflow Handlers always return false
-	 * @param env[in] The master GC thread
+	 * @param env[in] The main GC thread
 	 * @return true if overflow flag is set
 	 */
 	bool handleOverflow(MM_EnvironmentVLHGC *env);
@@ -863,9 +861,22 @@ private:
 	 * @note This will respect any alignment requirements due to hot fields etc.
 	 * @return an object pointer representing the new location of the object, or the original object pointer on failure.
 	 */
-	J9Object *copy(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *reservingContext, MM_ScavengerForwardedHeader* forwardedHeader, bool leafType = false);
+	J9Object *copy(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *reservingContext, MM_ForwardedHeader* forwardedHeader, bool leafType = false);
 	void updateInternalLeafPointersAfterCopy(J9IndexableObject *destinationPtr, J9IndexableObject *sourcePtr);
 	
+
+	/* Depth copy the hot fields of an object.
+	 * @param forwardedHeader - forwarded header of an object
+	 * @param destinationObjectPtr - destinationObjectPtr of the object described by the forwardedHeader
+	 */ 
+	MMINLINE void depthCopyHotFields(MM_EnvironmentVLHGC *env, J9Class *clazz, J9Object *destinationObjectPtr, MM_AllocationContextTarok *reservingContext);
+	
+	/* Copy the hot field of an object.
+	 * Valid if scavenger dynamicBreadthScanOrdering is enabled.
+	 * @param destinationObjectPtr - the object who's hot field will be copied
+	 * @param offset  - the object field offset of the hot field to be copied 
+	 */ 
+	MMINLINE void copyHotField(MM_EnvironmentVLHGC *env, J9Object *destinationObjectPtr, U_8 offset, MM_AllocationContextTarok *reservingContext);
 	/**
 	 * Push any remaining cached mark map data out before the copy scan cache is released.
 	 * @param env GC thread.
@@ -992,8 +1003,8 @@ protected:
 	 */
 	void tearDown(MM_EnvironmentVLHGC *env);
 
-	void masterSetupForCopyForward(MM_EnvironmentVLHGC *env);
-	void masterCleanupForCopyForward(MM_EnvironmentVLHGC *env);
+	void mainSetupForCopyForward(MM_EnvironmentVLHGC *env);
+	void mainCleanupForCopyForward(MM_EnvironmentVLHGC *env);
 	void workerSetupForCopyForward(MM_EnvironmentVLHGC *env);
 
 	void clearGCStats(MM_EnvironmentVLHGC *env);

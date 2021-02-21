@@ -18,7 +18,16 @@
  * [2] http://openjdk.java.net/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
-*******************************************************************************/
+ *******************************************************************************/
+
+/*
+ * Please note:
+ *
+ * Changing this file will require a Jenkins admin to approve the DSL script.
+ * To avoid this approval each time, under "Configure Global Security"
+ * uncheck "Enable script security for Job DSL scripts". This has been done
+ * on the Eclipse OpenJ9 Jenkins instance.
+ */
 
 if (!binding.hasVariable('SDK_VERSION')) SDK_VERSION = ''
 if (!binding.hasVariable('PLATFORM')) PLATFORM = ''
@@ -31,6 +40,7 @@ if (!binding.hasVariable('SCM_REPO')) SCM_REPO = 'https://github.com/eclipse/ope
 if (SCM_BRANCH ==~ /origin\/pr\/[0-9]+\/merge/) {
     SCM_BRANCH = 'master'
 }
+if (!binding.hasVariable('USER_CREDENTIALS_ID')) USER_CREDENTIALS_ID = ''
 
 pipelineScript = 'buildenv/jenkins/jobs/pipelines/Pipeline-Initialize.groovy'
 
@@ -41,6 +51,9 @@ pipelineJob("$JOB_NAME") {
             scm {
                 git {
                     remote {
+                        if (USER_CREDENTIALS_ID) {
+                            credentials(USER_CREDENTIALS_ID)
+                        }
                         url(SCM_REPO)
                     }
                     branch(SCM_BRANCH)
@@ -94,7 +107,7 @@ pipelineJob("$JOB_NAME") {
         stringParam('SCM_REFSPEC')
         booleanParam('ARCHIVE_JAVADOC', false)
 
-        if (jobType == 'pipeline'){
+        if (jobType == 'pipeline') {
             stringParam('TESTS_TARGETS')
             stringParam('BUILD_NODE')
             stringParam('TEST_NODE')
@@ -103,7 +116,7 @@ pipelineJob("$JOB_NAME") {
             stringParam('RESTART_TIMEOUT_UNITS')
             choiceParam('AUTOMATIC_GENERATION', ['true', 'false'])
             choiceParam('JOB_TYPE', ['pipeline'])
-        } else if (jobType == 'build'){
+        } else if (jobType == 'build') {
             stringParam('NODE')
             choiceParam('JOB_TYPE', ['build'])
         }

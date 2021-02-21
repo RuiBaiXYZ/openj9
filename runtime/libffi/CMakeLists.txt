@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2019 IBM Corp. and others
+# Copyright (c) 2017, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,7 +20,10 @@
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
 
-add_library(ffi STATIC
+set(OMR_ENHANCED_WARNINGS OFF)
+set(OMR_WARNINGS_AS_ERRORS OFF)
+
+j9vm_add_library(ffi STATIC
 	closures.c
 	debug.c
 	java_raw_api.c
@@ -168,6 +171,30 @@ elseif(OMR_ARCH_S390)
 	else()
 		message(SEND_ERROR "Unsupported platform")
 	endif()
+elseif(OMR_ARCH_ARM AND OMR_OS_LINUX)
+	target_include_directories(ffi
+		PUBLIC
+			arm
+			preconf/arm
+	)
+	target_sources(ffi
+		PRIVATE
+			arm/ffi.c
+			arm/sysv.S
+			arm/trampoline.S
+	)
+elseif(OMR_ARCH_AARCH64 AND OMR_OS_LINUX)
+	target_include_directories(ffi
+		PUBLIC
+			aarch64
+			preconf/xr64
+	)
+	target_sources(ffi
+		PRIVATE
+			aarch64/ffi.c
+			aarch64/sysv.S
+	)
+
 else()
 	message(SEND_ERROR "Unsupported platform")
 endif()

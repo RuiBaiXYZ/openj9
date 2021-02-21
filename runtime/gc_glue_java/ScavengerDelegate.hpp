@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -60,13 +60,12 @@ class MM_ParallelSweepScheme;
  * @ingroup GC_Base
  */
 class MM_ScavengerDelegate : public MM_BaseNonVirtual {
+
+/* Data members & types */
 private:
 	OMR_VM *_omrVM;
 	J9JavaVM *_javaVM;
 	MM_GCExtensions *_extensions;
-#if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
-	bool _compressObjectReferences;
-#endif /* defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS) */
 	volatile bool _shouldScavengeFinalizableObjects; /**< Set to true at the beginning of a collection if there are any pending finalizable objects */
 	volatile bool _shouldScavengeUnfinalizedObjects; /**< Set to true at the beginning of a collection if there are any unfinalized objects */
 	volatile bool _shouldScavengeSoftReferenceObjects; /**< Set to true if there are any SoftReference objects discovered */
@@ -81,8 +80,13 @@ private:
 #endif /* OMR_GC_CONCURRENT_SCAVENGER */
 
 protected:
+#if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
+	bool _compressObjectReferences;
+#endif /* defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS) */
+
 public:
 
+/* Methods */
 private:
 
 	/*
@@ -102,6 +106,8 @@ private:
 	 */
 	bool private_shouldPercolateGarbageCollect_classUnloading(MM_EnvironmentBase *envBase);
 
+
+
 	/**
 	 * Decide if GC percolation should occur due to active JNI critical
 	 * regions.  Active regions require that objects do not move, which
@@ -111,12 +117,12 @@ private:
 
 protected:
 public:
-	void masterSetupForGC(MM_EnvironmentBase *env);
+	void mainSetupForGC(MM_EnvironmentBase *env);
 	void workerSetupForGC_clearEnvironmentLangStats(MM_EnvironmentBase *env);
 	void reportScavengeEnd(MM_EnvironmentBase * envBase, bool scavengeSuccessful);
 	void mergeGCStats_mergeLangStats(MM_EnvironmentBase *envBase);
-	void masterThreadGarbageCollect_scavengeComplete(MM_EnvironmentBase *envBase);
-	void masterThreadGarbageCollect_scavengeSuccess(MM_EnvironmentBase *envBase);
+	void mainThreadGarbageCollect_scavengeComplete(MM_EnvironmentBase *envBase);
+	void mainThreadGarbageCollect_scavengeSuccess(MM_EnvironmentBase *envBase);
 	bool internalGarbageCollect_shouldPercolateGarbageCollect(MM_EnvironmentBase *envBase, PercolateReason *reason, U_32 *gcCode);
 	GC_ObjectScanner *getObjectScanner(MM_EnvironmentStandard *env, omrobjectptr_t objectPtr, void *allocSpace, uintptr_t flags);
 	void flushReferenceObjects(MM_EnvironmentStandard *env);
@@ -144,15 +150,7 @@ public:
 	MMINLINE bool
 	compressObjectReferences()
 	{
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-#if defined(OMR_GC_FULL_POINTERS)
-		return _compressObjectReferences;
-#else /* OMR_GC_FULL_POINTERS */
-		return true;
-#endif /* OMR_GC_FULL_POINTERS */
-#else /* OMR_GC_COMPRESSED_POINTERS */
-		return false;
-#endif /* OMR_GC_COMPRESSED_POINTERS */
+		return OMR_COMPRESS_OBJECT_REFERENCES(_compressObjectReferences);
 	}
 
 	void setShouldScavengeUnfinalizedObjects(bool shouldScavenge) { _shouldScavengeUnfinalizedObjects = shouldScavenge; }

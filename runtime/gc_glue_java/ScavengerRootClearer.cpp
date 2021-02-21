@@ -27,12 +27,12 @@
 #if defined(OMR_GC_MODRON_SCAVENGER)
 #include "CollectorLanguageInterfaceImpl.hpp"
 #include "ConfigurationDelegate.hpp"
-#include "Dispatcher.hpp"
 #include "FinalizableReferenceBuffer.hpp"
 #include "FinalizableObjectBuffer.hpp"
 #include "HeapRegionDescriptorStandard.hpp"
 #include "HeapRegionIteratorStandard.hpp"
 #include "ObjectAccessBarrier.hpp"
+#include "ParallelDispatcher.hpp"
 #include "ReferenceObjectBuffer.hpp"
 #include "ReferenceObjectList.hpp"
 #include "ReferenceStats.hpp"
@@ -106,6 +106,9 @@ MM_ScavengerRootClearer::scavengeReferenceObjects(MM_EnvironmentStandard *env, u
 {
 	Assert_MM_true(env->getGCEnvironment()->_referenceObjectBuffer->isEmpty());
 
+	/* Disable dynamicBreadthFirstScanOrdering depth copying before scavenging reference objects to avoid immediate copying of hot children of reference objects */
+	env->disableHotFieldDepthCopy();
+
 	MM_ScavengerJavaStats *javaStats = &env->getGCEnvironment()->_scavengerJavaStats;
 	MM_HeapRegionDescriptorStandard *region = NULL;
 	GC_HeapRegionIteratorStandard regionIterator(_extensions->heapRegionManager);
@@ -151,6 +154,9 @@ MM_ScavengerRootClearer::scavengeReferenceObjects(MM_EnvironmentStandard *env, u
 			}
 		}
 	}
+	/* Re-enable dynamicBreadthFirstScanOrdering depth copying after scavenging reference objects */
+	env->enableHotFieldDepthCopy();
+	
 	Assert_MM_true(env->getGCEnvironment()->_referenceObjectBuffer->isEmpty());
 }
 
@@ -158,6 +164,9 @@ MM_ScavengerRootClearer::scavengeReferenceObjects(MM_EnvironmentStandard *env, u
 void
 MM_ScavengerRootClearer::scavengeUnfinalizedObjects(MM_EnvironmentStandard *env)
 {
+	/* Disable dynamicBreadthFirstScanOrdering depth copying before scavenging finalizable objects to avoid immediate copying of hot children of finalizable objects */
+	env->disableHotFieldDepthCopy();
+
 	GC_FinalizableObjectBuffer buffer(_extensions);
 	MM_HeapRegionDescriptorStandard *region = NULL;
 	GC_HeapRegionIteratorStandard regionIterator(_extensions->heapRegionManager);
@@ -208,6 +217,9 @@ MM_ScavengerRootClearer::scavengeUnfinalizedObjects(MM_EnvironmentStandard *env)
 
 	/* restore everything to a flushed state before exiting */
 	gcEnv->_unfinalizedObjectBuffer->flush(env);
+
+	/* Re-enable dynamicBreadthFirstScanOrdering depth copying after scavenging finalizable objects */
+	env->enableHotFieldDepthCopy();
 }
 #endif /* J9VM_GC_FINALIZATION */
 #endif /* defined(OMR_GC_MODRON_SCAVENGER) */

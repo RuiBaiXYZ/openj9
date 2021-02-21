@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -118,14 +118,14 @@ checkNameImpl (J9CfrConstantPoolInfo * info, BOOLEAN isClass, BOOLEAN isMethod, 
 static VMINLINE I_32
 isInitOrClinitImpl (J9CfrConstantPoolInfo * info)
 {
-	U_8 *c = info->bytes;
+	U_8 *name = info->bytes;
 
 	/* Handle <init>/<clinit> cases */
-	if (*c == '<') {
-		if ((info->slot1 == 6) && (!strncmp((char *) info->bytes, "<init>", 6))) {
+	if (*name == '<') {
+		if (J9UTF8_DATA_EQUALS("<init>", 6, name, info->slot1)) {
 			return CFR_METHOD_NAME_INIT;
 		}
-		if ((info->slot1 == 8) && (!strncmp((char *) info->bytes, "<clinit>", 8))) {
+		if (J9UTF8_DATA_EQUALS("<clinit>", 8, name, info->slot1)) {
 			return CFR_METHOD_NAME_CLINIT;
 		}
 		return CFR_METHOD_NAME_INVALID;
@@ -171,19 +171,6 @@ bcvCheckClassName (J9CfrConstantPoolInfo * info)
 {
 	/* Class checks, not method checks */
 	return checkNameImpl(info, TRUE, FALSE, FALSE);
-}
-
-/**
-* Determine if this a valid name for Classes during class loading.
-*
-* @param info A pointer to J9CfrConstantPoolInfo
-* @returns The arity of the class if valid, -1 otherwise
-*/
-I_32
-bcvCheckClassNameInLoading (J9CfrConstantPoolInfo * info)
-{
-	/* Class checks, not method checks */
-	return checkNameImpl(info, TRUE, FALSE, TRUE);
 }
 
 /**

@@ -28,6 +28,7 @@
 #include <ctype.h>
 #include <string.h>
 #include "control/Options.hpp"
+#include "control/CompilationRuntime.hpp"
 #include "env/CompilerEnv.hpp"
 #include "env/CPU.hpp"
 #include "infra/Assert.hpp"
@@ -43,292 +44,130 @@
 
 extern J9JITConfig * jitConfig;
 
-namespace J9
-{
+TR::CPU
+J9::Z::CPU::detectRelocatable(OMRPortLibrary * const omrPortLib)
+   {
+   OMRPORT_ACCESS_FROM_OMRPORT(omrPortLib);
+   OMRProcessorDesc processorDescription;
+   omrsysinfo_get_processor_description(&processorDescription);
 
-namespace Z
-{
-
-int32_t
-CPU::TO_PORTLIB_get390MachineId()
-  {
-#if defined(J9ZTPF) || defined(J9ZOS390)
-   // Note we cannot use utsname on Linux as it simply returns "s390x" in info.machine. On z/OS we can indeed use it [1].
-   //
-   // [1] https://www.ibm.com/support/knowledgecenter/en/SSLTBW_2.1.0/com.ibm.zos.v2r1.bpxbd00/rtuna.htm
-   struct utsname info;
-
-   if (::uname(&info) >= 0)
-      {
-      return atoi(info.machine);
+   if (processorDescription.processor > OMR_PROCESSOR_S390_Z10)
+      { 
+      processorDescription.processor = OMR_PROCESSOR_S390_Z10;
+      processorDescription.physicalProcessor = OMR_PROCESSOR_S390_Z10;
       }
 
-   return 2098;
-#else
-   char line[80];
-   const int LINE_SIZE = sizeof(line) - 1;
-   const char procHeader[] = "processor ";
-   const int PROC_LINE_SIZE = 69;
-   const int PROC_HEADER_SIZE = sizeof(procHeader) - 1;
+   return TR::CPU::customize(processorDescription);
+   }
 
-   FILE * fp = fopen("/proc/cpuinfo", "r");
-   if (fp)
+TR::CPU
+J9::Z::CPU::customize(OMRProcessorDesc processorDescription)
+   {
+   OMRPORT_ACCESS_FROM_OMRPORT(TR::Compiler->omrPortLib);
+   if (processorDescription.processor < OMR_PROCESSOR_S390_Z10)
       {
-      while (fgets(line, LINE_SIZE, fp) > 0)
-         {
-         int len = strlen(line);
-         if (len > PROC_HEADER_SIZE && !memcmp(line, procHeader, PROC_HEADER_SIZE))
-            {
-            if (len == PROC_LINE_SIZE)
-               {
-               int32_t id;
-
-               // Match the following pattern to extract the machine id:
-               //
-               // processor 0: version = FF,  identification = 100003,  machine = 9672
-               sscanf(line, "%*s %*d%*c %*s %*c %*s %*s %*c %*s %*s %*c %d", &id);
-
-               return id;
-               }
-            }
-         }
-      fclose(fp);
+      omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_DFP, FALSE);
       }
 
-   return 2098;
-#endif
-   }
-
-bool
-CPU::TO_PORTLIB_get390_supportsZNext()
-   {
-#if defined(TR_HOST_S390) && (defined(J9ZOS390) || defined(LINUX))
-   J9ProcessorDesc *processorDesc = TR::Compiler->target.cpu.TO_PORTLIB_getJ9ProcessorDesc();
-   return (processorDesc->processor >= PROCESSOR_S390_GP14);
-#endif
-   return false;
-   }
-
-bool
-CPU::TO_PORTLIB_get390_supportsZ15()
-   {
-#if defined(TR_HOST_S390) && (defined(J9ZOS390) || defined(LINUX))
-   J9ProcessorDesc *processorDesc = TR::Compiler->target.cpu.TO_PORTLIB_getJ9ProcessorDesc();
-   return (processorDesc->processor >= PROCESSOR_S390_GP13);
-#endif
-   return false;
-   }
-
-bool
-CPU::TO_PORTLIB_get390_supportsZ14()
-   {
-#if defined(TR_HOST_S390) && (defined(J9ZOS390) || defined(LINUX))
-   J9ProcessorDesc *processorDesc = TR::Compiler->target.cpu.TO_PORTLIB_getJ9ProcessorDesc();
-   return (processorDesc->processor >= PROCESSOR_S390_GP12);
-#endif
-   return false;
-   }
-
-bool
-CPU::TO_PORTLIB_get390_supportsZ13()
-   {
-#if defined(TR_HOST_S390) && (defined(J9ZOS390) || defined(LINUX))
-   J9ProcessorDesc *processorDesc = TR::Compiler->target.cpu.TO_PORTLIB_getJ9ProcessorDesc();
-   return (processorDesc->processor >= PROCESSOR_S390_GP11);
-#endif
-   return false;
-   }
-
-
-bool
-CPU::TO_PORTLIB_get390_supportsZ6()
-   {
-#if defined(TR_HOST_S390) && (defined(J9ZOS390) || defined(LINUX))
-   J9ProcessorDesc  *processorDesc = TR::Compiler->target.cpu.TO_PORTLIB_getJ9ProcessorDesc();
-   return (processorDesc->processor >= PROCESSOR_S390_GP8);
-#endif
-   return false;
-   }
-
-
-bool
-CPU::TO_PORTLIB_get390_supportsZGryphon()
-   {
-   // Location 200 is architected such that bit 45 is ON if zG
-   // instruction is installed
-#if defined(TR_HOST_S390) && (defined(J9ZOS390) || defined(LINUX))
-   J9ProcessorDesc  *processorDesc = TR::Compiler->target.cpu.TO_PORTLIB_getJ9ProcessorDesc();
-   return (processorDesc->processor >= PROCESSOR_S390_GP9);
-#endif
-   return false;
-   }
-
-
-bool
-CPU::TO_PORTLIB_get390_supportsZHelix()
-   {
-#if defined(TR_HOST_S390) && (defined(J9ZOS390) || defined(LINUX))
-   J9ProcessorDesc  *processorDesc = TR::Compiler->target.cpu.TO_PORTLIB_getJ9ProcessorDesc();
-   return (processorDesc->processor >= PROCESSOR_S390_GP10);
-#endif
-   return false;
-   }
-
-void
-CPU::initializeS390ProcessorFeatures()
-   {
-   // The following nested if statements cascade so as to have the effect of only enabling the least common denominator
-   // of disable CPU architectures. For example if the user specified to disable z13 when running on a z15 machine the
-   // logic below will ensure we only reach the `setSupportsArch` call for zEC12.
-   if (TR::Compiler->target.cpu.TO_PORTLIB_get390_supportsZ6() &&
-         !TR::Options::getCmdLineOptions()->getOption(TR_DisableZ10))
+   if (processorDescription.processor < OMR_PROCESSOR_S390_Z196)
       {
-      TR::Compiler->target.cpu.setSupportsArch(TR::CPU::z10);
-
-      if (TR::Compiler->target.cpu.TO_PORTLIB_get390_supportsZGryphon() &&
-            !TR::Options::getCmdLineOptions()->getOption(TR_DisableZ196))
-         {
-         TR::Compiler->target.cpu.setSupportsArch(TR::CPU::z196);
-
-         if (TR::Compiler->target.cpu.TO_PORTLIB_get390_supportsZHelix() &&
-               !TR::Options::getCmdLineOptions()->getOption(TR_DisableZEC12))
-            {
-            TR::Compiler->target.cpu.setSupportsArch(TR::CPU::zEC12);
-
-            if (TR::Compiler->target.cpu.TO_PORTLIB_get390_supportsZ13() &&
-                  !TR::Options::getCmdLineOptions()->getOption(TR_DisableZ13))
-               {
-               TR::Compiler->target.cpu.setSupportsArch(TR::CPU::z13);
-
-               if (TR::Compiler->target.cpu.TO_PORTLIB_get390_supportsZ14() &&
-                     !TR::Options::getCmdLineOptions()->getOption(TR_DisableZ14))
-                  {
-                  TR::Compiler->target.cpu.setSupportsArch(TR::CPU::z14);
-
-                  if (TR::Compiler->target.cpu.TO_PORTLIB_get390_supportsZ15() &&
-                        !TR::Options::getCmdLineOptions()->getOption(TR_DisableZ15))
-                     {
-                     TR::Compiler->target.cpu.setSupportsArch(TR::CPU::z15);
-
-                     if (TR::Compiler->target.cpu.TO_PORTLIB_get390_supportsZNext() &&
-                           !TR::Options::getCmdLineOptions()->getOption(TR_DisableZNext))
-                        {
-                        TR::Compiler->target.cpu.setSupportsArch(TR::CPU::zNext);
-                        }
-                     }
-                  }
-               }
-            }
-         }
+      omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_HIGH_WORD, FALSE);
       }
-   
-   J9ProcessorDesc* processorDesc = TR::Compiler->target.cpu.TO_PORTLIB_getJ9ProcessorDesc();
+
+   if (processorDescription.processor < OMR_PROCESSOR_S390_ZEC12)
+      {
+      omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_TE, FALSE);
+      omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_RI, FALSE);
+      }
+
+   if (processorDescription.processor < OMR_PROCESSOR_S390_Z13)
+      {
+      omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_VECTOR_FACILITY, FALSE);
+      }
+
+   if (processorDescription.processor < OMR_PROCESSOR_S390_Z14)
+      {
+      omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_MISCELLANEOUS_INSTRUCTION_EXTENSION_2, FALSE);
+      omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL, FALSE);
+      omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_VECTOR_FACILITY_ENHANCEMENT_1, FALSE);
+      omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_GUARDED_STORAGE, FALSE);
+      }
+
+   if (processorDescription.processor < OMR_PROCESSOR_S390_Z15)
+      {
+      omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_MISCELLANEOUS_INSTRUCTION_EXTENSION_3, FALSE);
+      omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_VECTOR_FACILITY_ENHANCEMENT_2, FALSE);
+      omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL_ENHANCEMENT_FACILITY, FALSE);
+      }
 
    // This variable is used internally by the j9sysinfo macros below and cannot be folded away
    J9PortLibrary* privatePortLibrary = TR::Compiler->portLib;
 
-   if (j9sysinfo_processor_has_feature(processorDesc, J9PORT_S390_FEATURE_FPE))
-      {
-      TR::Compiler->target.cpu.setSupportsFloatingPointExtensionFacility(true);
-      }
-
-   // z9 supports DFP in millicode so do not check for DFP support unless we are z10+
-   if (TR::Compiler->target.cpu.getSupportsArch(TR::CPU::z10) &&
-         j9sysinfo_processor_has_feature(processorDesc, J9PORT_S390_FEATURE_DFP))
-      {
-      TR::Compiler->target.cpu.setSupportsDecimalFloatingPointFacility(true);
-      }
-
-   if (TR::Compiler->target.cpu.getSupportsArch(TR::CPU::z196) && 
-         j9sysinfo_processor_has_feature(processorDesc, J9PORT_S390_FEATURE_HIGH_WORD))
-      {
-      TR::Compiler->target.cpu.setSupportsHighWordFacility(true);
-      }
-
-   if (TR::Compiler->target.cpu.getSupportsArch(TR::CPU::zEC12))
-      {
-      if (j9sysinfo_processor_has_feature(processorDesc, J9PORT_S390_FEATURE_TE))
-         {
-         TR::Compiler->target.cpu.setSupportsTransactionalMemoryFacility(true);
-         }
-
-      if (j9sysinfo_processor_has_feature(processorDesc, J9PORT_S390_FEATURE_RI))
-         {
 #if defined(LINUX)
-         if (0 == j9ri_enableRISupport())
+   if (TRUE == omrsysinfo_processor_has_feature(&processorDescription, OMR_FEATURE_S390_RI))
+      {
+      if (0 != j9ri_enableRISupport())
+         {
+         omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_RI, FALSE);
+         }
+      }
 #endif
-         TR::Compiler->target.cpu.setSupportsRuntimeInstrumentationFacility(true);
-         }
-      }
 
-   if (TR::Compiler->target.cpu.getSupportsArch(TR::CPU::z13) &&
-         j9sysinfo_processor_has_feature(processorDesc, J9PORT_S390_FEATURE_VECTOR_FACILITY))
+   if (TRUE == omrsysinfo_processor_has_feature(&processorDescription, OMR_FEATURE_S390_GUARDED_STORAGE))
       {
-      TR::Compiler->target.cpu.setSupportsVectorFacility(true);
+      if (TR::Compiler->javaVM->memoryManagerFunctions->j9gc_software_read_barrier_enabled(TR::Compiler->javaVM))
+         {
+         omrsysinfo_processor_set_feature(&processorDescription, OMR_FEATURE_S390_GUARDED_STORAGE, FALSE);
+         }
       }
 
-   if (TR::Compiler->target.cpu.getSupportsArch(TR::CPU::z14))
+   if (_isSupportedFeatureMasksEnabled)
       {
-      if (j9sysinfo_processor_has_feature(processorDesc, J9PORT_S390_FEATURE_VECTOR_PACKED_DECIMAL))
+      // mask out any cpu features that the compiler doesn't care about
+      for (size_t i = 0; i < OMRPORT_SYSINFO_FEATURES_SIZE; i++)
          {
-         TR::Compiler->target.cpu.setSupportsVectorPackedDecimalFacility(true);
-         }
-
-      if (j9sysinfo_processor_has_feature(processorDesc, J9PORT_S390_FEATURE_VECTOR_FACILITY_ENHANCEMENT_1))
-         {
-         TR::Compiler->target.cpu.setSupportsVectorFacilityEnhancement1(true);
-         }
-
-      if (j9sysinfo_processor_has_feature(processorDesc, J9PORT_S390_FEATURE_GUARDED_STORAGE))
-         {
-         // turn off GS facility if GC has -XXgc:softwareRangeCheckReadBarrier
-         J9MemoryManagerFunctions * mmf = TR::Compiler->javaVM->memoryManagerFunctions;
-         TR::Compiler->target.cpu.setSupportsGuardedStorageFacility(!(mmf->j9gc_software_read_barrier_enabled(TR::Compiler->javaVM)));
+         processorDescription.features[i] &= _supportedFeatureMasks.features[i];
          }
       }
 
-   if (TR::Compiler->target.cpu.getSupportsArch(TR::CPU::z15))
-      {
-      if (j9sysinfo_processor_has_feature(processorDesc, J9PORT_S390_FEATURE_MISCELLANEOUS_INSTRUCTION_EXTENSION_3))
-         {
-         TR::Compiler->target.cpu.setSupportsMiscellaneousInstructionExtensions3Facility(true);
-         }
-
-      if (j9sysinfo_processor_has_feature(processorDesc, J9PORT_S390_FEATURE_VECTOR_FACILITY_ENHANCEMENT_2))
-         {
-         TR::Compiler->target.cpu.setSupportsVectorFacilityEnhancement2(true);
-         }
-
-      if (j9sysinfo_processor_has_feature(processorDesc, J9PORT_S390_FEATURE_VECTOR_PACKED_DECIMAL_ENHANCEMENT_FACILITY))
-         {
-         TR::Compiler->target.cpu.setSupportsVectorPackedDecimalEnhancementFacility(true);
-         }
-      }
+   return TR::CPU(processorDescription);
    }
 
-TR_ProcessorFeatureFlags
-CPU::getProcessorFeatureFlags()
+
+void
+J9::Z::CPU::enableFeatureMasks()
    {
-   TR_ProcessorFeatureFlags processorFeatureFlags = { {_flags.getValue()} };
-   return processorFeatureFlags;
+   // Only enable the features that compiler currently uses
+   const uint32_t utilizedFeatures [] = {OMR_FEATURE_S390_DFP, OMR_FEATURE_S390_TE, OMR_FEATURE_S390_FPE,
+                                         OMR_FEATURE_S390_RI, OMR_FEATURE_S390_VECTOR_FACILITY, OMR_FEATURE_S390_HIGH_WORD,
+                                         OMR_FEATURE_S390_MISCELLANEOUS_INSTRUCTION_EXTENSION_2,
+                                         OMR_FEATURE_S390_GUARDED_STORAGE, OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL,
+                                         OMR_FEATURE_S390_VECTOR_FACILITY_ENHANCEMENT_1,
+                                         OMR_FEATURE_S390_VECTOR_FACILITY_ENHANCEMENT_2,
+                                         OMR_FEATURE_S390_MISCELLANEOUS_INSTRUCTION_EXTENSION_3,
+                                         OMR_FEATURE_S390_VECTOR_PACKED_DECIMAL_ENHANCEMENT_FACILITY};
+
+   memset(_supportedFeatureMasks.features, 0, OMRPORT_SYSINFO_FEATURES_SIZE*sizeof(uint32_t));
+   OMRPORT_ACCESS_FROM_OMRPORT(TR::Compiler->omrPortLib);
+   for (size_t i = 0; i < sizeof(utilizedFeatures)/sizeof(uint32_t); i++)
+      {
+      omrsysinfo_processor_set_feature(&_supportedFeatureMasks, utilizedFeatures[i], TRUE);
+      }
+   _isSupportedFeatureMasksEnabled = true;
    }
 
 bool
-CPU::isCompatible(TR_Processor processorSignature, TR_ProcessorFeatureFlags processorFeatureFlags)
+J9::Z::CPU::isCompatible(const OMRProcessorDesc& processorDescription)
    {
-   if (!self()->isAtLeast(processorSignature))
+   if (!self()->isAtLeast(processorDescription.processor))
       {
       return false;
       }
-   for (int i = 0; i < PROCESSOR_FEATURES_SIZE; i++)
+   for (int i = 0; i < OMRPORT_SYSINFO_FEATURES_SIZE; i++)
       {
       // Check to see if the current processor contains all the features that code cache's processor has
-      if ((processorFeatureFlags.featureFlags[i] & self()->getProcessorFeatureFlags().featureFlags[i]) != processorFeatureFlags.featureFlags[i])
+      if ((processorDescription.features[i] & self()->getProcessorDescription().features[i]) != processorDescription.features[i])
          return false;
       }
    return true;
    }
-
-}
-
-}

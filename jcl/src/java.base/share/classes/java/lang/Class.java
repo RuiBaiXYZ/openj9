@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar18-SE]*/
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
 /*******************************************************************************
- * Copyright (c) 1998, 2020 IBM Corp. and others
+ * Copyright (c) 1998, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -25,35 +25,36 @@ package java.lang;
 import java.io.InputStream;
 import java.security.AccessControlContext;
 import java.security.ProtectionDomain;
-import java.security.AllPermission;
 import java.security.Permissions;
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 import java.lang.constant.ClassDesc;
-/*[ENDIF] Java12*/
+import jdk.internal.reflect.ReflectionFactory;
+/*[ENDIF] JAVA_SPEC_VERSION >= 12*/
 import java.lang.reflect.*;
 import java.net.URL;
 import java.lang.annotation.*;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
+/*[IF JAVA_SPEC_VERSION >= 16]*/
 import java.util.HashSet;
+/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 import java.util.Optional;
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.security.AccessController;
 import java.security.PrivilegedExceptionAction;
 import java.security.PrivilegedAction;
 import java.lang.ref.*;
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 import java.lang.constant.ClassDesc;
 import java.lang.constant.Constable;
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
 import sun.reflect.generics.repository.ClassRepository;
 import sun.reflect.generics.factory.CoreReflectionFactory;
@@ -61,18 +62,24 @@ import sun.reflect.generics.scope.ClassScope;
 import sun.reflect.annotation.AnnotationType;
 import java.util.Arrays;
 import com.ibm.oti.vm.VM;
-/*[IF Java11]*/
+/*[IF JAVA_SPEC_VERSION >= 11]*/
 import static com.ibm.oti.util.Util.doesClassLoaderDescendFrom;
-/*[ENDIF] Java11*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 11*/
 
 /*[IF Sidecar19-SE]
 import jdk.internal.misc.Unsafe;
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+import jdk.internal.access.SharedSecrets;
+/*[ELSE] JAVA_SPEC_VERSION >= 15
+import jdk.internal.misc.SharedSecrets;
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 import java.io.IOException;
 import jdk.internal.reflect.Reflection;
 import jdk.internal.reflect.CallerSensitive;
 import jdk.internal.reflect.ConstantPool;
 /*[ELSE]*/
 import sun.misc.Unsafe;
+import sun.misc.SharedSecrets;
 import sun.reflect.Reflection;
 import sun.reflect.CallerSensitive;
 import sun.reflect.ConstantPool;
@@ -136,9 +143,9 @@ import sun.security.util.SecurityConstants;
  * @version		initial
  */
 public final class Class<T> implements java.io.Serializable, GenericDeclaration, Type
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	, Constable, TypeDescriptor, TypeDescriptor.OfField<Class<?>>
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 {
 	private static final long serialVersionUID = 3206093459760846163L;
 	private static ProtectionDomain AllPermissionsPD;
@@ -204,6 +211,10 @@ public final class Class<T> implements java.io.Serializable, GenericDeclaration,
 	
 	/*[PR Jazz 85476] Address locking contention on classRepository in getGeneric*() methods */
 	private transient ClassRepositoryHolder classRepoHolder;
+
+/*[IF JAVA_SPEC_VERSION >= 12]*/
+	private static ReflectionFactory reflectionFactory = null;
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 	
 	/* Helper class to hold the ClassRepository. We use a Class with a final 
 	 * field to ensure that we have both safe initialization and safe publication.
@@ -243,6 +254,19 @@ public final class Class<T> implements java.io.Serializable, GenericDeclaration,
 	 */
 	private static final class ClassReflectNullPlaceHolder {}
 
+	private static final class MetadataCache {
+		MetadataCache() {}
+
+		static long cachedCanonicalNameOffset = -1;
+		static long cachedSimpleNameOffset = -1;
+
+		SoftReference<String> cachedCanonicalName;
+		SoftReference<String> cachedSimpleName;
+	}
+
+	private transient MetadataCache metadataCache;
+	private static long metadataCacheOffset = -1;
+
 	private transient Class<?>[] cachedInterfaces;
 	private static long cachedInterfacesOffset = -1;
 
@@ -262,10 +286,19 @@ public final class Class<T> implements java.io.Serializable, GenericDeclaration,
 		return unsafe;
 	}
 	
-/*[IF Java11]*/
+/*[IF JAVA_SPEC_VERSION >= 11]*/
 	private Class<?> nestHost;
-/*[ENDIF] Java11*/
-	
+/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
+
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+	private transient Object classData;
+/*[ENDIF] JAVA_SPEC_VERSION >= 15*/
+
+/*[IF JAVA_SPEC_VERSION >= 16]*/
+	private transient Class<?>[] cachedPermittedSubclasses;
+	private static long cachedPermittedSubclassesOffset = -1;
+/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
+
 /**
  * Prevents this class from being instantiated. Instances
  * created by the virtual machine only.
@@ -324,27 +357,6 @@ private void checkNonSunProxyMemberAccess(SecurityManager security, ClassLoader 
 			security.checkPackageAccess(packageName);
 		}
 	}
-}
-
-private long getFieldOffset(String fieldName) {
-	try {
-		Field field = Class.class.getDeclaredField(fieldName);
-		return getUnsafe().objectFieldOffset(field);
-	} catch (NoSuchFieldException e) {
-		throw newInternalError(e);
-	}
-}
-
-/**
- * This helper method atomically writes the given {@code fieldValue} to the
- * field specified by the {@code fieldOffset}
- */
-private void writeFieldValue(long fieldOffset, Object fieldValue) {
-	/*[IF Sidecar19-SE]*/
-	getUnsafe().putObjectRelease(this, fieldOffset, fieldValue);
-	/*[ELSE]*/
-	getUnsafe().putOrderedObject(this, fieldOffset, fieldValue);
-	/*[ENDIF]*/
 }
 
 private static void forNameAccessCheck(final SecurityManager sm, final Class<?> callerClass, final Class<?> foundClass) {
@@ -953,11 +965,28 @@ public Field getDeclaredField(String name) throws NoSuchFieldException, Security
 		ClassLoader callerClassLoader = ClassLoader.getStackClassLoader(1);
 		checkMemberAccess(security, callerClassLoader, Member.DECLARED);
 	}
+	return getDeclaredFieldInternal(name, true);
+}
 
-	/*[PR CMVC 114820, CMVC 115873, CMVC 116166] add reflection cache */
-	Field cachedField = lookupCachedField(name);
-	if (cachedField != null && cachedField.getDeclaringClass() == this) {
-		return cachedField;
+/**
+ * A private helper method for getDeclaredField().
+ * This is for internal usage, no security check required,
+ * and if doCache is false, the field is to be retrieved without caching
+ * which can avoid circular dependency at JVM bootstrapping phase.
+ *
+ * @param		name		The name of the field to look for.
+ * @param		doCache		The flag to determine if caching the field.
+ * @return		the field in the receiver named by the argument.
+ * @throws		NoSuchFieldException if the requested field could not be found
+ */
+@CallerSensitive
+private Field getDeclaredFieldInternal(String name, boolean doCache) throws NoSuchFieldException {
+	if (doCache) {
+		/*[PR CMVC 114820, CMVC 115873, CMVC 116166] add reflection cache */
+		Field cachedField = lookupCachedField(name);
+		if (cachedField != null && cachedField.getDeclaringClass() == this) {
+			return cachedField;
+		}
 	}
 
 	/*[PR CMVC 192714,194493] prepare the class before attempting to access members */
@@ -970,7 +999,12 @@ public Field getDeclaredField(String name) throws NoSuchFieldException, Security
 	if (0 == fields.length) {
 		throw new NoSuchFieldException(name);
 	}
-	return cacheField(fields[0]);
+	
+	if (doCache) {
+		return cacheField(fields[0]);
+	} else {
+		return fields[0];
+	}
 }
 
 /**
@@ -1031,7 +1065,7 @@ public Field[] getDeclaredFields() throws SecurityException {
  */
 private native Field[] getDeclaredFieldsImpl();
 
-/*[IF Sidecar19-SE]
+/*[IF JAVA_SPEC_VERSION >= 11]*/
 /**
  * Answers a list of method objects which represent the public methods
  * described by the arguments. Note that the associated method may not 
@@ -1104,7 +1138,7 @@ private List<Method> cacheDeclaredPublicMethods(List<Method> methods, CacheKey c
 	}
 	return methods;
 }
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 
 /**
  * A helper method for reflection debugging
@@ -1252,12 +1286,34 @@ public Class<?> getDeclaringClass() {
 			declaringClass.checkMemberAccess(security, callerClassLoader, MEMBER_INVALID_TYPE);
 		}
 		return declaringClass;
+	} else if (this.isClassADeclaredClass(declaringClass) || this.isClassADeclaredClass(this) || this.isCircularDeclaringClass()) {
+		/* The execution of VM shouldn't be interrupted by corrupted InnerClasses attributes such as circular entries.
+		 * To be specific, Class A is the declaringClass of B, Class B is the declaringClass of C, ..., Class Z is the
+		 * declaringClass of A, which forms a circle in the entries, whether or not the relationships between two classes
+		 * literally exist. e.g.
+		 * The specified declaringClass is fake one (intentionally set in the class file) which actually has no
+		 * relationship with current class but the current class is the declaring class of the specified declaringClass.
+		 * Thus, there are 3 cases:
+		 * 1) A --> B (real/fake) --> A: B is the declaring class of A and is one of the inner classes of A.
+		 * 2) B --> A --> A: B is the declaring class of A while A is one of the inner classes of A itself.
+		 * 3) A --> B --> C --> ... Z --> A: keep fetching the declaring class from A ends up wit A itself.
+		 */
+		return null;
 	}
 	
 	/*[MSG "K0555", "incompatible InnerClasses attribute between \"{0}\" and \"{1}\""]*/
 	throw new IncompatibleClassChangeError(
 			com.ibm.oti.util.Msg.getString("K0555", this.getName(),	declaringClass.getName())); //$NON-NLS-1$
 }
+
+/**
+ * Returns true if a cycle exists from the current class to itself by repeatedly searching the declaring classes.
+ *
+ * @return		true if the cycle exists, false otherwise.
+ *
+ */
+private native boolean isCircularDeclaringClass();
+
 /**
  * Returns true if the class passed in to the method is a declared class of
  * this class. 
@@ -1457,6 +1513,7 @@ Method getMethodHelper(
 	Method result;
 	Method bestCandidate;
 	String strSig;
+	boolean candidateFromInterface = false;
 	
 	/*[PR CMVC 114820, CMVC 115873, CMVC 116166] add reflection cache */
 	if (parameterTypes == null) {
@@ -1488,7 +1545,28 @@ Method getMethodHelper(
 			return null;
 		}
 	}
-	result = forDeclaredMethod ? getDeclaredMethodImpl(name, parameterTypes, strSig, null) : getMethodImpl(name, parameterTypes, strSig);
+	
+	if (forDeclaredMethod) {
+		result = getDeclaredMethodImpl(name, parameterTypes, strSig, null);
+	} else {
+		if (this.isInterface()) {
+			/* if the result is not in the current class, all superinterfaces will need to be searched */
+			result = getDeclaredMethodImpl(name, parameterTypes, strSig, null);
+			if (null == result) {
+				result = getMostSpecificMethodFromAllInterfacesOfCurrentClass(null, null, name, parameterTypes);
+				candidateFromInterface = true;
+			}
+		} else {
+			result = getMethodImpl(name, parameterTypes, strSig);
+			/* Retrieve the specified method implemented by the superclass from the top to the bottom. */
+			if ((result != null) && result.getDeclaringClass().isInterface()) {
+				HashMap<Class<?>, HashMap<MethodInfo, MethodInfo>> infoCache = new HashMap<>(16);
+				result = getMostSpecificMethodFromAllInterfacesOfAllSuperclasses(infoCache, name, parameterTypes);
+				candidateFromInterface = true;
+			}
+		}
+	}
+	
 	if (result == null) {
 		return throwExceptionOrReturnNull(throwException, name, parameterTypes);
 	}
@@ -1530,26 +1608,156 @@ Method getMethodHelper(
 	 * Otherwise, the result method is chosen arbitrarily from specific methods.
 	 */
 	bestCandidate = result;
-	Class<?> declaringClass = forDeclaredMethod ? this : result.getDeclaringClass();
-	while (true) {
-		result = declaringClass.getDeclaredMethodImpl(name, parameterTypes, strSig, result);
-		if (result == null) {
-			break;
-		}
-		boolean publicMethod = ((result.getModifiers() & Modifier.PUBLIC) != 0);
-		if ((methodList != null) && publicMethod) {
-			methodList.add(result);
-		}
-		if (forDeclaredMethod || publicMethod) {
-			// bestCandidate and result have same declaringClass.
-			Class<?> candidateRetType = bestCandidate.getReturnType();
-			Class<?> resultRetType = result.getReturnType();
-			if ((candidateRetType != resultRetType) && candidateRetType.isAssignableFrom(resultRetType)) {
-				bestCandidate = result;
+	if (!candidateFromInterface) {
+		Class<?> declaringClass = forDeclaredMethod ? this : result.getDeclaringClass();
+		while (true) {
+			result = declaringClass.getDeclaredMethodImpl(name, parameterTypes, strSig, result);
+			if (result == null) {
+				break;
+			}
+			boolean publicMethod = ((result.getModifiers() & Modifier.PUBLIC) != 0);
+			if ((methodList != null) && publicMethod) {
+				methodList.add(result);
+			}
+			if (forDeclaredMethod || publicMethod) {
+				// bestCandidate and result have same declaringClass.
+				Class<?> candidateRetType = bestCandidate.getReturnType();
+				Class<?> resultRetType = result.getReturnType();
+				if ((candidateRetType != resultRetType) && candidateRetType.isAssignableFrom(resultRetType)) {
+					bestCandidate = result;
+				}
 			}
 		}
 	}
 	return cacheMethod(bestCandidate);
+}
+
+/**
+ * Helper method searches all interfaces implemented by superclasses from the top to the bottom
+ * for the most specific method declared in one of these interfaces.
+ *
+ * @param infoCache
+ * @param name the specified method's name
+ * @param parameterTypes the types of the arguments of the specified method
+ * @return the most specific method selected from all interfaces from each superclass of the current class;
+ *         otherwise, return the method of the first interface from the top superclass
+ *         if the return types of all specified methods are identical.
+ */
+private Method getMostSpecificMethodFromAllInterfacesOfAllSuperclasses(HashMap<Class<?>, HashMap<MethodInfo, MethodInfo>> infoCache, 
+	String name, Class<?>... parameterTypes) 
+{
+	Method candidateMethod = null;
+	if (this != Object.class) {
+		/* get to the top superclass first. if all return types end up being the same the interfaces from this superclass have priority. */
+		Class superclz = getSuperclass();
+		candidateMethod = superclz.getMostSpecificMethodFromAllInterfacesOfAllSuperclasses(infoCache, name, parameterTypes);
+		
+		/* search all interfaces of current class, comparing against result from previous superclass. */
+		candidateMethod = getMostSpecificMethodFromAllInterfacesOfCurrentClass(infoCache, candidateMethod, name, parameterTypes);
+	}
+	return candidateMethod;
+}
+
+/**
+ * Helper method searches all interfaces implemented by the current class or interface 
+ * for the most specific method declared in one of these interfaces.
+ *
+ * @param infoCache
+ * @param potentialCandidate potential candidate from superclass, null if currentClass is an interface
+ * @param name the specified method's name
+ * @param parameterTypes the types of the arguments of the specified method
+ * @return the most specific method selected from all interfaces;
+ *         otherwise if return types from all qualifying methods are identical, return an arbitrary method.
+ */
+private Method getMostSpecificMethodFromAllInterfacesOfCurrentClass(HashMap<Class<?>, HashMap<MethodInfo, MethodInfo>> infoCache,
+	Method potentialCandidate, String name, Class<?>... parameterTypes) 
+{
+	Method bestMethod = potentialCandidate;
+	/* if infoCache is passed in, reuse from superclass */
+	if (null == infoCache) {
+		infoCache = new HashMap<>(16);
+	}
+	HashMap<MethodInfo, MethodInfo> methodCandidates = getMethodSet(infoCache, false, true);
+
+	for (MethodInfo mi : methodCandidates.values()) {
+		if (null == mi.jlrMethods) {
+			bestMethod = getMostSpecificInterfaceMethod(name, parameterTypes, bestMethod, mi.me);
+		} else {
+			for (Method m: mi.jlrMethods) {
+				bestMethod = getMostSpecificInterfaceMethod(name, parameterTypes, bestMethod, m);
+				/*[IF JAVA_SPEC_VERSION == 8]*/
+				// Java 8 returns any matching method found
+				if (bestMethod != null) {
+					break;
+				}
+				/*[ENDIF] JAVA_SPEC_VERSION == 8 */
+			}
+		}
+		/*[IF JAVA_SPEC_VERSION == 8]*/
+		if (bestMethod != null) {
+			break;
+		}
+		/*[ENDIF] JAVA_SPEC_VERSION == 8 */
+	}
+
+	return bestMethod;
+
+}
+
+private static Method getMostSpecificInterfaceMethod(String name, Class<?>[] parameterTypes, Method bestMethod, Method candidateMethod) {
+	if (candidateMethod == bestMethod) {
+		return bestMethod;
+	}
+
+	/* match name and parameters to user specification */
+	if (!candidateMethod.getDeclaringClass().isInterface() 
+		|| !candidateMethod.getName().equals(name) 
+		|| !doParameterTypesMatch(candidateMethod.getParameterTypes(), parameterTypes)
+	) {
+		return bestMethod;
+	}
+
+	if (null == bestMethod) {
+		bestMethod = candidateMethod;
+		return bestMethod;
+	}
+
+	Class<?> bestRetType = bestMethod.getReturnType();
+	Class<?> candidateRetType = candidateMethod.getReturnType();
+
+	if (bestRetType == candidateRetType) {
+		int bestModifiers = bestMethod.getModifiers();
+		int candidateModifiers = candidateMethod.getModifiers();
+		Class<?> bestDeclaringClass = bestMethod.getDeclaringClass();
+		Class<?> candidateDeclaringClass = candidateMethod.getDeclaringClass();
+		/* if all return types end up being the same, non-static methods take priority over static methods and sub-interfaces take
+			priority over superinterface */
+			if ((Modifier.isStatic(bestModifiers) && !Modifier.isStatic(candidateModifiers))
+				|| methodAOverridesMethodB(candidateDeclaringClass, Modifier.isAbstract(candidateModifiers), candidateDeclaringClass.isInterface(), 
+				bestDeclaringClass, Modifier.isAbstract(bestModifiers), bestDeclaringClass.isInterface())
+		) {
+			bestMethod = candidateMethod;
+		}
+	} else {
+		/* resulting method should have the most specific return type */
+		if (bestRetType.isAssignableFrom(candidateRetType)) {
+			bestMethod = candidateMethod;
+		}
+	}
+
+	return bestMethod;
+}
+
+private static boolean doParameterTypesMatch(Class<?>[] paramList1, Class<?>[] paramList2) {
+	if (paramList1.length != paramList2.length) return false;
+
+	for (int index = 0; index < paramList1.length; index++) {
+		if (!paramList1[index].equals(paramList2[index])) {
+			return false;
+		}
+	}
+
+	return true;
 }
 
 /**
@@ -1604,7 +1812,7 @@ public Method[] getMethods() throws SecurityException {
 	/*[PR CMVC 192714,194493] prepare the class before attempting to access members */
 	J9VMInternals.prepare(this);
 	HashMap<Class<?>, HashMap<MethodInfo, MethodInfo>> infoCache = new HashMap<>(16);
-	HashMap<MethodInfo, MethodInfo> myMethods = getMethodSet(infoCache, false);
+	HashMap<MethodInfo, MethodInfo> myMethods = getMethodSet(infoCache, false, false);
 	ArrayList<Method> myMethodList = new ArrayList<>(16);
 	for (MethodInfo mi: myMethods.values()) { /* don't know how big this will be at the start */
 		if (null == mi.jlrMethods) {
@@ -1621,13 +1829,13 @@ public Method[] getMethods() throws SecurityException {
 
 private HashMap<MethodInfo, MethodInfo> getMethodSet(
 		HashMap<Class<?>, HashMap<MethodInfo, MethodInfo>> infoCache, 
-		boolean virtualOnly) {
+		boolean virtualOnly, boolean localInterfacesOnly) {
 	/* virtualOnly must be false only for the bottom class of the hierarchy */
 	HashMap<MethodInfo, MethodInfo> myMethods = infoCache.get(this);
 	if (null == myMethods) { 
 		/* haven't visited this class.  Initialize with the methods from the VTable which take priority */
 		myMethods = new HashMap<>(16);
-		if (!isInterface()) {
+		if (!isInterface() && !localInterfacesOnly) {
 			int vCount = 0;
 			int sCount = 0;
 			Method methods[] = null; /* this includes the superclass's virtual and static methods. */
@@ -1667,28 +1875,27 @@ private HashMap<MethodInfo, MethodInfo> getMethodSet(
 				}
 				if (mDeclaringClass.isInterface()) {
 					scanInterfaces = true;
-					/* The vTable may contain one declaration of an interface method with multiple declarations. */
-					if (null == methodFilter) {
-						methodFilter = new HashSet<>();
-					}
-					methodFilter.add(mi);
+					/* Add all the interfaces at once to preserve ordering */
+					myMethods.remove(mi, mi);
 				}
 			}
 			if (scanInterfaces) {
 				/* methodFilter is guaranteed to be non-null at this point */
-				addInterfaceMethods(infoCache, methodFilter, myMethods);
+				addInterfaceMethods(infoCache, methodFilter, myMethods, localInterfacesOnly);
 			}
-		} else { 
-			/* this is an interface and doesn't have a vTable, but may have static or private methods */
-			for (Method m: getDeclaredMethods()) { 
-				int methodModifiers = m.getModifiers();
-				if ((virtualOnly && Modifier.isStatic(methodModifiers)) || !Modifier.isPublic(methodModifiers)){
-					continue;
+		} else {
+			if (!localInterfacesOnly || isInterface()) {
+				/* this is an interface and doesn't have a vTable, but may have static or private methods */
+				for (Method m: getDeclaredMethods()) { 
+					int methodModifiers = m.getModifiers();
+					if ((virtualOnly && Modifier.isStatic(methodModifiers)) || !Modifier.isPublic(methodModifiers)){
+						continue;
+					}
+					MethodInfo mi = new MethodInfo(m);
+					myMethods.put(mi, mi);
 				}
-				MethodInfo mi = new MethodInfo(m);
-				myMethods.put(mi, mi);
 			}
-			addInterfaceMethods(infoCache, null, myMethods);
+			addInterfaceMethods(infoCache, null, myMethods, localInterfacesOnly);
 		}
 		infoCache.put(this, myMethods); /* save results for future use */
 	}
@@ -1705,7 +1912,7 @@ private HashMap<MethodInfo, MethodInfo> getMethodSet(
 private HashMap<MethodInfo, MethodInfo> addInterfaceMethods(
 		HashMap<Class<?>, HashMap<MethodInfo, MethodInfo>> infoCache, 
 		Set<MethodInfo> methodFilter, 
-		HashMap<MethodInfo, MethodInfo> myMethods) {
+		HashMap<MethodInfo, MethodInfo> myMethods, boolean localInterfacesOnly) {
 	boolean addToCache = false;
 	boolean updateList = (null != myMethods);
 	if (!updateList) {
@@ -1721,7 +1928,7 @@ private HashMap<MethodInfo, MethodInfo> addInterfaceMethods(
 		Class mySuperclass = getSuperclass();
 		if (!isInterface() && (Object.class != mySuperclass)) { 
 			/* some interface methods are visible via the superclass */
-			HashMap<MethodInfo, MethodInfo> superclassMethods = mySuperclass.addInterfaceMethods(infoCache, methodFilter, null);
+			HashMap<MethodInfo, MethodInfo> superclassMethods = mySuperclass.addInterfaceMethods(infoCache, methodFilter, null, localInterfacesOnly);
 			for (MethodInfo otherInfo: superclassMethods.values()) {
 				if ((null == methodFilter) || methodFilter.contains(otherInfo)) {
 					addMethod(myMethods, otherInfo);
@@ -1729,7 +1936,7 @@ private HashMap<MethodInfo, MethodInfo> addInterfaceMethods(
 			}
 		}
 		for (Class intf: getInterfaces()) {
-			HashMap<MethodInfo, MethodInfo> intfMethods = intf.getMethodSet(infoCache, true);
+			HashMap<MethodInfo, MethodInfo> intfMethods = intf.getMethodSet(infoCache, true, localInterfacesOnly);
 			for (MethodInfo otherInfo: intfMethods.values()) {
 				if ((null == methodFilter) || methodFilter.contains(otherInfo)) {
 					addMethod(myMethods, otherInfo);
@@ -1765,7 +1972,7 @@ private native boolean getStaticMethodsImpl(Method[] array, int start, int count
 private native Object[] allocateAndFillArray(int size);
 
 /**
- * Answers an integer which which is the receiver's modifiers. 
+ * Answers an integer which is the receiver's modifiers. 
  * Note that the constants which describe the bits which are
  * returned are implemented in class java.lang.reflect.Modifier
  * which may not be available on the target.
@@ -2019,7 +2226,9 @@ private boolean useModularSearch(String absoluteResName, Module thisModule, Clas
 	boolean visible = false;
 
 	if (thisModule.isNamed()) {
-		final Module callerModule = callerClass.getModule();
+		// When the caller class is null, assuming it is loaded by module java.base.
+		// See https://github.com/eclipse/openj9/issues/8993 for more info.
+		final Module callerModule = callerClass == null ? Class.class.getModule() : callerClass.getModule();
 		visible = (thisModule == callerModule);
 		if (!visible) {
 			visible = absoluteResName.endsWith(".class"); //$NON-NLS-1$
@@ -2191,7 +2400,32 @@ public T newInstance() throws IllegalAccessException, InstantiationException {
 		checkNonSunProxyMemberAccess(security, callerClassLoader, Member.PUBLIC);
 	}
 
+/*[IF JAVA_SPEC_VERSION >= 12]*/
+	Class<?> callerClazz = getStackClass(1);
+	if (callerClazz.classLoader == ClassLoader.bootstrapClassLoader) {
+		/* newInstanceImpl() is required for all bootstrap classes to avoid an infinite loop
+		 * when calling copyConstructor.invoke() in cacheConstructor() at the bootstrap stage
+		 * as the constructors of bootstrap classes are not yet cached for use at that time.
+		 */
+		return (T)J9VMInternals.newInstanceImpl(this);
+	} else {
+		try {
+			Constructor<?> ctr = getDeclaredConstructor();
+			if (reflectionFactory == null) {
+				reflectionFactory = AccessController.doPrivileged(new ReflectionFactory.GetReflectionFactoryAction());
+			}
+			return (T)reflectionFactory.newInstance(ctr, null, callerClazz);
+		} catch (NoSuchMethodException  e) {
+			InstantiationException instantiationEx = new InstantiationException();
+			throw (InstantiationException)instantiationEx.initCause(e);
+		} catch (InvocationTargetException e) {
+			getUnsafe().throwException(e.getCause());
+			return null;  //unreachable but required in compilation
+		}
+	}
+/*[ELSE] JAVA_SPEC_VERSION >= 12*/
 	return (T)J9VMInternals.newInstanceImpl(this);
+/*[ENDIF] JAVA_SPEC_VERSION >= 12*/
 }
 
 /**
@@ -2288,10 +2522,10 @@ public String toGenericString() {
 		kindOfType = "interface "; //$NON-NLS-1$
 	} else if ((!isArray) && ((modifiers & ENUM) != 0) && (getSuperclass() == Enum.class)) {
 		kindOfType = "enum "; //$NON-NLS-1$
-/*[IF Java14]*/
+/*[IF JAVA_SPEC_VERSION >= 14]*/
 	} else if (isRecord()) {
 		kindOfType = "record "; //$NON-NLS-1$
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 14 */
 	} else {
 		kindOfType = "class "; //$NON-NLS-1$	
 	}
@@ -2343,7 +2577,7 @@ private void appendTypeParameters(StringBuilder nameBuilder) {
 			if (comma) nameBuilder.append(',');
 			nameBuilder.append(t);
 			comma = true;
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 			Type[] types = t.getBounds();
 			if (types.length == 1 && types[0].equals(Object.class)) {
 				// skip in case the only bound is java.lang.Object
@@ -2354,7 +2588,7 @@ private void appendTypeParameters(StringBuilder nameBuilder) {
 					prefix = " & "; //$NON-NLS-1$
 				}
 			}
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 		}
 		nameBuilder.append('>');
 	}
@@ -2861,6 +3095,81 @@ private MethodHandle getValueMethod(final Class<? extends Annotation> containedT
 	return valueMethod;
 }
 
+private MetadataCache getMetadataCache() {
+	if (metadataCache == null) {
+		/*[IF JAVA_SPEC_VERSION >= 11]
+		metadataCacheOffset = getUnsafe().objectFieldOffset(Class.class, "metadataCache"); //$NON-NLS-1$
+		/*[ELSE] JAVA_SPEC_VERSION >= 11 */
+		try {
+			Field field = Class.class.getDeclaredFieldInternal("metadataCache", false); //$NON-NLS-1$
+			metadataCacheOffset = getUnsafe().objectFieldOffset(field);
+		} catch (NoSuchFieldException e) {
+			throw newInternalError(e);
+		}
+		/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
+		writeFieldValue(metadataCacheOffset, new MetadataCache());
+	}
+	return metadataCache;
+}
+
+private String cacheSimpleName(String simpleName) {
+	MetadataCache cache = getMetadataCache();
+
+	if (cache.cachedSimpleName == null || cache.cachedSimpleName.get() == null) {
+		MetadataCache.cachedSimpleNameOffset = getFieldOffset(
+			MetadataCache.class, "cachedSimpleName", MetadataCache.cachedSimpleNameOffset); //$NON-NLS-1$
+
+		writeFieldValue(cache, MetadataCache.cachedSimpleNameOffset, new SoftReference<>(simpleName));
+	}
+
+	return simpleName;
+}
+
+private String cacheCanonicalName(String canonicalName) {
+	MetadataCache cache = getMetadataCache();
+
+	if (cache.cachedCanonicalName == null || cache.cachedCanonicalName.get() == null) {
+		MetadataCache.cachedCanonicalNameOffset = getFieldOffset(
+				MetadataCache.class, "cachedCanonicalName", MetadataCache.cachedCanonicalNameOffset); //$NON-NLS-1$
+
+		writeFieldValue(cache, MetadataCache.cachedCanonicalNameOffset, new SoftReference<>(canonicalName));
+	}
+
+	return canonicalName;
+}
+
+/**
+ * This helper method atomically writes the given {@code fieldValue} to the
+ * field specified by the {@code fieldOffset} of the {@code target} object
+ */
+private static void writeFieldValue(Object target, long fieldOffset, Object fieldValue) {
+	/*[IF JAVA_SPEC_VERSION >= 11]
+	getUnsafe().putObjectRelease(target, fieldOffset, fieldValue);
+	/*[ELSE] JAVA_SPEC_VERSION >= 11 */
+	getUnsafe().putOrderedObject(target, fieldOffset, fieldValue);
+	/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
+}
+
+private void writeFieldValue(long fieldOffset, Object fieldValue) {
+	writeFieldValue(this, fieldOffset, fieldValue);
+}
+
+private static long getFieldOffset(Class<?> hostClass, String fieldName, long initialOffset) {
+	if (initialOffset == -1) {
+		try {
+			Field field = hostClass.getDeclaredField(fieldName);
+			return getUnsafe().objectFieldOffset(field);
+		} catch (NoSuchFieldException e) {
+			throw newInternalError(e);
+		}
+	}
+	return initialOffset;
+}
+
+private static long getFieldOffset(String fieldName) {
+	return getFieldOffset(Class.class, fieldName, -1);
+}
+
 /**
  * Gets the array of containedType from the value() method.
  * 
@@ -2869,7 +3178,7 @@ private MethodHandle getValueMethod(final Class<? extends Annotation> containedT
  * @param containedType the annotationType() stored in the container
  * @return Annotation array if the given annotation has a value() method which returns an array of the containedType. Otherwise, return null.
  */
-private Annotation[] getAnnotationsArrayFromValue(Annotation container, Class<? extends Annotation> containerType, Class<? extends Annotation> containedType) {
+private static Annotation[] getAnnotationsArrayFromValue(Annotation container, Class<? extends Annotation> containerType, Class<? extends Annotation> containedType) {
 	try {
 		MethodHandle valueMethod = containerType.getValueMethod(containedType);
 		if (valueMethod != null) {
@@ -2942,7 +3251,7 @@ private AnnotationCache getAnnotationCache() {
 			Annotation[] directAnnotations = sun.reflect.annotation.AnnotationParser.toArray(
 						sun.reflect.annotation.AnnotationParser.parseAnnotations(
 								annotationsData,
-								new Access().getConstantPool(this),
+								getConstantPool(),
 								this));
 			
 			LinkedHashMap<Class<? extends Annotation>, Annotation> directAnnotationsMap = new LinkedHashMap<>(directAnnotations.length * 4 / 3);
@@ -3411,6 +3720,14 @@ private native String getSimpleNameImpl();
  * @see #isAnonymousClass()
  */
 public String getSimpleName() {
+	MetadataCache cache = getMetadataCache();
+	if (cache.cachedSimpleName != null) {
+		String cachedSimpleName = cache.cachedSimpleName.get();
+		if (cachedSimpleName != null) {
+			return cachedSimpleName;
+		}
+	}
+
 	int arrayCount = 0;
 	Class<?> baseType = this;
 	if (isArray()) {
@@ -3422,8 +3739,12 @@ public String getSimpleName() {
 	String simpleName = baseType.getSimpleNameImpl();
 	String fullName = baseType.getName();
 	if (simpleName == null) {
-		Class<?> parent = baseType.getEnclosingObjectClass();
-		// either a base class, or anonymous class
+		/** 
+		 * It is a base class, an anonymous class, or a hidden class.
+		 * Call getEnclosingClass() instead of getEnclosingObjectClass() to check getDeclaringClass() first. Hidden class test expects
+		 * NoClassDefFoundError from getDeclaringClass(). 
+		 */
+		Class<?> parent = baseType.getEnclosingClass();
 		if (parent != null) {
 			simpleName = ""; //$NON-NLS-1$
 		} else {
@@ -3471,7 +3792,7 @@ public String getSimpleName() {
 		}
 		return result.toString();
 	}
-	return simpleName;
+	return cacheSimpleName(simpleName);
 }
 
 /**
@@ -3487,6 +3808,14 @@ public String getSimpleName() {
  * @see #isLocalClass()
  */
 public String getCanonicalName() {
+	MetadataCache cache = getMetadataCache();
+	if (cache.cachedCanonicalName != null) {
+		String cachedCanonicalName = cache.cachedCanonicalName.get();
+		if (cachedCanonicalName != null) {
+			return cachedCanonicalName;
+		}
+	}
+
 	int arrayCount = 0;
 	Class<?> baseType = this;
 	if (isArray()) {
@@ -3495,6 +3824,12 @@ public String getCanonicalName() {
 			arrayCount++;
 		}
 	}
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+	if (baseType.isHidden()) {
+		/* Canonical name is always null for hidden classes. */
+		return null;
+	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 	if (baseType.getEnclosingObjectClass() != null) {
 		// local or anonymous class
 		return null;
@@ -3519,7 +3854,7 @@ public String getCanonicalName() {
 		}
 		return result.toString();
 	}
-	return canonicalName;
+	return cacheCanonicalName(canonicalName);
 }
 
 /**
@@ -3785,7 +4120,7 @@ private class MethodInfo {
 			int methodCursor = 0;
 			boolean addMethod = true;
 			boolean replacedMethod = false;
-			while (methodCursor < jlrMethods.size() && addMethod) {
+			while (methodCursor < jlrMethods.size()) {
 				int increment = 1;
 				Method m = jlrMethods.get(methodCursor);
 				if (newMethod.equals(m)) { /* already have this method */
@@ -3801,7 +4136,10 @@ private class MethodInfo {
 								incumbentMethodClass, incumbentIsAbstract, incumbentClassIsInterface)
 						) {
 							if (!replacedMethod) {
-								jlrMethods.set(methodCursor, newMethod);
+								/* preserve ordering by removing old and appending new instead of directly replacing. */ 
+								jlrMethods.remove(methodCursor);
+								jlrMethods.add(newMethod);
+								increment = 0;
 								replacedMethod = true;
 							} else {
 								jlrMethods.remove(methodCursor);
@@ -3897,9 +4235,11 @@ private static final class CacheKey {
 	static CacheKey newMethodKey(String methodName, Class<?>[] parameterTypes, Class<?> returnType) {
 		return new CacheKey(methodName, parameterTypes, returnType);
 	}
+/*[IF JAVA_SPEC_VERSION >= 11]*/
 	static CacheKey newDeclaredPublicMethodsKey(String methodName, Class<?>[] parameterTypes) {
 		return new CacheKey("#m" + methodName, parameterTypes, null);	//$NON-NLS-1$
 	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 
 	static final CacheKey PublicConstructorsKey = new CacheKey("/c", EmptyParameters, null); //$NON-NLS-1$
 	static final CacheKey PublicFieldsKey = newFieldKey("/f", null); //$NON-NLS-1$
@@ -4489,10 +4829,11 @@ Object setMethodHandleCache(Object cache) {
 	return result;
 }
 
-/*[IF Sidecar19-SE]*/
 ConstantPool getConstantPool() {
-	return new Access().getConstantPool(this);
+	return SharedSecrets.getJavaLangAccess().getConstantPool(this);
 }
+
+/*[IF Sidecar19-SE]*/
 Map<Class<? extends Annotation>, Annotation> getDeclaredAnnotationMap() {
 	throw new Error("Class.getDeclaredAnnotationMap() unimplemented"); //$NON-NLS-1$
 }
@@ -4507,7 +4848,7 @@ static byte[] getExecutableTypeAnnotationBytes(Executable exec) {
 }
 /*[ENDIF] Sidecar19-SE*/
 
-/*[IF Java11]*/
+/*[IF JAVA_SPEC_VERSION >= 11]*/
 /**
  * Answers the host class of the receiver's nest.
  *
@@ -4583,14 +4924,20 @@ public boolean isNestmateOf(Class<?> that) {
  * Answers the nest member classes of the receiver's nest host.
  *
  * @throws SecurityException if a SecurityManager is present and package access is not allowed
+/*[IF JAVA_SPEC_VERSION < 15]
  * @throws LinkageError if there is any problem loading or validating a nest member or the nest host
+/*[ENDIF]
  * @throws SecurityException if a returned class is not the current class, a security manager is enabled,
  *	the caller's class loader is not the same or an ancestor of that returned class, and the
  * 	checkPackageAccess() denies access
  * @return the host class of the receiver.
  */
 @CallerSensitive
-public Class<?>[] getNestMembers() throws LinkageError, SecurityException {
+public Class<?>[] getNestMembers() throws
+/*[IF JAVA_SPEC_VERSION < 15] */
+LinkageError,
+/*[ENDIF] JAVA_SPEC_VERSION < 15 */
+SecurityException {
 	if (isArray() || isPrimitive()) {
 		/* By spec, Class objects representing array types or primitive types
 		 * belong to the nest consisting only of itself.
@@ -4617,9 +4964,9 @@ public Class<?>[] getNestMembers() throws LinkageError, SecurityException {
 
 	return members;
 }
-/*[ENDIF] Java11 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	/**
 	 * Create class of an array. The component type will be this Class instance.
 	 * 
@@ -4653,6 +5000,20 @@ public Class<?>[] getNestMembers() throws LinkageError, SecurityException {
 	 * @return Optional with a nominal descriptor of Class instance
 	 */
 	public Optional<ClassDesc> describeConstable() {
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+		Class<?> clazz = this;
+		if (isArray()) {
+			clazz = getComponentType();
+			while (clazz.isArray()) {
+				clazz = clazz.getComponentType();
+			}
+		}
+		if (clazz.isHidden()) {
+			/* It is always an empty Optional for hidden classes. */
+			return Optional.empty(); 
+		}
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
+
 		ClassDesc classDescriptor = ClassDesc.ofDescriptor(this.descriptorString());
 		return Optional.of(classDescriptor);
 	}
@@ -4663,7 +5024,7 @@ public Class<?>[] getNestMembers() throws LinkageError, SecurityException {
 	 * @return field descriptor of Class instance
 	 */
 	public String descriptorString() {
-		/* see MethodType.getBytecodeStringName */
+		/* see MethodTypeHelper.getBytecodeStringName */
 
 		if (this.isPrimitive()) {
 			if (this == int.class) {
@@ -4687,20 +5048,43 @@ public Class<?>[] getNestMembers() throws LinkageError, SecurityException {
 			}
 		}
 		String name = this.getName().replace('.', '/');
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+		Class<?> clazz = this;
+		if (isArray()) {
+			clazz = getComponentType();
+			while (clazz.isArray()) {
+				clazz = clazz.getComponentType();
+			}
+		}
+		if (clazz.isHidden()) {
+			/* descriptor String of hidden class is something like: "Lpackage/ClassName.romaddress;". */
+			int index = name.lastIndexOf('/');
+			name = name.substring(0, index)+ '.' + name.substring(index + 1,name.length());
+		}
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 		if (this.isArray()) {
 			return name;
 		}
 		return "L"+ name + ";"; //$NON-NLS-1$ //$NON-NLS-2$
 	}
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
-/*[IF Java14]*/
+/*[IF JAVA_SPEC_VERSION >= 14]*/
 	/**
 	 * Returns true if the class instance is a record.
 	 * 
 	 * @return true for a record class, false otherwise
 	 */
-	public native boolean isRecord();
+	public boolean isRecord() {
+/*[IF JAVA_SPEC_VERSION >= 16]*/
+		Class superclazz = getSuperclass();
+		return ((superclazz == Record.class) && isRecordImpl());
+/*[ELSE] JAVA_SPEC_VERSION >= 16*/
+		return isRecordImpl();
+/*[ENDIF] JAVA_SPEC_VERSION >= 16*/
+	}
+	
+	private native boolean isRecordImpl();
 
 	/**
 	 * Returns an array of RecordComponent objects for a record class.
@@ -4709,7 +5093,7 @@ public Class<?>[] getNestMembers() throws LinkageError, SecurityException {
 	 * For a class that is not a record, null is returned.
 	 * For a record with no components an empty array is returned.
 	 * 
-	 * @throws SecurityException 
+	 * @throws SecurityException if declared member access or package access is not allowed
 	 */
 	@CallerSensitive
 	public RecordComponent[] getRecordComponents() {
@@ -4727,5 +5111,101 @@ public Class<?>[] getNestMembers() throws LinkageError, SecurityException {
 	}
 
 	private native RecordComponent[] getRecordComponentsImpl();
-/*[ENDIF] Java14 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 14 */
+
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+	/**
+	 * Returns true if class or interface is sealed.
+	 * 
+	 * @return true if class is sealed, false otherwise
+	 */
+	public native boolean isSealed();
+
+	private native boolean isHiddenImpl();
+	/**
+	 * Returns true if the class is a hidden class.
+	 * 
+	 * @return true for a hidden class, false otherwise
+	 */
+	public boolean isHidden() {
+		return isHiddenImpl(); 
+	}
+
+	/**
+	 * Returns the classData stored in the class.
+	 * 
+	 * @return the classData (Object).
+	 */
+	Object getClassData() {
+		return classData;
+	}
+
+	private native String[] permittedSubclassesImpl();
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
+
+/*[IF JAVA_SPEC_VERSION >= 16]*/
+	/**
+	 * Returns the permitted subclasses related to the calling sealed class as an array
+	 * of Class objects. If the calling class is not a sealed class, is an array class,
+	 * or is primitive, then this method returns null instead.
+	 * The order of any classes returned in the array is unspecified, and any classes
+	 * that cannot be loaded are not included in the returned array. The returned array
+	 * may be empty if there are no permitted subclasses.
+	 * 
+	 * @return array of Class objects if permitted subclasses exist or null if not a sealed class.
+	 * 
+	 * @throws SecurityException if access to any of the classes returned in the array is denied
+	 * 
+	 * @since 16
+	 */
+	@CallerSensitive
+	public Class<?>[] getPermittedSubclasses() throws SecurityException {
+		if (!isSealed()) {
+			return null;
+		}
+		Class<?>[] localPermittedSubclasses = cachedPermittedSubclasses;
+		if (null == localPermittedSubclasses) {
+			String[] permittedSubclassesNames = permittedSubclassesImpl();
+			ArrayList<Class<?>> permittedSubclasses = new ArrayList<>(permittedSubclassesNames.length);
+
+			for (int i = 0; i < permittedSubclassesNames.length; i++) {
+				String subclassName = permittedSubclassesNames[i];
+				try {
+					Class<?> permitted = forNameImpl(subclassName, false, this.classLoader);
+					permittedSubclasses.add(permitted);
+				} catch (ClassNotFoundException e) {
+					// do nothing if class not found
+				}
+			}
+			localPermittedSubclasses = permittedSubclasses.toArray(new Class<?>[0]);
+
+			long localPermittedSubclassesCacheOffset = cachedPermittedSubclassesOffset;
+			if (-1 == localPermittedSubclassesCacheOffset) {
+				localPermittedSubclassesCacheOffset = getUnsafe().objectFieldOffset(Class.class, "cachedPermittedSubclasses");
+				cachedPermittedSubclassesOffset = localPermittedSubclassesCacheOffset;
+			}
+			getUnsafe().putObjectRelease(this, localPermittedSubclassesCacheOffset, localPermittedSubclasses);
+		}
+
+		SecurityManager sm = System.getSecurityManager();
+		if (null != sm) {
+			HashSet<String> packages = new HashSet<>();
+			ClassLoader callerClassLoader = ClassLoader.getCallerClassLoader();
+			for (int i = 0; i < localPermittedSubclasses.length; i++) {
+				ClassLoader subClassLoader = localPermittedSubclasses[i].internalGetClassLoader();
+				if (sun.reflect.misc.ReflectUtil.needsPackageAccessCheck(callerClassLoader, subClassLoader)) {
+					String pkgName = localPermittedSubclasses[i].getPackageName();
+					if ((pkgName != null) && (pkgName != "")) {
+						packages.add(pkgName);
+					}
+				}
+			}
+			for (String pkgName : packages) {
+				sm.checkPackageAccess(pkgName);
+			}
+		}
+
+		return localPermittedSubclasses;
+	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
 }

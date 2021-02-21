@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2019 IBM Corp. and others
+# Copyright (c) 2017, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -29,8 +29,11 @@
 # The final step is where the differences are. While vpaths under make handle everything automatically,
 # we have to actually resolve the full paths to the source files (via omr_find_files and output in resolvedPaths)
 
+set(OMR_ENHANCED_WARNINGS OFF)
+
 add_tracegen(common/j9prt.tdf)
-add_library(j9prt SHARED
+j9vm_add_library(j9prt SHARED
+	OUTPUT_NAME j9prt${J9VM_VERSION_SUFFIX}
 	${CMAKE_CURRENT_BINARY_DIR}/ut_j9prt.c
 
 	# Pull in the objects compiled as part of the OMR port library
@@ -77,11 +80,15 @@ if(OMR_OS_ZOS)
 		j9gs_get_supported.s
 		j9gs_load_gscb.s
 		j9gs_store_gscb.s
-		j9guardedstorage.mc
 		j9mprotect.s
 		j9munprotect.s
 		protect_helpers.c
 	)
+	omr_compile_metalc(
+		zos390/j9guardedstorage.mc
+		zos390/j9guardedstorage.o
+	)
+	target_sources(j9prt PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/zos390/j9guardedstorage.o)
 endif()
 
 if(NOT OMR_OS_WINDOWS)
@@ -170,6 +177,10 @@ if(OMR_OS_OSX OR OMR_OS_AIX)
 	target_link_libraries(j9prt PRIVATE iconv)
 endif()
 
+if(OMR_OS_ZOS)
+	target_link_libraries(j9prt PRIVATE omrport_metalc)
+endif()
+
 target_compile_definitions(j9prt
 	PRIVATE
 		-DJ9PORT_LIBRARY_DEFINE
@@ -178,6 +189,9 @@ target_compile_definitions(j9prt
 if(OMR_OS_WINDOWS)
 	target_include_directories(j9prt PRIVATE win32_include)
 else()
+	if(OMR_OS_ZOS)
+		target_include_directories(j9prt PRIVATE zos390)
+	endif()
 	target_include_directories(j9prt PRIVATE
 		unix
 		unix_include
@@ -193,6 +207,15 @@ target_include_directories(j9prt
 		${CMAKE_CURRENT_BINARY_DIR}
 		${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+if(OMR_OS_LINUX)
+	if((OMR_ARCH_RISCV) OR (OMR_ARCH_X86 AND OMR_ENV_DATA64))
+		set_source_files_properties(unix/j9process.c
+			COMPILE_FLAGS
+			-Wno-unused-result
+		)
+	endif()
+endif()
 
 omr_add_exports(j9prt
 	j9port_allocate_library

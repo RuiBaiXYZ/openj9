@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -184,7 +184,7 @@ j9bcutil_buildRomClass(J9LoadROMClassData *loadData, U_8 * intermediateData, UDA
 
 	ROMClassCreationContext context(
 			PORTLIB, javaVM, loadData->classData, loadData->classDataLength, bctFlags, bcuFlags, findClassFlags, &romClassSegmentAllocationStrategy,
-			loadData->className, loadData->classNameLength, intermediateData, (U_32) intermediateDataLength, loadData->romClass, loadData->classBeingRedefined,
+			loadData->className, loadData->classNameLength, loadData->hostPackageName, loadData->hostPackageLength, intermediateData, (U_32) intermediateDataLength, loadData->romClass, loadData->classBeingRedefined,
 			loadData->classLoader, (0 != classFileBytesReplaced), (TRUE == isIntermediateROMClass), localBuffer);
 
 	BuildResult result = romClassBuilder->buildROMClass(&context);
@@ -250,7 +250,7 @@ ROMClassBuilder::buildROMClass(ROMClassCreationContext *context)
 }
 
 BuildResult
-ROMClassBuilder::handleAnonClassName(J9CfrClassFile *classfile, bool *isLambda)
+ROMClassBuilder::handleAnonClassName(J9CfrClassFile *classfile, bool *isLambda, U_8* hostPackageName, UDATA hostPackageLength)
 {
 	J9CfrConstantPoolInfo* constantPool = classfile->constantPool;
 	U_32 cpThisClassUTF8Slot = constantPool[classfile->thisClass].slot1;
@@ -260,9 +260,16 @@ ROMClassBuilder::handleAnonClassName(J9CfrClassFile *classfile, bool *isLambda)
 	U_32 i = 0;
 	BOOLEAN stringOrNASReferenceToClassName = FALSE;
 	BOOLEAN newCPEntry = TRUE;
-	UDATA newAnonClassNameLength = originalStringLength + 1 + ROM_ADDRESS_LENGTH + 1;
 	BuildResult result = OK;
+	char buf[ROM_ADDRESS_LENGTH + 1] = {0};
 	PORT_ACCESS_FROM_PORT(_portLibrary);
+
+	/* check if adding host package name to anonymous class is needed */
+	UDATA newHostPackageLength = 0;
+	if (memcmp(originalStringBytes, hostPackageName, hostPackageLength) != 0) {
+		newHostPackageLength = hostPackageLength + 1;
+	}
+	UDATA newAnonClassNameLength = originalStringLength + 1 + ROM_ADDRESS_LENGTH + 1 + newHostPackageLength;
 
 	/* check if the class is a lambda class */
 	if (NULL != getLastDollarSignOfLambdaClassName(originalStringBytes, originalStringLength)) {
@@ -272,8 +279,10 @@ ROMClassBuilder::handleAnonClassName(J9CfrClassFile *classfile, bool *isLambda)
 	/* Find if there are any Constant_String or CFR_CONSTANT_NameAndType references to the className.
 	 * If there are none we don't need to make a new cpEntry, we can overwrite the existing
 	 * one since the only reference to it is the classRef
+	 * Note: The check only applies to the existing cpEntries of the constant pool rather than
+	 * the last cpEntry (not yet initialized) for the anonClassName.
 	 */
-	for (i = 0; i < classfile->constantPoolCount; i++) {
+	for (i = 0; i < newUtfCPEntry; i++) {
 		if ((CFR_CONSTANT_String == constantPool[i].tag)
 			|| (CFR_CONSTANT_NameAndType == constantPool[i].tag)
 		) {
@@ -312,7 +321,7 @@ ROMClassBuilder::handleAnonClassName(J9CfrClassFile *classfile, bool *isLambda)
 	}
 
 	/* calculate the size of the new string and create new cpEntry*/
-	anonClassName->slot1 = originalStringLength + ROM_ADDRESS_LENGTH + 1;
+	anonClassName->slot1 = (U_32)newAnonClassNameLength - 1;
 	if (newCPEntry) {
 		anonClassName->slot2 = 0;
 		anonClassName->tag = CFR_CONSTANT_Utf8;
@@ -324,10 +333,18 @@ ROMClassBuilder::handleAnonClassName(J9CfrClassFile *classfile, bool *isLambda)
 	constantPool[classfile->thisClass].slot1 = newUtfCPEntry;
 
 	/* copy the name into the new location and add the special character, fill the rest with zeroes */
-	memcpy (constantPool[newUtfCPEntry].bytes, originalStringBytes, originalStringLength);
-	*(U_8*)((UDATA) constantPool[newUtfCPEntry].bytes + originalStringLength) = ANON_CLASSNAME_CHARACTER_SEPARATOR;
-	memset(constantPool[newUtfCPEntry].bytes + originalStringLength + 1, '0', ROM_ADDRESS_LENGTH);
-	*(U_8*)((UDATA) constantPool[newUtfCPEntry].bytes + originalStringLength + 1 + ROM_ADDRESS_LENGTH) = '\0';
+	if (newHostPackageLength > 0 ) {
+		memcpy(constantPool[newUtfCPEntry].bytes, hostPackageName, newHostPackageLength - 1);
+		*(U_8*)((UDATA) constantPool[newUtfCPEntry].bytes + newHostPackageLength - 1) = ANON_CLASSNAME_CHARACTER_SEPARATOR;
+	}
+	memcpy (constantPool[newUtfCPEntry].bytes + newHostPackageLength, originalStringBytes, originalStringLength);
+	*(U_8*)((UDATA) constantPool[newUtfCPEntry].bytes + newHostPackageLength + originalStringLength) = ANON_CLASSNAME_CHARACTER_SEPARATOR;
+	/* 
+	 * 0x<romAddress> will be appended to anon/hidden class name.
+	 * Initialize the 0x<romAddress> part to 0x00000000 or 0x0000000000000000 (depending on the platforms).
+	 */
+	j9str_printf(PORTLIB, buf, ROM_ADDRESS_LENGTH + 1, ROM_ADDRESS_FORMAT, 0);
+	memcpy(constantPool[newUtfCPEntry].bytes + newHostPackageLength + originalStringLength + 1, buf, ROM_ADDRESS_LENGTH + 1);	
 
 	/* search constantpool for all other identical classRefs. We have not actually
 	 * tested this scenario as javac will not output more than one classRef or utfRef of the
@@ -338,8 +355,8 @@ ROMClassBuilder::handleAnonClassName(J9CfrClassFile *classfile, bool *isLambda)
 			U_32 classNameSlot = constantPool[i].slot1;
 			if (classNameSlot != newUtfCPEntry) {
 				U_32 classNameLength = constantPool[classNameSlot].slot1;
-				if ((classNameLength == originalStringLength)
-					&& (0 == strncmp(originalStringBytes, (const char*)constantPool[classNameSlot].bytes, originalStringLength)))
+				if (J9UTF8_DATA_EQUALS(originalStringBytes, originalStringLength,
+						constantPool[classNameSlot].bytes, classNameLength))
 				{
 					/* if it is the same class, point to original class name slot */
 					constantPool[i].slot1 = newUtfCPEntry;
@@ -359,53 +376,55 @@ ROMClassBuilder::releaseClassFileBuffer()
 	_classFileBuffer = NULL;
 	return result;
 }
+
 void
 ROMClassBuilder::getSizeInfo(ROMClassCreationContext *context, ROMClassWriter *romClassWriter, SRPOffsetTable *srpOffsetTable, bool *countDebugDataOutOfLine, SizeInformation *sizeInformation)
 {
-		/* create a new scope to allow the ROMClassVerbosePhase to properly record the amount of time spent in
-		 * preparation */
-		ROMClassVerbosePhase v(context, PrepareROMClass);
-		Cursor mainAreaCursor(RC_TAG, srpOffsetTable, context);
-		Cursor lineNumberCursor(LINE_NUMBER_TAG, srpOffsetTable, context);
-		Cursor variableInfoCursor(VARIABLE_INFO_TAG, srpOffsetTable, context);
-		Cursor utf8Cursor(UTF8_TAG, srpOffsetTable, context);
-		Cursor classDataCursor(INTERMEDIATE_TAG, srpOffsetTable, context);
-		/*
-		 * The need to have separate lineNumber and variableInfo Cursors from mainAreaCursor only exists
-		 * if it is possible to place debug information out of line. That is currently only done when
-		 * shared classes is enabled and it is possible to share the class OR when the allocation strategy
-		 * permits it.
-		 */
-		if (context->canPossiblyStoreDebugInfoOutOfLine()) {
-			/* It's possible that debug information can be stored out of line.
-			 * Calculate sizes and offsets with out of line debug information.*/
-			*countDebugDataOutOfLine = true;
-			romClassWriter
-				->writeROMClass(&mainAreaCursor,
-					&lineNumberCursor,
-					&variableInfoCursor,
-					&utf8Cursor,
-					(context->isIntermediateDataAClassfile()) ? &classDataCursor : NULL,
-					0, 0, 0, 0,
-					ROMClassWriter::MARK_AND_COUNT_ONLY);
-		} else {
-			context->forceDebugDataInLine();
-			romClassWriter
-				->writeROMClass(&mainAreaCursor,
-					&mainAreaCursor,
-					&mainAreaCursor,
-					&utf8Cursor,
-					(context->isIntermediateDataAClassfile()) ? &classDataCursor : NULL,
-					0, 0, 0, 0,
-					ROMClassWriter::MARK_AND_COUNT_ONLY);
-		}
-		sizeInformation->rcWithOutUTF8sSize = mainAreaCursor.getCount();
-		sizeInformation->lineNumberSize = lineNumberCursor.getCount();
-		sizeInformation->variableInfoSize = variableInfoCursor.getCount();
-		sizeInformation->utf8sSize = utf8Cursor.getCount();
-		/* In case of intermediateData being stored as ROMClass, rawClassDataSize will be 0. */
-		sizeInformation->rawClassDataSize = classDataCursor.getCount();
-		sizeInformation->varHandleMethodTypeLookupTableSize = romClassWriter->getVarHandleMethodTypePaddedSize();
+	/* create a new scope to allow the ROMClassVerbosePhase to properly record the amount of time spent in
+	 * preparation */
+	ROMClassVerbosePhase v(context, PrepareROMClass);
+	Cursor mainAreaCursor(RC_TAG, srpOffsetTable, context);
+	Cursor lineNumberCursor(LINE_NUMBER_TAG, srpOffsetTable, context);
+	Cursor variableInfoCursor(VARIABLE_INFO_TAG, srpOffsetTable, context);
+	Cursor utf8Cursor(UTF8_TAG, srpOffsetTable, context);
+	Cursor classDataCursor(INTERMEDIATE_TAG, srpOffsetTable, context);
+	/*
+	 * The need to have separate lineNumber and variableInfo Cursors from mainAreaCursor only exists
+	 * if it is possible to place debug information out of line. That is currently only done when
+	 * shared classes is enabled and it is possible to share the class OR when the allocation strategy
+	 * permits it.
+	 */
+	if (context->canPossiblyStoreDebugInfoOutOfLine()) {
+		/* It's possible that debug information can be stored out of line.
+		 * Calculate sizes and offsets with out of line debug information.*/
+		*countDebugDataOutOfLine = true;
+		romClassWriter
+			->writeROMClass(&mainAreaCursor,
+				&lineNumberCursor,
+				&variableInfoCursor,
+				&utf8Cursor,
+				(context->isIntermediateDataAClassfile()) ? &classDataCursor : NULL,
+				0, 0, 0, 0,
+				ROMClassWriter::MARK_AND_COUNT_ONLY);
+	} else {
+		context->forceDebugDataInLine();
+		romClassWriter
+			->writeROMClass(&mainAreaCursor,
+				&mainAreaCursor,
+				&mainAreaCursor,
+				&utf8Cursor,
+				(context->isIntermediateDataAClassfile()) ? &classDataCursor : NULL,
+				0, 0, 0, 0,
+				ROMClassWriter::MARK_AND_COUNT_ONLY);
+	}
+	/* NOTE: the size of the VarHandle MethodType lookup table is already included in
+	 * rcWithOutUTF8sSize; see ROMClassWriter::writeVarHandleMethodTypeLookupTable() */
+	sizeInformation->rcWithOutUTF8sSize = mainAreaCursor.getCount();
+	sizeInformation->lineNumberSize = lineNumberCursor.getCount();
+	sizeInformation->variableInfoSize = variableInfoCursor.getCount();
+	sizeInformation->utf8sSize = utf8Cursor.getCount();
+	/* In case of intermediateData being stored as ROMClass, rawClassDataSize will be 0. */
+	sizeInformation->rawClassDataSize = classDataCursor.getCount();
 }
 
 BuildResult
@@ -427,8 +446,8 @@ ROMClassBuilder::prepareAndLaydown( BufferManager *bufferManager, ClassFileParse
 	Trc_BCU_Assert_False(context->isRetransforming() && !context->isRetransformAllowed());
 
 	bool isLambda = false;
-	if (context->isClassAnon()) {
-		BuildResult res = handleAnonClassName(classFileParser->getParsedClassFile(), &isLambda);
+	if (context->isClassAnon() || context->isClassHidden()) {
+		BuildResult res = handleAnonClassName(classFileParser->getParsedClassFile(), &isLambda, context->hostPackageName(), context->hostPackageLength());
 		if (OK != res) {
 			return res;
 		}
@@ -471,10 +490,14 @@ ROMClassBuilder::prepareAndLaydown( BufferManager *bufferManager, ClassFileParse
 	getSizeInfo(context, &romClassWriter, &srpOffsetTable, &countDebugDataOutOfLine, &sizeInformation);
 
 	U_32 romSize = 0;
+	U_32 sizeToCompareForLambda = 0;
 	if (isLambda) {
-		/* calculate the romSize to compare the ROM sizes in the compareROMClassForEquality method for lambda classes */
-		romSize = U_32(sizeInformation.rcWithOutUTF8sSize + sizeInformation.utf8sSize + sizeInformation.rawClassDataSize + sizeInformation.varHandleMethodTypeLookupTableSize);
-		romSize = ROUND_UP_TO_POWEROF2(romSize, sizeof(U_64));
+		/* 
+		 * romSize calculated from getSizeInfo() does not involve StringInternManager. It is only accurate for string intern disabled classes. 
+		 * Lambda classes in java 15 and up are strong hidden classes (defined with Option.STONG), which has the same lifecycle as its
+		 * defining class loader. It is string intern enabled. So pass classFileSize instead of romSize to sizeToCompareForLambda.
+		 */
+		sizeToCompareForLambda = classFileOracle.getClassFileSize();
 	}
 
 	if ( context->shouldCompareROMClassForEquality() ) {
@@ -490,7 +513,7 @@ ROMClassBuilder::prepareAndLaydown( BufferManager *bufferManager, ClassFileParse
 		bool romClassIsShared = (j9shr_Query_IsAddressInCache(_javaVM, romClass, romClass->romSize) ? true : false);
 
 		if (compareROMClassForEquality((U_8*)romClass, romClassIsShared, &romClassWriter,
-				&srpOffsetTable, &srpKeyProducer, &classFileOracle, modifiers, extraModifiers, optionalFlags, context, romSize, isLambda)
+				&srpOffsetTable, &srpKeyProducer, &classFileOracle, modifiers, extraModifiers, optionalFlags, context, sizeToCompareForLambda, isLambda)
 		) {
 			return OK;
 		} else {
@@ -515,8 +538,7 @@ ROMClassBuilder::prepareAndLaydown( BufferManager *bufferManager, ClassFileParse
 			sizeInformation.lineNumberSize +
 			sizeInformation.variableInfoSize +
 			sizeInformation.utf8sSize +
-			sizeInformation.rawClassDataSize +
-			sizeInformation.varHandleMethodTypeLookupTableSize;
+			sizeInformation.rawClassDataSize;
 
 #if defined(J9VM_OPT_SHARED_CLASSES)
 	if (context->isROMClassShareable()) {
@@ -525,6 +547,14 @@ ROMClassBuilder::prepareAndLaydown( BufferManager *bufferManager, ClassFileParse
 			loadType = J9SHR_LOADTYPE_REDEFINED;
 		} else if (context->isRetransforming()) {
 			loadType = J9SHR_LOADTYPE_RETRANSFORMED;
+		} else if (context->isClassUnsafe()
+			|| context->isClassHidden()
+			|| (LOAD_LOCATION_UNKNOWN == context->loadLocation())
+		) {
+			/* For redefining/transforming, we still want loadType to be J9SHR_LOADTYPE_REDEFINED/J9SHR_LOADTYPE_RETRANSFORMED,
+			 * so put these checks after the redefining/transforming checks.
+			 */ 
+			loadType = J9SHR_LOADTYPE_NOT_FROM_PATH;
 		}
 
 		SCStoreTransaction sharedStoreClassTransaction =
@@ -567,7 +597,7 @@ ROMClassBuilder::prepareAndLaydown( BufferManager *bufferManager, ClassFileParse
 				}
 				context->recordROMClass(existingROMClass);
 				if (compareROMClassForEquality((U_8*)existingROMClass, /* romClassIsShared = */ true, &romClassWriter,
-						&srpOffsetTable, &srpKeyProducer, &classFileOracle, modifiers, extraModifiers, optionalFlags, context, romSize, isLambda)
+						&srpOffsetTable, &srpKeyProducer, &classFileOracle, modifiers, extraModifiers, optionalFlags, context, sizeToCompareForLambda, isLambda)
 				) {
 					/*
 					 * Found an existing ROMClass in the shared cache that is equivalent
@@ -592,7 +622,7 @@ ROMClassBuilder::prepareAndLaydown( BufferManager *bufferManager, ClassFileParse
 
 			sizeRequirements.romClassMinimalSize =
 					U_32(sizeInformation.rcWithOutUTF8sSize
-					+ sizeInformation.utf8sSize + sizeInformation.rawClassDataSize + sizeInformation.varHandleMethodTypeLookupTableSize);
+					+ sizeInformation.utf8sSize + sizeInformation.rawClassDataSize);
 			sizeRequirements.romClassMinimalSize = ROUND_UP_TO_POWEROF2(sizeRequirements.romClassMinimalSize, sizeof(U_64));
 
 			sizeRequirements.romClassSizeFullSize =
@@ -695,7 +725,7 @@ ROMClassBuilder::prepareAndLaydown( BufferManager *bufferManager, ClassFileParse
 	AllocationStrategy::AllocatedBuffers allocatedBuffers;
 
 	if ( context->allocationStrategy()->allocateWithOutOfLineData( &allocatedBuffers,
-			sizeInformation.rcWithOutUTF8sSize + sizeInformation.utf8sSize + sizeInformation.rawClassDataSize + sizeInformation.varHandleMethodTypeLookupTableSize,
+			sizeInformation.rcWithOutUTF8sSize + sizeInformation.utf8sSize + sizeInformation.rawClassDataSize,
 			sizeInformation.lineNumberSize, sizeInformation.variableInfoSize)
 	) {
 		romClassBuffer = allocatedBuffers.romClassBuffer;
@@ -717,7 +747,7 @@ ROMClassBuilder::prepareAndLaydown( BufferManager *bufferManager, ClassFileParse
 	 * Use an if statement here and call finishPrepareAndLaydown() in both cases to allow the scope of SCStringTransaction() to survive the life of the call to
 	 * finishPrepareAndLaydown(). Otherwise, the scope of SCStringTransaction() would end early and it would not be safe to us interned strings.
 	 */
-	if (J9_ARE_ALL_BITS_SET(context->findClassFlags(), J9_FINDCLASS_FLAG_ANON)) {
+	if (J9_ARE_ANY_BITS_SET(context->findClassFlags(), J9_FINDCLASS_FLAG_ANON | J9_FINDCLASS_FLAG_HIDDEN)) {
 		U_16 classNameIndex = classFileOracle.getClassNameIndex();
 		U_8* classNameBytes = classFileOracle.getUTF8Data(classNameIndex);
 		U_16 classNameFullLength = classFileOracle.getUTF8Length(classNameIndex);
@@ -831,7 +861,7 @@ ROMClassBuilder::checkDebugInfoCompression(J9ROMClass *romClass, ClassFileOracle
 					Trc_BCU_Assert_Compression_OutOfMemory();
 				}
 			}
-			/* 2) Test local variable table table compression */
+			/* 2) Test local variable table compression */
 			U_32 localVariablesCount = methodIterator.getLocalVariablesCount();
 			if (0 != localVariablesCount) {
 				J9MethodDebugInfo *methodDebugInfo = getMethodDebugInfoFromROMMethod(currentMethod);
@@ -1000,12 +1030,13 @@ ROMClassBuilder::finishPrepareAndLaydown(
 									0, 0, 0, 0,
 									ROMClassWriter::MARK_AND_COUNT_ONLY);
 
+		/* NOTE: the size of the VarHandle MethodType lookup table is already included in
+		 * rcWithOutUTF8sSize; see ROMClassWriter::writeVarHandleMethodTypeLookupTable() */
 		sizeInformation->rcWithOutUTF8sSize = mainAreaCursor.getCount();
 		sizeInformation->lineNumberSize = 0;
 		sizeInformation->variableInfoSize = 0;
 		sizeInformation->utf8sSize = utf8Cursor.getCount();
 		sizeInformation->rawClassDataSize = classDataCursor.getCount();
-		sizeInformation->varHandleMethodTypeLookupTableSize = romClassWriter->getVarHandleMethodTypePaddedSize();
 	} else if (internManager.isInterningEnabled()) {
 		/*
 		 * With the interned strings known, do a second pass on the UTF8 block to update SRP offset information
@@ -1020,7 +1051,7 @@ ROMClassBuilder::finishPrepareAndLaydown(
 	/*
 	 * Record the romSize as the final size of the ROMClass with interned strings space removed.
 	 */
-	U_32 romSize = U_32(sizeInformation->rcWithOutUTF8sSize + sizeInformation->utf8sSize + sizeInformation->rawClassDataSize + sizeInformation->varHandleMethodTypeLookupTableSize);
+	U_32 romSize = U_32(sizeInformation->rcWithOutUTF8sSize + sizeInformation->utf8sSize + sizeInformation->rawClassDataSize);
 	romSize = ROUND_UP_TO_POWEROF2(romSize, sizeof(U_64));
 
 	/*
@@ -1056,18 +1087,18 @@ ROMClassBuilder::finishPrepareAndLaydown(
  *
  *                                  + UNUSED
  *                                 + UNUSED
- *                                + UNUSED
- *                               + UNUSED
+ *                                + J9AccClassIsValueBased
+ *                              + J9AccClassHiddenOptionNestmate
  *
- *                             + UNUSED
- *                            + UNUSED
+ *                             + J9AccClassHiddenOptionStrong
+ *                            + AccSealed
  *                           + AccRecord
  *                          + AccClassAnonClass
  *
  *                        + AccSynthetic (matches Oracle modifier position)
  *                       + AccClassUseBisectionSearch
  *                      + AccClassInnerClass
- *                     + UNUSED
+ *                     + J9AccClassHidden
  *
  *                   + AccClassNeedsStaticConstantInit
  *                  + AccClassIntermediateDataIsClassfile
@@ -1104,6 +1135,16 @@ ROMClassBuilder::computeExtraModifiers(ClassFileOracle *classFileOracle, ROMClas
 	if ( context->isClassAnon() ) {
 		modifiers |= J9AccClassAnonClass;
 	}
+	
+	if (context->isClassHidden()) {
+		modifiers |= J9AccClassHidden;
+		if (context->isHiddenClassOptNestmateSet()) {
+			modifiers |= J9AccClassHiddenOptionNestmate;
+		}
+		if (context->isHiddenClassOptStrongSet()) {
+			modifiers |= J9AccClassHiddenOptionStrong;
+		}
+	}
 
 	if ( context->classFileBytesReplaced() ) {
 		modifiers |= J9AccClassBytecodesModified;
@@ -1127,6 +1168,10 @@ ROMClassBuilder::computeExtraModifiers(ClassFileOracle *classFileOracle, ROMClas
 
 	if ( classFileOracle->isClassUnmodifiable() ) {
 		modifiers |= J9AccClassIsUnmodifiable;
+	}
+	
+	if (classFileOracle->isValueBased()) {
+		modifiers |= J9AccClassIsValueBased;
 	}
 
 	U_32 classNameindex = classFileOracle->getClassNameIndex();
@@ -1203,6 +1248,10 @@ ROMClassBuilder::computeExtraModifiers(ClassFileOracle *classFileOracle, ROMClas
 		modifiers |= J9AccRecord;
 	}
 
+	if (classFileOracle->isSealed()) {
+		modifiers |= J9AccSealed;
+	}
+
 	return modifiers;
 }
 
@@ -1239,6 +1288,9 @@ ROMClassBuilder::computeOptionalFlags(ClassFileOracle *classFileOracle, ROMClass
 	}
 	if (classFileOracle->isRecord()) {
 		optionalFlags |= J9_ROMCLASS_OPTINFO_RECORD_ATTRIBUTE;
+	}
+	if (classFileOracle->isSealed()) {
+		optionalFlags |= J9_ROMCLASS_OPTINFO_PERMITTEDSUBCLASSES_ATTRIBUTE;
 	}
 	return optionalFlags;
 }
@@ -1277,22 +1329,23 @@ bool
 ROMClassBuilder::compareROMClassForEquality(U_8 *romClass,bool romClassIsShared,
 		ROMClassWriter *romClassWriter, SRPOffsetTable *srpOffsetTable, SRPKeyProducer *srpKeyProducer,
 		ClassFileOracle *classFileOracle, U_32 modifiers, U_32 extraModifiers, U_32 optionalFlags,
-		ROMClassCreationContext * context, U_32 romSize, bool isLambda)
+		ROMClassCreationContext * context, U_32 sizeToCompareForLambda, bool isLambda)
 {
 	bool ret = false;
 
 	if (isLambda) {
-		if (sizeof(U_64) < abs((int)(romSize - ((J9ROMClass *)romClass)->romSize))) {
-			/* If the class is a lambda class, we compare the romSizes first to save time. Lambda class names are in the format of
-			 * HostClassName$$Lambda$<IndexNumber>/0000000000000000. When we reach this check, the host class names will be the
-			 * same for both the classes because of the hash key check earlier so the only difference in the size will be the
-			 * difference between the number of digits of the index number. The same lambda class might have a different index
-			 * number from run to run and when the number of digits of the index number increases by 1, romSize increases by 2.
-			 * We check if the difference between romSizes is bigger than sizeof(U_64) because this will allow at least 4 but up
-			 * to 7 (because romSize has padding and is always multiples of 8) digits difference. (eg. HostClassName$$Lambda$[1-9]
-			 * can get matched at least up to HostClassName$$Lambda$99999, HostClassName$$Lambda$[10-99] can get matched at least
-			 * up to HostClassName$$Lambda$999999) This check is different than the classFileSize check because when the number of
-			 * digits of the index number increases by 1, romSize increases by 2 but classFileSize increases by 1.
+		int maxVariance = 9;
+		if (abs((int)(sizeToCompareForLambda - ((J9ROMClass *)romClass)->classFileSize)) > maxVariance) {
+			/* 
+			 * Lambda class names are in the format of HostClassName$$Lambda$<IndexNumber>/0x0000000000000000.
+			 * When we reach this check, the host class names will be the same for both the classes because
+			 * of the hash key check earlier so the only difference in the size will be the difference
+			 * between the number of digits of the index number. The same lambda class might have a
+			 * different index number from run to run and when the number of digits of the index number
+			 * increases by 1, classFileSize also increases by 1. The indexNumber is counter for the number of lambda classes 
+			 * defined so far. It is an int in the JCL side, so the it cannot vary more than max integer vs 0, which is maxVariance (9 bytes).
+			 * This check is different than the romSize check because when the number of digits of the index
+			 * number increases by 1, classFileSize also increases by 1 but romSize increases by 2.
 			 */
 			ret = false;
 		} else {

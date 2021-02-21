@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -45,6 +45,13 @@
 int64_t
 J9::VMEnv::maxHeapSizeInBytes()
    {
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      auto *vmInfo = TR::compInfoPT->getClientData()->getOrCacheVMInfo(stream);
+      return vmInfo->_maxHeapSizeInBytes;
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
    J9JavaVM *jvm = TR::Compiler->javaVM;
 
    if (!jvm)
@@ -53,14 +60,6 @@ J9::VMEnv::maxHeapSizeInBytes()
    J9MemoryManagerFunctions * mmf = jvm->memoryManagerFunctions;
    return (int64_t) mmf->j9gc_get_maximum_heap_size(jvm);
    }
-
-
-UDATA
-J9::VMEnv::heapBaseAddress()
-   {
-   return 0;
-   }
-
 
 bool
 J9::VMEnv::hasAccess(OMR_VMThread *omrVMThread)
@@ -170,7 +169,9 @@ acquireVMaccessIfNeededInner(J9VMThread *vmThread, TR_YesNoMaybe isCompThread)
                     heldMonitor, TR_J9VMBase::get(jitConfig, NULL)->getJ9MonitorName((J9ThreadMonitor*)heldMonitor->getVMMonitor()));
 #endif // #if defined(DEBUG) || defined(PROD_WITH_ASSUMES)
 
-         if (TR::Options::getCmdLineOptions()->realTimeGC())
+         TR::Compilation *comp = compInfoPT->getCompilation();
+         if ((comp && comp->getOptions()->realTimeGC()) ||
+              TR::Options::getCmdLineOptions()->realTimeGC())
             compInfoPT->waitForGCCycleMonitor(false); // used only for real-time
 
          acquireVMAccessNoSuspend(vmThread);   // blocking. Will wait for the entire GC
@@ -189,7 +190,6 @@ acquireVMaccessIfNeededInner(J9VMThread *vmThread, TR_YesNoMaybe isCompThread)
             //TR::MonitorTable::get()->readReleaseClassUnloadMonitor(0); // Main code should do it.
             // releaseVMAccess(vmThread);
 
-            TR::Compilation *comp = compInfoPT->getCompilation();
             if (comp)
                {
                comp->failCompilation<TR::CompilationInterrupted>("Compilation interrupted by GC unloading classes");
@@ -212,7 +212,7 @@ acquireVMaccessIfNeededInner(J9VMThread *vmThread, TR_YesNoMaybe isCompThread)
     * At shutdown time the compilation thread executes Java code and it may receive a sample (see D174900)
     * Only abort the compilation if we're explicitly prepared to handle it.
     */
-   if (compInfoPT->compilationCanBeInterrupted() && compInfoPT->compilationShouldBeInterrupted())
+   if (compInfoPT->compilationShouldBeInterrupted())
       {
       TR_ASSERT(compInfoPT->compilationShouldBeInterrupted() != GC_COMP_INTERRUPT, "GC should not have cut in _compInfoPT=%p\n", compInfoPT);
 
@@ -324,7 +324,7 @@ J9::VMEnv::releaseAccess(TR_J9VMBase *fej9)
       }
    }
 
-uintptrj_t
+uintptr_t
 J9::VMEnv::thisThreadGetPendingExceptionOffset()
    {
    return offsetof(J9VMThread, jitException);
@@ -403,7 +403,7 @@ J9::VMEnv::canMethodExitEventBeHooked(TR::Compilation *comp)
    return comp->fej9()->canMethodExitEventBeHooked();
    }
 
-uintptrj_t
+uintptr_t
 J9::VMEnv::getOverflowSafeAllocSize(TR::Compilation *comp)
    {
    return comp->fej9()->getOverflowSafeAllocSize();
@@ -417,14 +417,14 @@ J9::VMEnv::cpuTimeSpentInCompilationThread(TR::Compilation *comp)
    }
 
 
-uintptrj_t
+uintptr_t
 J9::VMEnv::OSRFrameHeaderSizeInBytes(TR::Compilation *comp)
    {
    return comp->fej9()->getOSRFrameHeaderSizeInBytes();
    }
 
 
-uintptrj_t
+uintptr_t
 J9::VMEnv::OSRFrameSizeInBytes(TR::Compilation *comp, TR_OpaqueMethodBlock* method)
    {
    return comp->fej9()->getOSRFrameSizeInBytes(method);
@@ -432,48 +432,48 @@ J9::VMEnv::OSRFrameSizeInBytes(TR::Compilation *comp, TR_OpaqueMethodBlock* meth
 
 
 bool
-J9::VMEnv::ensureOSRBufferSize(TR::Compilation *comp, uintptrj_t osrFrameSizeInBytes, uintptrj_t osrScratchBufferSizeInBytes, uintptrj_t osrStackFrameSizeInBytes)
+J9::VMEnv::ensureOSRBufferSize(TR::Compilation *comp, uintptr_t osrFrameSizeInBytes, uintptr_t osrScratchBufferSizeInBytes, uintptr_t osrStackFrameSizeInBytes)
    {
-   return comp->fej9()->ensureOSRBufferSize(osrFrameSizeInBytes, osrScratchBufferSizeInBytes, osrStackFrameSizeInBytes);
+   return comp->fej9()->ensureOSRBufferSize(comp, osrFrameSizeInBytes, osrScratchBufferSizeInBytes, osrStackFrameSizeInBytes);
    }
 
-uintptrj_t
+uintptr_t
 J9::VMEnv::thisThreadGetOSRReturnAddressOffset(TR::Compilation *comp)
    {
    return comp->fej9()->thisThreadGetOSRReturnAddressOffset();
    }
 
-uintptrj_t
+uintptr_t
 J9::VMEnv::thisThreadGetGSIntermediateResultOffset(TR::Compilation *comp)
    {
    return comp->fej9()->thisThreadGetGSIntermediateResultOffset();
    }
 
-uintptrj_t
+uintptr_t
 J9::VMEnv::thisThreadGetConcurrentScavengeActiveByteAddressOffset(TR::Compilation *comp)
    {
    return comp->fej9()->thisThreadGetConcurrentScavengeActiveByteAddressOffset();
    }
 
-uintptrj_t
+uintptr_t
 J9::VMEnv::thisThreadGetEvacuateBaseAddressOffset(TR::Compilation *comp)
    {
    return comp->fej9()->thisThreadGetEvacuateBaseAddressOffset();
    }
 
-uintptrj_t
+uintptr_t
 J9::VMEnv::thisThreadGetEvacuateTopAddressOffset(TR::Compilation *comp)
    {
    return comp->fej9()->thisThreadGetEvacuateTopAddressOffset();
    }
 
-uintptrj_t
+uintptr_t
 J9::VMEnv::thisThreadGetGSOperandAddressOffset(TR::Compilation *comp)
    {
    return comp->fej9()->thisThreadGetGSOperandAddressOffset();
    }
 
-uintptrj_t
+uintptr_t
 J9::VMEnv::thisThreadGetGSHandlerAddressOffset(TR::Compilation *comp)
    {
    return comp->fej9()->thisThreadGetGSHandlerAddressOffset();
@@ -499,4 +499,16 @@ J9::VMEnv::getInterpreterVTableOffset()
       }
 #endif /* defined(J9VM_OPT_JITSERVER) */
    return sizeof(J9Class);
+   }
+
+bool
+J9::VMEnv::isVMInStartupPhase(J9JITConfig *jitConfig)
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      return TR::compInfoPT->getClientData()->isInStartupPhase();
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+   return jitConfig->javaVM->phase != J9VM_PHASE_NOT_STARTUP;
    }

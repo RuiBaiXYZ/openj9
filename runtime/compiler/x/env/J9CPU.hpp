@@ -37,21 +37,6 @@ namespace J9 { typedef J9::X86::CPU CPUConnector; }
 #include "compiler/env/J9CPU.hpp"
 #include "env/ProcessorInfo.hpp"
 
-namespace TR { class Compilation; }
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#define PROCESSOR_FEATURES_SIZE 3
-typedef struct TR_ProcessorFeatureFlags {
-  uint32_t featureFlags[PROCESSOR_FEATURES_SIZE];
-} TR_ProcessorFeatureFlags;
-
-#ifdef __cplusplus
-}
-#endif
-
 namespace J9
 {
 
@@ -67,20 +52,37 @@ protected:
 
 public:
 
+   /** 
+    * @brief A factory method used to construct a CPU object for portable AOT compilations
+    * @param[in] omrPortLib : the port library
+    * @return TR::CPU
+    */
+   static TR::CPU detectRelocatable(OMRPortLibrary * const omrPortLib);
+
+   /**
+    * @brief Intialize _supportedFeatureMasks to the list of processor features that will be exploited by the compiler and set _isSupportedFeatureMasksEnabled to true
+    * @return void
+    */
+   static void enableFeatureMasks();
+
+   bool is(OMRProcessorArchitecture p);
+   bool supportsFeature(uint32_t feature);
+
    TR_X86CPUIDBuffer *queryX86TargetCPUID();
    const char * getProcessorVendorId();
    uint32_t getProcessorSignature();
 
-   bool testOSForSSESupport();
+   bool testOSForSSESupport() { return true; } // VM guarantees SSE/SSE2 are available
    bool hasPopulationCountInstruction();
 
-   TR_ProcessorFeatureFlags getProcessorFeatureFlags();
-   bool isCompatible(TR_Processor processorSignature, TR_ProcessorFeatureFlags processorFeatureFlags);
+   bool isCompatible(const OMRProcessorDesc& processorDescription);
 
    uint32_t getX86ProcessorFeatureFlags();
    uint32_t getX86ProcessorFeatureFlags2();
    uint32_t getX86ProcessorFeatureFlags8();
 
+   bool is_test(OMRProcessorArchitecture p);
+   bool supports_feature_test(uint32_t feature);
    };
 
 }

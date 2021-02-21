@@ -20,7 +20,9 @@
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
 
-add_library(jvmti_test_src STATIC
+set(OMR_ENHANCED_WARNINGS OFF)
+
+j9vm_add_library(jvmti_test_src STATIC
 	com/ibm/jvmti/tests/addToBootstrapClassLoaderSearch/abcl001.c
 	com/ibm/jvmti/tests/addToBootstrapClassLoaderSearch/abcl002.c
 	com/ibm/jvmti/tests/addToBootstrapClassLoaderSearch/abcl003.c
@@ -41,6 +43,7 @@ add_library(jvmti_test_src STATIC
 	com/ibm/jvmti/tests/decompResolveFrame/decomp002.c
 	com/ibm/jvmti/tests/decompResolveFrame/decomp003.c
 	com/ibm/jvmti/tests/decompResolveFrame/decomp004.c
+	com/ibm/jvmti/tests/decompResolveFrame/decomp005.c
 
 	com/ibm/jvmti/tests/eventClassFileLoadHook/ecflh001.c
 
@@ -147,6 +150,7 @@ add_library(jvmti_test_src STATIC
 	com/ibm/jvmti/tests/redefineClasses/rc019a.c
 	com/ibm/jvmti/tests/redefineClasses/rc019b.c
 	com/ibm/jvmti/tests/redefineClasses/rc020.c
+	com/ibm/jvmti/tests/redefineClasses/rtc003.c
 
 	com/ibm/jvmti/tests/registerNativesWithRetransformation/rnwr001.c
 
@@ -159,6 +163,7 @@ add_library(jvmti_test_src STATIC
 	com/ibm/jvmti/tests/retransformationIncapableAgent/ria001.c
 
 	com/ibm/jvmti/tests/retransformClasses/rtc001.c
+	com/ibm/jvmti/tests/retransformClasses/rtc002.c
 
 	com/ibm/jvmti/tests/retransformRedefineCombo/rrc001.c
 

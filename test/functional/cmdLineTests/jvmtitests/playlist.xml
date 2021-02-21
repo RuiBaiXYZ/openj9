@@ -1,7 +1,6 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
+<?xml version='1.0' encoding='UTF-8'?>
 <!--
-  Copyright (c) 2016, 2020 IBM Corp. and others
+  Copyright (c) 2016, 2021 IBM Corp. and others
 
   This program and the accompanying materials are made available under
   the terms of the Eclipse Public License 2.0 which accompanies this
@@ -21,7 +20,6 @@
 
   SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
-
 <playlist xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../TKG/playlist.xsd">
 	<test>
 		<testCaseName>cmdLineTester_jvmtitests</testCaseName>
@@ -149,7 +147,6 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>cmdLineTester_jvmtitests_hcr_openi9_none_SCC</testCaseName>
 		<variations>
@@ -192,7 +189,6 @@
 			<impl>openj9</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>cmdLineTester_jvmtitests_debug</testCaseName>
 		<variations>
@@ -233,7 +229,6 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>cmdLineTester_jvmtitests_debug_openj9_none_SCC</testCaseName>
 		<variations>
@@ -273,7 +268,6 @@
 			<impl>openj9</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>cmdLineTester_jvmtitests_nongold</testCaseName>
 		<variations>
@@ -314,8 +308,6 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
-
 	<test>
 		<testCaseName>cmdLineTester_fieldwatchtests</testCaseName>
 		<variations>
@@ -347,8 +339,6 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
-
 	<test>
 		<testCaseName>cmdLineTester_jvmtitests_hcr_nongold_SE80</testCaseName>
 		<variations>
@@ -435,13 +425,11 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
-
 	<test>
 		<testCaseName>cmdLineTester_jvmtitests_hcr_OSRG_nongold_SE80</testCaseName>
 		<variations>
-			<variation>Mode107-OSRG</variation>
-			<variation>Mode110-OSRG</variation>
+			<variation>Mode107-OSRG -Xnocompressedrefs</variation>
+			<variation>Mode110-OSRG -Xnocompressedrefs</variation>
 			<variation>Mode607-OSRG</variation>
 			<variation>Mode610-OSRG</variation>
 			<variation>Mode612-OSRG</variation>
@@ -509,7 +497,6 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>cmdLineTester_jvmtitests_extended_nongold</testCaseName>
 		<variations>
@@ -550,7 +537,6 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>cmdLineTester_decompilationTests</testCaseName>
 		<variations>
@@ -564,7 +550,7 @@
 	-DEXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS) -Xdump -Xgcthreads1 $(SQ) \
 	-jar $(CMDLINETESTER_JAR) \
 	-config $(Q)$(TEST_RESROOT)$(D)decompilationtests.xml$(Q) \
-	-explainExcludes -xids all,linux_ppc -xlist $(Q)$(TEST_RESROOT)$(D)jvmtitests_excludes_$(JDK_VERSION).xml$(Q) -verbose -nonZeroExitWhenError; \
+	-explainExcludes -xids all,linux_ppc -xlist $(Q)$(TEST_RESROOT)$(D)jvmtitests_excludes_$(JDK_VERSION).xml$(Q) -nonZeroExitWhenError; \
 	${TEST_STATUS}</command>
 		<platformRequirements>^arch.arm</platformRequirements>
 		<levels>
@@ -596,7 +582,7 @@
 	-DEXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS) -Xdump -Xgcthreads1 $(SQ) \
 	-jar $(CMDLINETESTER_JAR) \
 	-config $(Q)$(TEST_RESROOT)$(D)decompilationtests.xml$(Q) \
-	-explainExcludes -xids all,linux_ppc -xlist $(Q)$(TEST_RESROOT)$(D)jvmtitests_excludes_$(JDK_VERSION).xml$(Q) -verbose -nonZeroExitWhenError; \
+	-explainExcludes -xids all,linux_ppc -xlist $(Q)$(TEST_RESROOT)$(D)jvmtitests_excludes_$(JDK_VERSION).xml$(Q) -nonZeroExitWhenError; \
 	${TEST_STATUS}</command>
 		<platformRequirements>^arch.arm</platformRequirements>
 		<levels>

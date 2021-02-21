@@ -124,7 +124,7 @@ typedef struct J9ClassLoaderWalkState {
 #define J9CLASS_IS_MIXED(ramClass) (((J9CLASS_FLAGS(ramClass) >> J9AccClassRAMShapeShift) & OBJECT_HEADER_SHAPE_MASK) == OBJECT_HEADER_SHAPE_MIXED)
 
 #define J9CLASS_IS_EXEMPT_FROM_VALIDATION(clazz) \
-	(J9ROMCLASS_IS_UNSAFE((clazz)->romClass) || J9_ARE_ANY_BITS_SET((clazz)->classFlags, J9ClassIsExemptFromValidation))
+	((J9ROMCLASS_IS_UNSAFE((clazz)->romClass) && !J9ROMCLASS_IS_HIDDEN((clazz)->romClass)) || (J9_ARE_ANY_BITS_SET((clazz)->classFlags, J9ClassIsExemptFromValidation)))
 
 #define IS_STRING_COMPRESSION_ENABLED(vmThread) (FALSE != ((vmThread)->javaVM)->strCompEnabled)
 
@@ -167,7 +167,7 @@ typedef struct J9ClassLoaderWalkState {
 #define J9UTF8_LENGTH(j9UTF8Address) (((struct J9UTF8 *)(j9UTF8Address))->length)
 #define J9UTF8_SET_LENGTH(j9UTF8Address, len) (((struct J9UTF8 *)(j9UTF8Address))->length = (len))
 #define J9UTF8_DATA(j9UTF8Address) (((struct J9UTF8 *)(j9UTF8Address))->data)
-
+#define J9UTF8_TOTAL_SIZE(j9UTF8Address) (sizeof(J9UTF8) + J9UTF8_LENGTH(j9UTF8Address))
 #define J9UTF8_DATA_EQUALS(data1, length1, data2, length2) ((((length1) == (length2)) && (memcmp((data1), (data2), (length1)) == 0)))
 #define J9UTF8_EQUALS(utf1, utf2) (((utf1) == (utf2)) || (J9UTF8_DATA_EQUALS(J9UTF8_DATA(utf1), J9UTF8_LENGTH(utf1), J9UTF8_DATA(utf2), J9UTF8_LENGTH(utf2))))
 #define J9UTF8_LITERAL_EQUALS(data1, length1, cString) (J9UTF8_DATA_EQUALS((data1), (length1), (cString), sizeof(cString) - 1))
@@ -309,14 +309,21 @@ static const struct { \
 	((NULL != (interfaceClass)) && ((J9_ITABLE_INDEX_UNRESOLVED != ((methodIndexAndArgCount) & ~255))))
 
 /* Macros for ValueTypes */
+#define J9_CLASS_DISALLOWS_LOCKING_FLAGS (J9ClassIsValueType | J9ClassIsValueBased)
+#define J9_CLASS_ALLOWS_LOCKING(clazz) J9_ARE_NO_BITS_SET((clazz)->classFlags, J9_CLASS_DISALLOWS_LOCKING_FLAGS)
+#define J9_IS_J9CLASS_VALUEBASED(clazz) J9_ARE_ALL_BITS_SET((clazz)->classFlags, J9ClassIsValueBased)
 #ifdef J9VM_OPT_VALHALLA_VALUE_TYPES
+#define J9CLASS_UNPADDED_INSTANCE_SIZE(clazz) J9_VALUETYPE_FLATTENED_SIZE(clazz)
 #define J9_IS_J9CLASS_VALUETYPE(clazz) J9_ARE_ALL_BITS_SET((clazz)->classFlags, J9ClassIsValueType)
 #define J9_IS_J9CLASS_FLATTENED(clazz) J9_ARE_ALL_BITS_SET((clazz)->classFlags, J9ClassIsFlattened)
-#define J9_VALUETYPE_FLATTENED_SIZE(clazz)((clazz)->totalInstanceSize - (clazz)->backfillOffset)
+#define J9_VALUETYPE_FLATTENED_SIZE(clazz) (J9CLASS_HAS_4BYTE_PREPADDING((clazz)) ? ((clazz)->totalInstanceSize - sizeof(U_32)) : (clazz)->totalInstanceSize)
+#define IS_REF_OR_VAL_SIGNATURE(firstChar) ('L' == (firstChar) || 'Q' == (firstChar))
 #else /* J9VM_OPT_VALHALLA_VALUE_TYPES */
+#define J9CLASS_UNPADDED_INSTANCE_SIZE(clazz) ((clazz)->totalInstanceSize)
 #define J9_IS_J9CLASS_VALUETYPE(clazz) FALSE
 #define J9_IS_J9CLASS_FLATTENED(clazz) FALSE
 #define J9_VALUETYPE_FLATTENED_SIZE(clazz)((UDATA) 0) /* It is not possible for this macro to be used since we always check J9_IS_J9CLASS_FLATTENED before ever using it. */
+#define IS_REF_OR_VAL_SIGNATURE(firstChar) ('L' == (firstChar))
 #endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 
 #if defined(OPENJ9_BUILD)

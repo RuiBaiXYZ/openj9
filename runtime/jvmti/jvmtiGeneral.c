@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -65,9 +65,9 @@ static const J9JvmtiErrorMapping errorMap[] = {
 	{ "JVMTI_ERROR_NAMES_DONT_MATCH" , 69 },
 	{ "JVMTI_ERROR_UNSUPPORTED_REDEFINITION_CLASS_MODIFIERS_CHANGED" , 70 },
 	{ "JVMTI_ERROR_UNSUPPORTED_REDEFINITION_METHOD_MODIFIERS_CHANGED" , 71 },
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if (JAVA_SPEC_VERSION >= 11)
 	{ "JVMTI_ERROR_UNSUPPORTED_REDEFINITION_CLASS_ATTRIBUTE_CHANGED" , 72 },
-#endif /* defined(J9VM_OPT_VALHALLA_NESTMATES) */
+#endif /* (JAVA_SPEC_VERSION >= 11) */
 	{ "JVMTI_ERROR_UNMODIFIABLE_CLASS" , 79 },
 	{ "JVMTI_ERROR_UNMODIFIABLE_MODULE" , 80 },
 	{ "JVMTI_ERROR_NOT_AVAILABLE" , 98 },
@@ -177,19 +177,26 @@ jvmtiError JNICALL
 jvmtiGetVersionNumber(jvmtiEnv* env,
 	jint* version_ptr)
 {
+#if JAVA_SPEC_VERSION >= 11
 	J9JavaVM * vm = JAVAVM_FROM_ENV(env);
-	jvmtiError rc;
+#endif /* JAVA_SPEC_VERSION >= 11 */
+	jvmtiError rc = JVMTI_ERROR_NONE;
 	jint rv_version = JVMTI_1_2_3_SPEC_VERSION;
 
 	Trc_JVMTI_jvmtiGetVersionNumber_Entry(env);
 
 	ENSURE_NON_NULL(version_ptr);
 
+#if JAVA_SPEC_VERSION >= 11
+#if JAVA_SPEC_VERSION >= 15
+	if (J2SE_VERSION(vm) >= J2SE_V15) {
+		rv_version = JVMTI_VERSION_15;
+	} else
+#endif /* JAVA_SPEC_VERSION >= 15 */
 	if (J2SE_VERSION(vm) >= J2SE_V11) {
 		rv_version = JVMTI_VERSION_11;
 	}
-
-	rc = JVMTI_ERROR_NONE;
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 done:
 	if (NULL != version_ptr) {

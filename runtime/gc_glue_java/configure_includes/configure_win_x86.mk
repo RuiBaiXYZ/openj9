@@ -33,23 +33,11 @@ ifeq (win_x86-64_cmprssptrs, $(SPEC))
 		--enable-OMR_ARCH_X86 \
 		--enable-OMR_ENV_DATA64 \
 		--enable-OMR_ENV_LITTLE_ENDIAN \
-		--enable-OMR_GC_COMPRESSED_POINTERS \
 		--enable-OMR_GC_TLH_PREFETCH_FTA \
 		--enable-OMR_GC_CONCURRENT_SCAVENGER \
 		--enable-OMR_PORT_ALLOCATE_TOP_DOWN \
-		--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS
-endif
-
-ifeq (win_x86-64_cmprssptrs_purec, $(SPEC))
-	CONFIGURE_ARGS += \
-		--enable-OMRTHREAD_LIB_WIN32 \
-		--enable-OMR_ARCH_X86 \
-		--enable-OMR_ENV_DATA64 \
-		--enable-OMR_ENV_LITTLE_ENDIAN \
-		--enable-OMR_GC_COMPRESSED_POINTERS \
-		--enable-OMR_GC_TLH_PREFETCH_FTA \
-		--enable-OMR_PORT_ALLOCATE_TOP_DOWN \
-		--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS
+		--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS \
+		OMR_GC_POINTER_MODE=compressed
 endif
 
 ifeq (win_x86-64, $(SPEC))
@@ -57,46 +45,23 @@ ifeq (win_x86-64, $(SPEC))
 		--enable-OMRTHREAD_LIB_WIN32 \
 		--enable-OMR_ARCH_X86 \
 		--enable-OMR_ENV_DATA64 \
-		--enable-OMR_GC_FULL_POINTERS \
 		--enable-OMR_ENV_LITTLE_ENDIAN \
 		--enable-OMR_GC_TLH_PREFETCH_FTA \
 		--enable-OMR_GC_CONCURRENT_SCAVENGER \
 		--enable-OMR_PORT_ALLOCATE_TOP_DOWN \
-		--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS
-endif
-
-ifeq (win_x86-64_purec, $(SPEC))
-	CONFIGURE_ARGS += \
-		--enable-OMRTHREAD_LIB_WIN32 \
-		--enable-OMR_ARCH_X86 \
-		--enable-OMR_ENV_DATA64 \
-		--enable-OMR_GC_FULL_POINTERS \
-		--enable-OMR_ENV_LITTLE_ENDIAN \
-		--enable-OMR_GC_TLH_PREFETCH_FTA \
-		--enable-OMR_PORT_ALLOCATE_TOP_DOWN \
-		--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS
+		--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS \
+		OMR_GC_POINTER_MODE=full
 endif
 
 ifeq (win_x86, $(SPEC))
 	CONFIGURE_ARGS += \
 		--enable-OMRTHREAD_LIB_WIN32 \
 		--enable-OMR_ARCH_X86 \
-		--enable-OMR_GC_FULL_POINTERS \
 		--enable-OMR_ENV_LITTLE_ENDIAN \
 		--enable-OMR_GC_TLH_PREFETCH_FTA \
 		--enable-OMR_PORT_ALLOCATE_TOP_DOWN \
-		--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS
-endif
-
-ifeq (win_x86_purec, $(SPEC))
-	CONFIGURE_ARGS += \
-		--enable-OMRTHREAD_LIB_WIN32 \
-		--enable-OMR_ARCH_X86 \
-		--enable-OMR_GC_FULL_POINTERS \
-		--enable-OMR_ENV_LITTLE_ENDIAN \
-		--enable-OMR_GC_TLH_PREFETCH_FTA \
-		--enable-OMR_PORT_ALLOCATE_TOP_DOWN \
-		--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS
+		--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS \
+		OMR_GC_POINTER_MODE=full
 endif
 
 CONFIGURE_ARGS += libprefix= exeext=.exe solibext=.dll arlibext=.lib objext=.obj
@@ -129,3 +94,9 @@ CONFIGURE_ARGS += 'OMR_HOST_OS=win'
 CONFIGURE_ARGS += 'OMR_HOST_ARCH=x86'
 CONFIGURE_ARGS += 'OMR_TARGET_DATASIZE=$(TEMP_TARGET_DATASIZE)'
 CONFIGURE_ARGS += 'OMR_TOOLCHAIN=msvc'
+
+CONFIGURE_ARGS += 'OMR_COMPANY_NAME=International Business Machines Corporation'
+CONFIGURE_ARGS += 'OMR_COMPANY_COPYRIGHT=Copyright (c) 1991, $(shell date "+%Y") IBM Corp. and others'
+CONFIGURE_ARGS += 'OMR_PRODUCT_NAME=IBM SDK, Java(tm) 2 Technology Edition'
+CONFIGURE_ARGS += 'OMR_PRODUCT_DESCRIPTION=J9 Virtual Machine Runtime'
+CONFIGURE_ARGS += 'OMR_PRODUCT_VERSION=$(OPENJDK_VERSION_NUMBER_FOUR_POSITIONS)'

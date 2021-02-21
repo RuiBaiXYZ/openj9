@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -36,6 +36,7 @@
 #include "env/IO.hpp"
 #include "env/J2IThunk.hpp"
 #include "env/VMJ9.h"
+#include "env/VerboseLog.hpp"
 #include "env/jittypes.h"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
@@ -166,7 +167,7 @@ J9::X86::AMD64::PrivateLinkage::PrivateLinkage(TR::CodeGenerator *cg)
 
    // Offsets relative to where the frame pointer *would* point if we had one;
    // namely, the local with the highest address (ie. the "first" local)
-   _properties._offsetToFirstParm = RETURN_ADDRESS_SIZE;
+   setOffsetToFirstParm(RETURN_ADDRESS_SIZE);
    _properties._offsetToFirstLocal = 0;
 
    // TODO: Need a better way to build the flags so they match the info above
@@ -330,7 +331,7 @@ uint8_t *J9::X86::AMD64::PrivateLinkage::flushArguments(
 
    // account for the return address in thunks and snippets.
    if (isReturnAddressOnStack)
-      offset += sizeof(intptrj_t);
+      offset += sizeof(intptr_t);
 
    TR::RealRegister::RegNum reg = TR::RealRegister::NoReg;
    TR_X86OpCodes            op  = BADIA32Op;
@@ -468,7 +469,7 @@ J9::X86::AMD64::PrivateLinkage::flushArguments(
 
    // account for the return address in SwitchToInterpreterPrePrologue
    if (isReturnAddressOnStack)
-      offset += sizeof(intptrj_t);
+      offset += sizeof(intptr_t);
 
    TR::RealRegister::RegNum reg;
    TR::Register *espReg = cg()->allocateRegister();
@@ -534,7 +535,7 @@ uint8_t *J9::X86::AMD64::PrivateLinkage::generateVirtualIndirectThunk(TR::Node *
    uint8_t             *thunk;
    uint8_t             *thunkEntry;
    uint8_t             *cursor;
-   TR::Compilation * comp = cg()->comp();
+   TR::Compilation *comp = cg()->comp();
 
    (void)storeArguments(callNode, NULL, true, &codeSize);
    codeSize += 12;  // +10 MOV8RegImm64 +2 JMPReg
@@ -558,22 +559,22 @@ uint8_t *J9::X86::AMD64::PrivateLinkage::generateVirtualIndirectThunk(TR::Node *
    switch (callNode->getDataType())
       {
       case TR::NoType:
-         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_AMD64icallVMprJavaSendVirtual0, false, false, false);
+         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_AMD64icallVMprJavaSendVirtual0);
          break;
       case TR::Int64:
-         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_AMD64icallVMprJavaSendVirtualJ, false, false, false);
+         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_AMD64icallVMprJavaSendVirtualJ);
          break;
       case TR::Address:
-         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_AMD64icallVMprJavaSendVirtualL, false, false, false);
+         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_AMD64icallVMprJavaSendVirtualL);
          break;
       case TR::Int32:
-         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_AMD64icallVMprJavaSendVirtual1, false, false, false);
+         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_AMD64icallVMprJavaSendVirtual1);
          break;
       case TR::Float:
-         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_AMD64icallVMprJavaSendVirtualF, false, false, false);
+         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_AMD64icallVMprJavaSendVirtualF);
          break;
       case TR::Double:
-         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_AMD64icallVMprJavaSendVirtualD, false, false, false);
+         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_AMD64icallVMprJavaSendVirtualD);
          break;
       default:
          TR_ASSERT(0, "Bad return data type '%s' for call node [" POINTER_PRINTF_FORMAT "]\n",
@@ -592,7 +593,7 @@ uint8_t *J9::X86::AMD64::PrivateLinkage::generateVirtualIndirectThunk(TR::Node *
    //
    *(uint16_t *)cursor = 0xbf48;
    cursor += 2;
-   *(uint64_t *)cursor = (uintptrj_t)glueSymRef->getMethodAddress();
+   *(uint64_t *)cursor = (uintptr_t)glueSymRef->getMethodAddress();
    cursor += 8;
 
    // JMPReg rdi
@@ -610,7 +611,7 @@ uint8_t *J9::X86::AMD64::PrivateLinkage::generateVirtualIndirectThunk(TR::Node *
 
 TR_J2IThunk *J9::X86::AMD64::PrivateLinkage::generateInvokeExactJ2IThunk(TR::Node *callNode, char *signature)
    {
-   TR::Compilation * comp = cg()->comp();
+   TR::Compilation *comp = cg()->comp();
 
    // Allocate thunk storage
    //
@@ -632,22 +633,22 @@ TR_J2IThunk *J9::X86::AMD64::PrivateLinkage::generateInvokeExactJ2IThunk(TR::Nod
    switch (callNode->getDataType())
       {
       case TR::NoType:
-         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExact0, false, false, false);
+         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExact0);
          break;
       case TR::Int64:
-         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExactJ, false, false, false);
+         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExactJ);
          break;
       case TR::Address:
-         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExactL, false, false, false);
+         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExactL);
          break;
       case TR::Int32:
-         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExact1, false, false, false);
+         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExact1);
          break;
       case TR::Float:
-         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExactF, false, false, false);
+         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExactF);
          break;
       case TR::Double:
-         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExactD, false, false, false);
+         glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExactD);
          break;
       default:
          TR_ASSERT(0, "Bad return data type '%s' for call node [" POINTER_PRINTF_FORMAT "]\n",
@@ -662,7 +663,7 @@ TR_J2IThunk *J9::X86::AMD64::PrivateLinkage::generateInvokeExactJ2IThunk(TR::Nod
    //
    *(uint16_t *)cursor = 0xbf48;
    cursor += 2;
-   *(uint64_t *)cursor = (uintptrj_t) cg()->fej9()->getInvokeExactThunkHelperAddress(comp, glueSymRef, callNode->getDataType());
+   *(uint64_t *)cursor = (uintptr_t) cg()->fej9()->getInvokeExactThunkHelperAddress(comp, glueSymRef, callNode->getDataType());
    cursor += 8;
 
    // Arg stores
@@ -674,7 +675,7 @@ TR_J2IThunk *J9::X86::AMD64::PrivateLinkage::generateInvokeExactJ2IThunk(TR::Nod
       // JMPImm4 helper
       //
       *(uint8_t *)cursor++ = 0xe9;
-      TR::SymbolReference *helper = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_methodHandleJ2IGlue, false, false, false);
+      TR::SymbolReference *helper = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_methodHandleJ2IGlue);
       int32_t disp32 = cg()->branchDisplacementToHelperOrTrampoline(cursor+4, helper);
       *(int32_t *)cursor = disp32;
       cursor += 4;
@@ -690,40 +691,6 @@ TR_J2IThunk *J9::X86::AMD64::PrivateLinkage::generateInvokeExactJ2IThunk(TR::Nod
    traceMsg(comp, "\n-- ( Created invokeExact J2I thunk " POINTER_PRINTF_FORMAT " for node " POINTER_PRINTF_FORMAT " )", thunk, callNode);
 
    return thunk;
-   }
-
-
-////////////////////////////////////////////////
-//
-// Prologue and Epilogue
-//
-
-void J9::X86::AMD64::PrivateLinkage::mapIncomingParms(TR::ResolvedMethodSymbol *method)
-   {
-   TR_ASSERT(!getProperties().passArgsRightToLeft(), "Right-to-left not yet implemented on AMD64");
-
-   ListIterator<TR::ParameterSymbol> parameterIterator(&method->getParameterList());
-   TR::ParameterSymbol              *parmCursor   = parameterIterator.getFirst();
-
-   // Adjust the offsets to the right relative positions
-   //
-   int32_t offset = 0;
-   for (parmCursor = parameterIterator.getFirst(); parmCursor; parmCursor = parameterIterator.getNext())
-      {
-      offset -= parmCursor->getRoundedSize() * ((DOUBLE_SIZED_ARGS && parmCursor->getDataType() != TR::Address) ? 2 : 1);
-      parmCursor->setParameterOffset(offset);
-      }
-
-   // Now that we know the total size of the parameters, we know where they all go.
-   // Bump the offsets to the right absolute positions.
-   // TODO:AMD64: Isn't there a way to run through the parms backward, and avoid this second pass?
-   //
-   const int32_t bump = getProperties().getOffsetToFirstParm() - offset;
-   for (parmCursor = parameterIterator.getFirst(); parmCursor; parmCursor = parameterIterator.getNext())
-      {
-      parmCursor->setParameterOffset(bump + parmCursor->getParameterOffset());
-      }
-
    }
 
 TR::Instruction *J9::X86::AMD64::PrivateLinkage::savePreservedRegisters(TR::Instruction *cursor)
@@ -866,7 +833,6 @@ int32_t J9::X86::AMD64::PrivateLinkage::buildArgs(TR::Node                      
    switch (callNode->getSymbol()->castToMethodSymbol()->getMandatoryRecognizedMethod())
       {
       case TR::java_lang_invoke_ComputedCalls_dispatchJ9Method:
-      case TR::java_lang_invoke_MethodHandle_invokeWithArgumentsHelper:
          passArgsOnStack = true;
          break;
       default:
@@ -1201,12 +1167,12 @@ TR::Instruction *J9::X86::AMD64::PrivateLinkage::buildPICSlot(TR::X86PICSlot pic
       TR::SymbolReference * callSymRef = comp()->getSymRefTab()->findOrCreateMethodSymbol(
             node->getSymbolReference()->getOwningMethodIndex(), -1, picSlot.getMethod(), TR::MethodSymbol::Virtual);
 
-      instr = generateImmSymInstruction(CALLImm4, node, (intptrj_t)picSlot.getMethod()->startAddressForJittedMethod(), callSymRef, cg());
+      instr = generateImmSymInstruction(CALLImm4, node, (intptr_t)picSlot.getMethod()->startAddressForJittedMethod(), callSymRef, cg());
       }
    else if (picSlot.getHelperMethodSymbolRef())
       {
       TR::MethodSymbol *helperMethod = picSlot.getHelperMethodSymbolRef()->getSymbol()->castToMethodSymbol();
-      instr = generateImmSymInstruction(CALLImm4, node, (uint32_t)(uintptrj_t)helperMethod->getMethodAddress(), picSlot.getHelperMethodSymbolRef(), cg());
+      instr = generateImmSymInstruction(CALLImm4, node, (uint32_t)(uintptr_t)helperMethod->getMethodAddress(), picSlot.getHelperMethodSymbolRef(), cg());
       }
    else
       {
@@ -1320,7 +1286,7 @@ void J9::X86::AMD64::PrivateLinkage::buildIPIC(TR::X86CallSite &site, TR::LabelS
 
    TR::Method *method = site.getMethodSymbol()->getMethod();
    TR_OpaqueClassBlock *declaringClass = NULL;
-   uintptrj_t itableIndex;
+   uintptr_t itableIndex;
    if (  useLastITableCache
       && (declaringClass = site.getSymbolReference()->getOwningMethod(comp())->getResolvedInterfaceMethod(site.getSymbolReference()->getCPIndex(), &itableIndex))
       && performTransformation(comp(), "O^O useLastITableCache for n%dn itableIndex=%d: %.*s.%.*s%.*s\n",

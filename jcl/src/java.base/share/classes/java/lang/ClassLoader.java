@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
 /*******************************************************************************
- * Copyright (c) 1998, 2020 IBM Corp. and others
+ * Copyright (c) 1998, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -62,7 +62,12 @@ import jdk.internal.loader.BootLoader;
 /*[ELSE]
 import sun.reflect.CallerSensitive;
 /*[ENDIF]*/
- 
+
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+import jdk.internal.loader.NativeLibraries;
+import jdk.internal.loader.NativeLibrary;
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
+
 /**
  * ClassLoaders are used to dynamically load, link and install
  * classes into a running image.
@@ -96,10 +101,6 @@ public abstract class ClassLoader {
 
 	private long vmRef;
 	ClassLoader parent;
-	
-	/*[IF Panama]*/
-	private static String[]	usr_paths = new String[1];
-	/*[ENDIF]*/
 
 	/*[PR CMVC 130382] Optimize checking ClassLoader assertion status */
 	private static boolean checkAssertionOptions;
@@ -147,7 +148,10 @@ public abstract class ClassLoader {
 /*[ENDIF]*/	
 	private static boolean specialLoaderInited = false;
 	private static InternalAnonymousClassLoader internalAnonClassLoader;
-	private static native void initAnonClassLoader(InternalAnonymousClassLoader anonClassLoader);	
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+	private NativeLibraries nativelibs = null;
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
+	private static native void initAnonClassLoader(InternalAnonymousClassLoader anonClassLoader);
 	
 	/*[PR JAZZ 73143]: ClassLoader incorrectly discards class loading locks*/
 	static final class ClassNameLockRef extends WeakReference<Object> implements Runnable {
@@ -204,7 +208,7 @@ public abstract class ClassLoader {
 			// ignore
 		}
 
-		/*[IF Java11]*/
+		/*[IF JAVA_SPEC_VERSION >= 11]*/
 		// This static method call ensures jdk.internal.loader.ClassLoaders.BOOT_LOADER initialization first
 		jdk.internal.loader.ClassLoaders.platformClassLoader();
 		if (bootstrapClassLoader.servicesCatalog != null) {
@@ -216,7 +220,7 @@ public abstract class ClassLoader {
 		}
 		bootstrapClassLoader.classLoaderValueMap = BootLoader.getClassLoaderValueMap();
 		applicationClassLoader = ClassLoaders.appClassLoader();
-		/*[ELSE] Java11 */
+		/*[ELSE] JAVA_SPEC_VERSION >= 11 */
 		ClassLoader sysTemp = null;
 		// Proper initialization requires BootstrapLoader is the first loader instantiated
 		String systemLoaderString = System.internalGetProperties().getProperty("systemClassLoader"); //$NON-NLS-1$
@@ -234,7 +238,7 @@ public abstract class ClassLoader {
 		AbstractClassLoader.setBootstrapClassLoader(bootstrapClassLoader);
 		lazyClassLoaderInit = true;
 		applicationClassLoader = bootstrapClassLoader;
-		/*[ENDIF] Java11 */
+		/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 
 		/* [PR 78889] The creation of this classLoader requires lazy initialization. The internal classLoader struct
 		 * is created in the initAnonClassLoader call. The "new InternalAnonymousClassLoader()" call must be 
@@ -259,24 +263,29 @@ public abstract class ClassLoader {
 		 * More details are at https://github.com/eclipse/openj9/issues/3399#issuecomment-459004840.
 		 */
 		Modifier.isPublic(Modifier.PUBLIC);
-		/*[IF Java10]*/
+		/*[IF JAVA_SPEC_VERSION >= 10]*/
 		try {
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 10 */
 			System.bootLayer = jdk.internal.module.ModuleBootstrap.boot();
-		/*[IF Java10]*/
+		/*[IF JAVA_SPEC_VERSION >= 10]*/
 		} catch (Exception ex) {
-			ex.printStackTrace();
+			System.out.println(ex);
+			Throwable t = ex.getCause();
+			while (t != null) {
+				System.out.println("Caused by: " + t); //$NON-NLS-1$
+				t = t.getCause();
+			}
 			System.exit(1);
 		}
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 10 */
 		jdk.internal.misc.VM.initLevel(2);
 		String javaSecurityManager = System.internalGetProperties().getProperty("java.security.manager"); //$NON-NLS-1$
 		if ((javaSecurityManager != null) 
-		/*[IF Java12]*/
+		/*[IF JAVA_SPEC_VERSION >= 12]*/
 			/* See the SecurityManager javadoc for details about special tokens. */
 			&& !javaSecurityManager.equals("disallow") //$NON-NLS-1$ /* special token to disallow SecurityManager */
 			&& !javaSecurityManager.equals("allow") //$NON-NLS-1$ /* special token to allow SecurityManager */
-			/*[ENDIF] Java12 */
+			/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 		) {
 			if (javaSecurityManager.isEmpty() || "default".equals(javaSecurityManager)) { //$NON-NLS-1$
 				System.setSecurityManager(new SecurityManager());
@@ -296,11 +305,6 @@ public abstract class ClassLoader {
 		applicationClassLoader = sun.misc.Launcher.getLauncher().getClassLoader();
 		/*[ENDIF]*/
 
-		/*[IF Panama]*/
-		/* RI jdk.internal.nicl.LdLoader uses reflection to lookup this field */
-		usr_paths[0] = System.getProperty("user.dir");
-		/*[ENDIF]*/
-		
 		/* Find the extension class loader */
 		ClassLoader tempLoader = applicationClassLoader;
 		while (null != tempLoader.parent) {
@@ -402,6 +406,9 @@ private ClassLoader(Void staticMethodHolder, String classLoaderName, ClassLoader
 		}
 /*[IF Sidecar19-SE]*/
 		unnamedModule = new Module(this);
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+		this.nativelibs = NativeLibraries.jniNativeLibraries(this);
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 /*[ENDIF]*/
 	} 
 /*[IF Sidecar19-SE]*/	
@@ -411,11 +418,17 @@ private ClassLoader(Void staticMethodHolder, String classLoaderName, ClassLoader
 			unnamedModule = null;
 			bootstrapClassLoader = this;
 			VM.initializeClassLoader(bootstrapClassLoader, VM.J9_CLASSLOADER_TYPE_BOOT, false);
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+			this.nativelibs = NativeLibraries.jniNativeLibraries(null);
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 		} else {
 			// Assuming the second classloader initialized is platform classloader
 			VM.initializeClassLoader(this, VM.J9_CLASSLOADER_TYPE_PLATFORM, false);
 			specialLoaderInited = true;
 			unnamedModule = new Module(this);
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+			this.nativelibs = NativeLibraries.jniNativeLibraries(this);
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 		}
 	}
 	this.classLoaderName = classLoaderName;
@@ -598,6 +611,24 @@ final Class<?> defineClassInternal(
 	}
 	return answer;
 }
+
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+
+private final native Class<?> defineClassImpl1(Class<?> hostClass, String className, byte[] classRep, ProtectionDomain protectionDomain, boolean init, int flags, Object classData);
+final Class<?> defineClassInternal(
+		Class<?> hostClass, 
+		String className, 
+		byte[] classRep, 
+		ProtectionDomain protectionDomain, 
+		boolean init, 
+		int flags, 
+		Object classData)
+		throws java.lang.ClassFormatError 
+{
+	Class<?> answer = defineClassImpl1(hostClass, className, classRep, protectionDomain, init, flags, classData);
+	return answer;
+}
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 
 /*[IF Sidecar19-SE]*/
 /**
@@ -786,7 +817,7 @@ private native Class<?> findLoadedClassImpl(String className);
 
 /**
  * Attempts to load a class using the system class loader.
- * Note that the class has already been been linked.
+ * Note that the class has already been linked.
  *
  * @return 		java.lang.Class
  *					the class which was loaded.
@@ -1345,7 +1376,7 @@ Class<?> loadClassHelper(final String className, boolean resolveClass, boolean d
 }
 
 /**
- * Attempts to register the  the ClassLoader as being capable of 
+ * Attempts to register the ClassLoader as being capable of 
  * parallel class loading.  This requires that all superclasses must
  * also be parallel capable.
  *
@@ -1873,9 +1904,6 @@ static ClassLoader callerClassLoader() {
  *							if the library was not allowed to be loaded
  */
 static void loadLibraryWithClassLoader(String libName, ClassLoader loader) {
-	SecurityManager smngr = System.getSecurityManager();
-	if (smngr != null)
-		smngr.checkLink(libName);
 	if (loader != null) {
 		String realLibName = loader.findLibrary(libName);
 		
@@ -1888,14 +1916,13 @@ static void loadLibraryWithClassLoader(String libName, ClassLoader loader) {
 	* [PR JAZZ 93728] Match behaviour of System.loadLibrary() in reference
 	* implementation when system property java.library.path is set 
 	*/
-
-	if (null == loader) {
+	try {
 		loadLibraryWithPath(libName, loader, System.internalGetProperties().getProperty("com.ibm.oti.vm.bootstrap.library.path")); //$NON-NLS-1$
-	} else {
-		try {
+	} catch (UnsatisfiedLinkError ule) {
+		if (loader == null) {
+			throw ule;
+		} else {
 			loadLibraryWithPath(libName, loader, System.internalGetProperties().getProperty("java.library.path")); //$NON-NLS-1$
-		} catch (UnsatisfiedLinkError ule) {
-			loadLibraryWithPath(libName, loader, System.internalGetProperties().getProperty("com.ibm.oti.vm.bootstrap.library.path")); //$NON-NLS-1$
 		}
 	}
 }
@@ -1944,7 +1971,9 @@ static void loadLibraryWithPath(String libName, ClassLoader loader, String libra
 		} catch (java.io.IOException e) {
 			error = com.ibm.oti.util.Util.toString(message);
 		}
-		throw new UnsatisfiedLinkError(libName + " (" + error + ")"); //$NON-NLS-1$ //$NON-NLS-2$
+		/*[MSG "K0649", "{0} ({1})"]*/
+		throw new UnsatisfiedLinkError(com.ibm.oti.util.Msg.getString("K0649", libName, error));//$NON-NLS-1$
+
 	}
 }
 
@@ -1957,6 +1986,59 @@ static void loadLibrary(Class<?> caller, String name, boolean fullPath) {
 		loadLibraryWithClassLoader(name, caller.getClassLoaderImpl());
 }
 
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+static void loadLibrary(Class<?> caller, File file) {
+	ClassLoader loader = (caller == null) ? null : caller.getClassLoader();
+	NativeLibraries nls = (loader == null) ? bootstrapClassLoader.nativelibs : loader.nativelibs;
+	NativeLibrary nl = nls.loadLibrary(caller, file);
+	if (nl == null) {
+		/*[MSG "K0647", "Can't load {0}"]*/
+		throw new UnsatisfiedLinkError(com.ibm.oti.util.Msg.getString("K0647", file));//$NON-NLS-1$
+	}
+}
+static void loadLibrary(Class<?> caller, String libName) {
+	ClassLoader loader = (caller == null) ? null : caller.getClassLoader();
+	if (loader == null) {
+		NativeLibrary nl = bootstrapClassLoader.nativelibs.loadLibrary(caller, libName);
+		if (nl == null) {
+			/*[MSG "K0647", "Can't load {0}"]*/
+			throw new UnsatisfiedLinkError(com.ibm.oti.util.Msg.getString("K0647", libName));//$NON-NLS-1$
+		}
+	} else {
+		NativeLibraries nls = loader.nativelibs;
+		String libfilename = loader.findLibrary(libName);
+		if (libfilename != null) {
+			File libfile = new File(libfilename);
+			if (!libfile.isAbsolute()) {
+				/*[MSG "K0648", "Not an absolute path: {0}"]*/
+				throw new UnsatisfiedLinkError(com.ibm.oti.util.Msg.getString("K0648", libfilename));//$NON-NLS-1$
+			}
+			NativeLibrary nl = nls.loadLibrary(caller, libfile);
+			if (nl == null) {
+				/*[MSG "K0647", "Can't load {0}"]*/
+				throw new UnsatisfiedLinkError(com.ibm.oti.util.Msg.getString("K0647", libfilename));//$NON-NLS-1$
+			}
+		} else {
+			NativeLibrary nl = nls.loadLibrary(caller, libName);
+			if (nl == null) {
+				/*[MSG "K0647", "Can't load {0}"]*/
+				throw new UnsatisfiedLinkError(com.ibm.oti.util.Msg.getString("K0647", libName));//$NON-NLS-1$
+			}
+		}
+	}
+}
+
+private static long findNative(ClassLoader loader, String entryName) {
+	long result = 0;
+	if (loader == null) {
+		result = bootstrapClassLoader.nativelibs.find(entryName);
+	} else {
+		result = loader.nativelibs.find(entryName);
+	}
+	return result;
+}
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
+
 /**
  * Sets the assertion status of a class.
  *
@@ -1966,6 +2048,10 @@ static void loadLibrary(Class<?> caller, String name, boolean fullPath) {
  * @since 1.4
  */
 public void setClassAssertionStatus(String cname, boolean enable) {
+	setClassAssertionStatusImpl(cname, enable);
+}
+
+private void setClassAssertionStatusImpl(String cname, boolean enable) {
 	if (!isParallelCapable) {
 		synchronized(this) {
 			setClassAssertionStatusHelper(cname, enable);
@@ -1993,6 +2079,10 @@ private void setClassAssertionStatusHelper(final String cname, final boolean ena
  * @since 1.4
  */
 public void setPackageAssertionStatus(String pname, boolean enable) {
+	setPackageAssertionStatusImpl(pname, enable);
+}
+
+private void setPackageAssertionStatusImpl(String pname, boolean enable) {
 	if (!isParallelCapable) {
 		synchronized(this) {
 			setPackageAssertionStatusHelper(pname, enable);
@@ -2003,7 +2093,6 @@ public void setPackageAssertionStatus(String pname, boolean enable) {
 		}
 	}
 }
-
 
 private void setPackageAssertionStatusHelper(final String pname, final boolean enable) {
 	if (packageAssertionStatus == null ) {
@@ -2021,6 +2110,10 @@ private void setPackageAssertionStatusHelper(final String pname, final boolean e
  * @since 1.4
  */
 public void setDefaultAssertionStatus(boolean enable){
+	setDefaultAssertionStatusImpl(enable);
+}
+
+private void setDefaultAssertionStatusImpl(boolean enable){
 	if (!isParallelCapable) {
 		synchronized(this) {
 			defaultAssertionStatus = enable;
@@ -2208,16 +2301,16 @@ private void initializeClassLoaderAssertStatus() {
 					if (bootLoader) {
 						continue;
 					}
-					setDefaultAssertionStatus(def);
+					setDefaultAssertionStatusImpl(def);
 				} else {
 					String str = vmargExtraInfo;
 					int len = str.length();
 					if ( len > 3 && str.charAt(len-1) == '.'  && 
 						str.charAt(len-2) == '.' && str.charAt(len-3) == '.') {
 						str = str.substring(0,len-3);
-						setPackageAssertionStatus(str, def);
+						setPackageAssertionStatusImpl(str, def);
 					} else {
-						setClassAssertionStatus(str, def);
+						setClassAssertionStatusImpl(str, def);
 					}
 				}
 		} else if ( vmargOptions.compareTo("-esa") == 0  //$NON-NLS-1$
@@ -2227,7 +2320,7 @@ private void initializeClassLoaderAssertStatus() {
 		) {
 			if (bootLoader) {
 				boolean def = vmargOptions.charAt(1) == 'e';
-				setDefaultAssertionStatus(def);
+				setDefaultAssertionStatusImpl(def);
 			}
 		}
 

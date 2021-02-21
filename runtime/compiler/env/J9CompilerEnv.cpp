@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2017 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -25,14 +25,20 @@
 #include "env/defines.h"
 #include "env/CPU.hpp"
 #include "j9.h"
+#if defined(J9VM_OPT_JITSERVER)
+#include "control/CompilationRuntime.hpp"
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
 J9::CompilerEnv::CompilerEnv(J9JavaVM *vm, TR::RawAllocator raw, const TR::PersistentAllocatorKit &persistentAllocatorKit) :
+#if defined(TR_HOST_ARM) || defined(TR_HOST_ARM64)
    OMR::CompilerEnvConnector(raw, persistentAllocatorKit),
+#else
+   OMR::CompilerEnvConnector(raw, persistentAllocatorKit, OMRPORT_FROM_J9PORT(vm->portLibrary)),
+#endif
    portLib(vm->portLibrary),
    javaVM(vm)
    {
    }
-
 
 void
 J9::CompilerEnv::initializeTargetEnvironment()
@@ -63,3 +69,45 @@ J9::CompilerEnv::isCodeTossed()
 
    return false;
    }
+
+TR::PersistentAllocator &
+J9::CompilerEnv::persistentAllocator()
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   if (J9::PersistentInfo::_remoteCompilationMode == JITServer::SERVER)
+      {
+      auto compInfoPT = TR::compInfoPT;
+      if (compInfoPT && compInfoPT->getPerClientPersistentMemory())
+         {
+         // Returns per-client allocator after enterPerClientPersistentAllocator() is called
+         return compInfoPT->getPerClientPersistentMemory()->_persistentAllocator.get();
+         }
+      }
+#endif
+   return OMR::CompilerEnv::persistentAllocator();
+   }
+
+TR_PersistentMemory *
+J9::CompilerEnv::persistentMemory()
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   if (J9::PersistentInfo::_remoteCompilationMode == JITServer::SERVER)
+      {
+      auto compInfoPT = TR::compInfoPT;
+      if (compInfoPT && compInfoPT->getPerClientPersistentMemory())
+         {
+         // Returns per-client persistent memory after enterPerClientPersistentAllocator() is called
+         return compInfoPT->getPerClientPersistentMemory();
+         }
+      }
+#endif
+   return OMR::CompilerEnv::persistentMemory();
+   }
+
+#if defined(J9VM_OPT_JITSERVER)
+TR::PersistentAllocator &
+J9::CompilerEnv::persistentGlobalAllocator()
+   {
+   return OMR::CompilerEnv::persistentAllocator();
+   }
+#endif

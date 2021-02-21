@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2019 IBM Corp. and others
+ * Copyright (c) 1998, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -664,7 +664,7 @@ unsigned char value, int level, const char *groupName, BOOLEAN suppressMessages,
 	return rc;
 }
 
-/* valid ranges passed in in componentName are of one of the following forms:
+/* valid ranges passed in componentName are of one of the following forms:
  * tpnid{j9vm.10}
  * tpnid{j9vm.10-20}
  * j9vm.10
@@ -1014,7 +1014,7 @@ openFileFromDirectorySearchList(char *searchPath, char *fileName, int32_t flags,
 	searchPathLen = strlen(searchPath);
 	while (offset < searchPathLen) {
 		PORT_ACCESS_FROM_PORT(UT_GLOBAL(portLibrary));
-		size_t currentPathEntryEndsAt = strcspn(nextPathEntry, ";\0");
+		size_t currentPathEntryEndsAt = strcspn(nextPathEntry, ";");
 		strncpy(tempFileNamePath, nextPathEntry, currentPathEntryEndsAt);
 		tempFileNamePath[currentPathEntryEndsAt] = '\0';
 		strcat(tempFileNamePath, DIR_SEPARATOR_STR);
@@ -1029,7 +1029,7 @@ openFileFromDirectorySearchList(char *searchPath, char *fileName, int32_t flags,
 		}
 		
 		offset += currentPathEntryEndsAt + 1;
-		nextPathEntry += currentPathEntryEndsAt + 1;;
+		nextPathEntry += currentPathEntryEndsAt + 1;
 	}
 	
 	return fileHandle;

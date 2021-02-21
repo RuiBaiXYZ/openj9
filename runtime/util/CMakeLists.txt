@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2019 IBM Corp. and others
+# Copyright (c) 2017, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,6 +20,7 @@
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
 
+set(OMR_ENHANCED_WARNINGS OFF)
 add_tracegen(hshelp.tdf j9hshelp)
 add_tracegen(util.tdf j9util)
 add_tracegen(vmutil.tdf j9vmutil)
@@ -28,7 +29,7 @@ add_tracegen(srphashtable.tdf)
 
 j9vm_gen_asm(fpusup.m4)
 
-add_library(j9util STATIC
+j9vm_add_library(j9util STATIC
 	alignedmemcpy.c
 	annhelp.c
 	argbits.c
@@ -41,6 +42,7 @@ add_library(j9util STATIC
 	cpplink.c
 	defarg.c
 	divhelp.c
+	dllloadinfo.c
 	eventframe.c
 	extendedHCR.c
 	extendedmethodblockaccess.c
@@ -80,7 +82,6 @@ add_library(j9util STATIC
 	romhelp.c
 	sendslot.c
 	shchelp_j9.c
-	sleephelp.c
 	srphashtable.c
 	strhelp.c
 	subclass.c

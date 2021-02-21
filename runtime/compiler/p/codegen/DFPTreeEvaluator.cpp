@@ -74,7 +74,7 @@ static const char * fieldName = "laside";
 static const char * sig = "J";
 static const uint32_t fieldLen = 6;
 static const uint32_t sigLen = 1;
-static const char * className ="Ljava/math/BigDecimal;\0";
+static const char * className = "Ljava/math/BigDecimal;";
 static const int32_t len = 22;
 
 extern bool loadAndEvaluateAsDouble(
@@ -108,8 +108,10 @@ static void overlapDFPOperandAndPrecisionLoad(
       bool isConst16Precision,
       TR::CodeGenerator *cg)
    {
+   TR::Compilation *comp = cg->comp();
+
    // check for direct move
-   bool p8DirectMoveTest = cg->comp()->target().cpu.id() == TR_PPCp8;
+   bool p8DirectMoveTest = comp->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P8);
 
    /* We want to overlap the loading of the DFP operands and precision...
       Cases will be..
@@ -124,7 +126,7 @@ static void overlapDFPOperandAndPrecisionLoad(
    bool rhsLoaded = loadAndEvaluateAsDouble(rhsNode, rhsFPRegister, cg);
 
    // if couldn't lfd either of them, overlap the move to FPRs
-   if (cg->comp()->target().is64Bit() && p8DirectMoveTest)
+   if (comp->target().is64Bit() && p8DirectMoveTest)
       {
       if (!lhsLoaded)
          {
@@ -160,12 +162,12 @@ static void overlapDFPOperandAndPrecisionLoad(
 
          // need to store each register word into mem & then load
          tempLHSSymRef = cg->allocateLocalTemp(TR::Int64);
-         tempLHSMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempLHSSymRef, 8, cg);
-         if (cg->comp()->target().is32Bit())
+         tempLHSMR = TR::MemoryReference::createWithSymRef(cg, node, tempLHSSymRef, 8);
+         if (comp->target().is32Bit())
             {
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, tempLHSMR, lhsRegister->getHighOrder());
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node,
-               new (cg->trHeapMemory()) TR::MemoryReference(node, *tempLHSMR, 4, 4, cg), lhsRegister->getLowOrder());
+               TR::MemoryReference::createWithMemRef(cg, node, *tempLHSMR, 4, 4), lhsRegister->getLowOrder());
             }
          else // !p8DirectMoveTest
             generateMemSrc1Instruction(cg, TR::InstOpCode::std, node, tempLHSMR, lhsRegister);
@@ -183,12 +185,12 @@ static void overlapDFPOperandAndPrecisionLoad(
 
          // need to store each register word into mem & then load
          tempRHSSymRef = cg->allocateLocalTemp(TR::Int64);
-         tempRHSMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempRHSSymRef, 8, cg);
-         if (cg->comp()->target().is32Bit())
+         tempRHSMR = TR::MemoryReference::createWithSymRef(cg, node, tempRHSSymRef, 8);
+         if (comp->target().is32Bit())
             {
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, tempRHSMR, rhsRegister->getHighOrder());
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node,
-               new (cg->trHeapMemory()) TR::MemoryReference(node, *tempRHSMR, 4, 4, cg), rhsRegister->getLowOrder());
+               TR::MemoryReference::createWithMemRef(cg, node, *tempRHSMR, 4, 4), rhsRegister->getLowOrder());
             }
          else
             generateMemSrc1Instruction(cg, TR::InstOpCode::std, node, tempRHSMR, rhsRegister);
@@ -201,7 +203,7 @@ static void overlapDFPOperandAndPrecisionLoad(
 
          // store register word to mem
          tempPrecSymRef = cg->allocateLocalTemp(TR::Int64);
-         TR::MemoryReference * tempMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempPrecSymRef, 8, cg);
+         TR::MemoryReference * tempMR = TR::MemoryReference::createWithSymRef(cg, node, tempPrecSymRef, 8);
          generateMemSrc1Instruction(cg, TR::InstOpCode::std, node, tempMR, cg->evaluate(precChild));
          }
 
@@ -214,21 +216,21 @@ static void overlapDFPOperandAndPrecisionLoad(
       if (toRound == 1 && !isConst16Precision)
          {
          generateTrg1MemInstruction(cg, TR::InstOpCode::lfd, node, precFPRegister,
-            new (cg->trHeapMemory()) TR::MemoryReference(node, tempPrecSymRef, 8, cg));
+            TR::MemoryReference::createWithSymRef(cg, node, tempPrecSymRef, 8));
          }
 
       if (!rhsLoaded)
          {
          rhsFPRegister = cg->allocateRegister(TR_FPR);
          generateTrg1MemInstruction(cg, TR::InstOpCode::lfd, node, rhsFPRegister,
-            new (cg->trHeapMemory()) TR::MemoryReference(node, tempRHSSymRef, 8, cg));
+            TR::MemoryReference::createWithSymRef(cg, node, tempRHSSymRef, 8));
          }
 
       if (!lhsLoaded)
          {
          lhsFPRegister = cg->allocateRegister(TR_FPR);
          generateTrg1MemInstruction(cg, TR::InstOpCode::lfd, node, lhsFPRegister,
-            new (cg->trHeapMemory()) TR::MemoryReference(node, tempLHSSymRef, 8, cg));
+            TR::MemoryReference::createWithSymRef(cg, node, tempLHSSymRef, 8));
          }
       }
    }
@@ -278,13 +280,13 @@ static void genSetDFPRoundingMode(
       {
       // store into first 32-bits of 64-bit memory, then lfd into an fpr
       TR::SymbolReference * tempSymRef = cg->allocateLocalTemp(TR::Int64);
-      TR::MemoryReference * tempMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempSymRef, 8, cg);
+      TR::MemoryReference * tempMR = TR::MemoryReference::createWithSymRef(cg, node, tempSymRef, 8);
       generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, tempMR, rmRegister);
 
       cg->generateGroupEndingNop(node);
 
       generateTrg1MemInstruction(cg, TR::InstOpCode::lfd, node, fpRegister,
-          new (cg->trHeapMemory()) TR::MemoryReference(node, tempSymRef, 8, cg));
+          TR::MemoryReference::createWithSymRef(cg, node, tempSymRef, 8));
       }
 
    generateSrc1Instruction(cg, TR::InstOpCode::mtfsfw, node, fpRegister, 0x1);
@@ -349,7 +351,7 @@ static void genStoreDFP(
       }
 
    // need a hand-crafted memref
-   TR::MemoryReference * tempMR = new (cg->trHeapMemory()) TR::MemoryReference(objRegister, dfpFieldOffset, 8, cg);
+   TR::MemoryReference * tempMR = TR::MemoryReference::createWithDisplacement(cg, objRegister, dfpFieldOffset, 8);
 
    // store to memory
    generateMemSrc1Instruction(cg, TR::InstOpCode::stfd, node, tempMR, fprDFPRegister);
@@ -361,7 +363,7 @@ static TR::Register *inlineBigDecimalConstructor64(
       bool isLong,
       bool exp)
    {
-   bool p8DirectMoveTest = cg->comp()->target().cpu.id() == TR_PPCp8;
+   bool p8DirectMoveTest = cg->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P8);
 
    // second child is an expression representing the value to be converted to DFP
    TR::Register * valRegister = cg->evaluate(node->getSecondChild());
@@ -448,28 +450,28 @@ static TR::Register *inlineBigDecimalConstructor64(
       // (1) prep the exponent for the Store-Load sequence
       if (exp)
          {
-         tempExpMR = new (cg->trHeapMemory()) TR::MemoryReference(cg->getStackPointerRegister(), -4, 4, cg);
+         tempExpMR = TR::MemoryReference::createWithDisplacement(cg, cg->getStackPointerRegister(), -4, 4);
          tempExpMR->forceIndexedForm(node, cg);
 
          // touch memory before performing Store-Load
          generateTrg1MemInstruction(cg, TR::InstOpCode::lfiwax, node, expFPRegister, tempExpMR);
 
          // store 32-bits into stack slot
-         generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, new (cg->trHeapMemory()) TR::MemoryReference(node, *tempExpMR, 0, 4, cg), expRegister);
+         generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, TR::MemoryReference::createWithMemRef(cg, node, *tempExpMR, 0, 4), expRegister);
          }
 
       // (2) prep the value for the Store-Load sequence
       // NOTE:  We don't differentiate between isLong or !isLong since we've
       // sign extended above - so we'll need to prep both halves of the register
       tempValSymRef = cg->allocateLocalTemp(TR::Int64);
-      tempValMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempValSymRef, 8, cg);
+      tempValMR = TR::MemoryReference::createWithSymRef(cg, node, tempValSymRef, 8);
       generateMemSrc1Instruction(cg, TR::InstOpCode::std, node, tempValMR, valRegister);
 
       // (3) prep the precision for the Store-Load sequence
       if (toRound == 1)
          {
          tempPrecSymRef = cg->allocateLocalTemp(TR::Int64);
-         TR::MemoryReference * tempMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempPrecSymRef, 8, cg);
+         TR::MemoryReference * tempMR = TR::MemoryReference::createWithSymRef(cg, node, tempPrecSymRef, 8);
          generateMemSrc1Instruction(cg, TR::InstOpCode::std, node, tempMR, precRegister);
          }
 
@@ -480,17 +482,17 @@ static TR::Register *inlineBigDecimalConstructor64(
       if (toRound == 1)
          {
          generateTrg1MemInstruction(cg, TR::InstOpCode::lfd, node, precFPRegister,
-             new (cg->trHeapMemory()) TR::MemoryReference(node, tempPrecSymRef, 8, cg));
+             TR::MemoryReference::createWithSymRef(cg, node, tempPrecSymRef, 8));
          }
 
       // complete the Store-Load sequence for value
       generateTrg1MemInstruction(cg, TR::InstOpCode::lfd, node, dfpRegister,
-            new (cg->trHeapMemory()) TR::MemoryReference(node, tempValSymRef, 8, cg));
+            TR::MemoryReference::createWithSymRef(cg, node, tempValSymRef, 8));
 
       // complete the Store-Load sequence for exponent
       if (exp)
          {
-         generateTrg1MemInstruction(cg, TR::InstOpCode::lfiwax, node, expFPRegister, new (cg->trHeapMemory()) TR::MemoryReference(node, *tempExpMR, 0, 4, cg));
+         generateTrg1MemInstruction(cg, TR::InstOpCode::lfiwax, node, expFPRegister, TR::MemoryReference::createWithMemRef(cg, node, *tempExpMR, 0, 4));
          tempExpMR->decNodeReferenceCounts(cg);
          }
       }
@@ -646,9 +648,9 @@ static TR::Register *inlineBigDecimalConstructor32(
    if(!isLong)
       {
       // setup for store 32-bits into stack slot
-      tempValMR = new (cg->trHeapMemory()) TR::MemoryReference(cg->getStackPointerRegister(), -4, 4, cg);
-      tempValMR2 = new (cg->trHeapMemory()) TR::MemoryReference(node, *tempValMR, 0, 4, cg);
-      tempValMR3 = new (cg->trHeapMemory()) TR::MemoryReference(node, *tempValMR, 0, 4, cg);
+      tempValMR = TR::MemoryReference::createWithDisplacement(cg, cg->getStackPointerRegister(), -4, 4);
+      tempValMR2 = TR::MemoryReference::createWithMemRef(cg, node, *tempValMR, 0, 4);
+      tempValMR3 = TR::MemoryReference::createWithMemRef(cg, node, *tempValMR, 0, 4);
       tempValMR3->forceIndexedForm(node, cg);
       tempValMR->forceIndexedForm(node, cg);
 
@@ -665,10 +667,10 @@ static TR::Register *inlineBigDecimalConstructor32(
       // 32-bit AIX (and possibly Linux) doesn't guarantee
       // saving left half of 64-bit regs
       tempValSymRef = cg->allocateLocalTemp(TR::Int64);
-      tempValMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempValSymRef, 8, cg);
+      tempValMR = TR::MemoryReference::createWithSymRef(cg, node, tempValSymRef, 8);
       generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, tempValMR, valRegister->getHighOrder());
       generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node,
-            new (cg->trHeapMemory()) TR::MemoryReference(node, *tempValMR, 4, 4, cg), valRegister->getLowOrder());
+            TR::MemoryReference::createWithMemRef(cg, node, *tempValMR, 4, 4), valRegister->getLowOrder());
       }
 
    // prep the exponent for the Store-Load sequence
@@ -685,14 +687,14 @@ static TR::Register *inlineBigDecimalConstructor32(
       cg->decReferenceCount(node->getChild(2));
 
       // setup for store 32-bits into stack slot
-      tempExpMR = new (cg->trHeapMemory()) TR::MemoryReference(cg->getStackPointerRegister(), -4, 4, cg);
+      tempExpMR = TR::MemoryReference::createWithDisplacement(cg, cg->getStackPointerRegister(), -4, 4);
       tempExpMR->forceIndexedForm(node, cg);
 
       // touch memory before performing Store-Load
       generateTrg1MemInstruction(cg, TR::InstOpCode::lfiwax, node, expFPRegister, tempExpMR);
 
       // store 32-bits into stack slot
-      generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, new (cg->trHeapMemory()) TR::MemoryReference(node, *tempExpMR, 0, 4, cg), expRegister);
+      generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, TR::MemoryReference::createWithMemRef(cg, node, *tempExpMR, 0, 4), expRegister);
       }
 
    // prep Rounding (rounding mode + precision) for Store-Load sequence
@@ -743,7 +745,7 @@ static TR::Register *inlineBigDecimalConstructor32(
    // complete the Store-Load sequence for exponent
    if (exp)
       {
-      generateTrg1MemInstruction(cg, TR::InstOpCode::lfiwax, node, expFPRegister, new (cg->trHeapMemory()) TR::MemoryReference(node, *tempExpMR, 0, 4, cg));
+      generateTrg1MemInstruction(cg, TR::InstOpCode::lfiwax, node, expFPRegister, TR::MemoryReference::createWithMemRef(cg, node, *tempExpMR, 0, 4));
       tempExpMR->decNodeReferenceCounts(cg);
       }
 
@@ -757,7 +759,7 @@ static TR::Register *inlineBigDecimalConstructor32(
    else
       {
       generateTrg1MemInstruction(cg, TR::InstOpCode::lfd, node, dfpRegister,
-            new (cg->trHeapMemory()) TR::MemoryReference(node, tempValSymRef, 8, cg));
+            TR::MemoryReference::createWithSymRef(cg, node, tempValSymRef, 8));
       }
 
    /* Now convert to DFP, insert exponent and round */
@@ -884,9 +886,11 @@ extern TR::Register *inlineBigDecimalBinaryOp(
       TR::InstOpCode::Mnemonic op,
       bool scaled)
    {
+   TR::Compilation *comp = cg->comp();
+
    // This is the check used to determine whether or not to use direct move instructions in 64 bit
    // Is used consistently throughout this file
-   bool p8DirectMoveTest = cg->comp()->target().cpu.id() == TR_PPCp8;
+   bool p8DirectMoveTest = comp->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P8);
 
    int32_t toRound = 0;
    bool isConst16Precision = false;
@@ -999,7 +1003,7 @@ extern TR::Register *inlineBigDecimalBinaryOp(
       {
       // Check the desired biased exponent
       TR::Register * desiredBiasedExpRegister = cg->evaluate(node->getChild(3));
-      if (cg->comp()->target().is64Bit() && p8DirectMoveTest) // sign extend it...
+      if (comp->target().is64Bit() && p8DirectMoveTest) // sign extend it...
          generateTrg1Src1Instruction(cg, TR::InstOpCode::extsw, node, desiredBiasedExpRegister, desiredBiasedExpRegister);
       cg->decReferenceCount(node->getChild(3));
 
@@ -1107,8 +1111,10 @@ extern TR::Register *inlineBigDecimalScaledDivide(
       TR::Node * node,
       TR::CodeGenerator *cg)
    {
+   TR::Compilation *comp = cg->comp();
+
    // used to check for direct move instruction support
-   bool p8DirectMoveTest = cg->comp()->target().cpu.id() == TR_PPCp8;
+   bool p8DirectMoveTest = comp->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P8);
 
    // check the rounding constant
    TR::Register * rmRegister = NULL;
@@ -1144,7 +1150,7 @@ extern TR::Register *inlineBigDecimalScaledDivide(
    bool rhsLoaded = loadAndEvaluateAsDouble(rhsNode, rhsFPRegister, cg);
 
    // if couldn't lfd either of them, overlap the move to FPRs (case for using the POWER 8 direct move instructions)
-   if (cg->comp()->target().is64Bit() && p8DirectMoveTest)
+   if (comp->target().is64Bit() && p8DirectMoveTest)
       {
       if (!lhsLoaded)
          {
@@ -1174,12 +1180,12 @@ extern TR::Register *inlineBigDecimalScaledDivide(
 
          // need to store each register word into mem & then load
          tempLHSSymRef = cg->allocateLocalTemp(TR::Int64);
-         tempLHSMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempLHSSymRef, 8, cg);
-         if (cg->comp()->target().is32Bit())
+         tempLHSMR = TR::MemoryReference::createWithSymRef(cg, node, tempLHSSymRef, 8);
+         if (comp->target().is32Bit())
             {
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, tempLHSMR, lhsRegister->getHighOrder());
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node,
-                  new (cg->trHeapMemory()) TR::MemoryReference(node, *tempLHSMR, 4, 4, cg), lhsRegister->getLowOrder());
+                  TR::MemoryReference::createWithMemRef(cg, node, *tempLHSMR, 4, 4), lhsRegister->getLowOrder());
             }
          else // another case if we cannot use the POWER 8 direct move instructions
             generateMemSrc1Instruction(cg, TR::InstOpCode::std, node, tempLHSMR, lhsRegister);
@@ -1196,12 +1202,12 @@ extern TR::Register *inlineBigDecimalScaledDivide(
 
          // need to store each register word into mem & then load
          tempRHSSymRef = cg->allocateLocalTemp(TR::Int64);
-         tempRHSMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempRHSSymRef, 8, cg);
-         if (cg->comp()->target().is32Bit())
+         tempRHSMR = TR::MemoryReference::createWithSymRef(cg, node, tempRHSSymRef, 8);
+         if (comp->target().is32Bit())
             {
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, tempRHSMR, rhsRegister->getHighOrder());
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node,
-                  new (cg->trHeapMemory()) TR::MemoryReference(node, *tempRHSMR, 4, 4, cg), rhsRegister->getLowOrder());
+                  TR::MemoryReference::createWithMemRef(cg, node, *tempRHSMR, 4, 4), rhsRegister->getLowOrder());
             }
          else
             generateMemSrc1Instruction(cg, TR::InstOpCode::std, node, tempRHSMR, rhsRegister);
@@ -1217,13 +1223,13 @@ extern TR::Register *inlineBigDecimalScaledDivide(
          {
          lhsFPRegister = cg->allocateRegister(TR_FPR);
          generateTrg1MemInstruction(cg, TR::InstOpCode::lfd, node, lhsFPRegister,
-             new (cg->trHeapMemory()) TR::MemoryReference(node, tempLHSSymRef, 8, cg));
+             TR::MemoryReference::createWithSymRef(cg, node, tempLHSSymRef, 8));
          }
       if (!rhsLoaded)
          {
          rhsFPRegister = cg->allocateRegister(TR_FPR);
          generateTrg1MemInstruction(cg, TR::InstOpCode::lfd, node, rhsFPRegister,
-             new (cg->trHeapMemory()) TR::MemoryReference(node, tempRHSSymRef, 8, cg));
+             TR::MemoryReference::createWithSymRef(cg, node, tempRHSSymRef, 8));
          }
       }
 
@@ -1264,7 +1270,7 @@ extern TR::Register *inlineBigDecimalScaledDivide(
 
    // Check the desired biased exponent
    TR::Register * desiredBiasedExpRegister = cg->evaluate(node->getChild(3));
-   if (cg->comp()->target().is64Bit() || p8DirectMoveTest)
+   if (comp->target().is64Bit() || p8DirectMoveTest)
       generateTrg1Src1Instruction(cg, TR::InstOpCode::extsw, node, desiredBiasedExpRegister, desiredBiasedExpRegister);
    cg->decReferenceCount(node->getChild(3));
 
@@ -1274,7 +1280,7 @@ extern TR::Register *inlineBigDecimalScaledDivide(
    TR::Register * actualBiasedExpRegister = cg->allocateRegister();
 
    // move the actual biased exponent to a GPR... (can do this in 32/64bit mode)
-   if (cg->comp()->target().is64Bit() && p8DirectMoveTest)
+   if (comp->target().is64Bit() && p8DirectMoveTest)
       {
       // generate a direct move instruction
       generateTrg1Src1Instruction(cg, TR::InstOpCode::mfvsrd, node, actualBiasedExpRegister, fprActualBiasedExpRegister);
@@ -1283,14 +1289,14 @@ extern TR::Register *inlineBigDecimalScaledDivide(
       {
       //NOTE:  Since exponent will never be > 32-bits, ok to use doubleword store-loads here
       TR::SymbolReference * tempExpSymRef = cg->allocateLocalTemp(TR::Int64);
-      TR::MemoryReference * tempMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempExpSymRef, 8, cg);
+      TR::MemoryReference * tempMR = TR::MemoryReference::createWithSymRef(cg, node, tempExpSymRef, 8);
       generateMemSrc1Instruction(cg, TR::InstOpCode::stfd, node, tempMR, fprActualBiasedExpRegister);
 
       // now finish off the Store-Load sequence in REVERSE!
       cg->generateGroupEndingNop(node);
 
       generateTrg1MemInstruction(cg, TR::InstOpCode::ld, node, actualBiasedExpRegister,
-         new (cg->trHeapMemory()) TR::MemoryReference(node, tempExpSymRef, 8, cg));
+         TR::MemoryReference::createWithSymRef(cg, node, tempExpSymRef, 8));
       }
     cg->stopUsingRegister(fprActualBiasedExpRegister);
 
@@ -1325,19 +1331,19 @@ extern TR::Register *inlineBigDecimalScaledDivide(
 
    // Insert the biased exponent (biased exponents always < 32, so can do this in 32/64 bit if there is support)
    TR::Register * fprDesiredBiasedExpRegister = cg->allocateRegister(TR_FPR);
-   if (cg->comp()->target().is64Bit() && p8DirectMoveTest)
+   if (comp->target().is64Bit() && p8DirectMoveTest)
       generateTrg1Src1Instruction(cg, TR::InstOpCode::mtvsrd, node, fprDesiredBiasedExpRegister, desiredBiasedExpRegister);
    else
       {
       // store register word to mem & then load
       TR::SymbolReference * tempSymRef = cg->allocateLocalTemp(TR::Int64);
-      TR::MemoryReference * tempMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempSymRef, 8, cg);
+      TR::MemoryReference * tempMR = TR::MemoryReference::createWithSymRef(cg, node, tempSymRef, 8);
       generateMemSrc1Instruction(cg, TR::InstOpCode::std, node, tempMR, desiredBiasedExpRegister);
 
       cg->generateGroupEndingNop(node);
 
       generateTrg1MemInstruction(cg, TR::InstOpCode::lfd, node, fprDesiredBiasedExpRegister,
-         new (cg->trHeapMemory()) TR::MemoryReference(node, tempSymRef, 8, cg));
+         TR::MemoryReference::createWithSymRef(cg, node, tempSymRef, 8));
       }
    generateTrg1Src2Instruction(cg, TR::InstOpCode::diex, node, dfpDummyFPRegister, fprDesiredBiasedExpRegister, dfpDummyFPRegister);
    cg->stopUsingRegister(fprDesiredBiasedExpRegister);
@@ -1557,8 +1563,10 @@ extern TR::Register *inlineBigDecimalRound(
       TR::Node * node,
       TR::CodeGenerator *cg)
    {
+   TR::Compilation *comp = cg->comp();
+
    // check for direct move
-   bool p8DirectMoveTest = cg->comp()->target().cpu.id() == TR_PPCp8;
+   bool p8DirectMoveTest = comp->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P8);
 
    // load DFP to be rounded
    TR::Register * dfpFPRegister = NULL;
@@ -1576,7 +1584,7 @@ extern TR::Register *inlineBigDecimalRound(
    bool dfpLoaded = loadAndEvaluateAsDouble(dfpNode, dfpFPRegister, cg);
 
    // if couldn't lfd the load, overlap the move to FPRs
-   if (cg->comp()->target().is64Bit() && p8DirectMoveTest)
+   if (comp->target().is64Bit() && p8DirectMoveTest)
       {
       if (!dfpLoaded)
          {
@@ -1603,14 +1611,14 @@ extern TR::Register *inlineBigDecimalRound(
          dfpFPRegister = cg->allocateRegister(TR_FPR);
 
          tempSymRef = cg->allocateLocalTemp(TR::Int64);
-         tempMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempSymRef, 8, cg);
+         tempMR = TR::MemoryReference::createWithSymRef(cg, node, tempSymRef, 8);
 
          // need to store each register word into mem & then load
-         if (cg->comp()->target().is32Bit())
+         if (comp->target().is32Bit())
             {
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, tempMR, dfpRegister->getHighOrder());
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node,
-                  new (cg->trHeapMemory()) TR::MemoryReference(node, *tempMR, 4, 4, cg), dfpRegister->getLowOrder());
+                  TR::MemoryReference::createWithMemRef(cg, node, *tempMR, 4, 4), dfpRegister->getLowOrder());
             }
          else //!p8DirectMoveTest
             generateMemSrc1Instruction(cg, TR::InstOpCode::std, node, tempMR, dfpRegister);
@@ -1621,20 +1629,20 @@ extern TR::Register *inlineBigDecimalRound(
 
       // store register word to mem
       tempPrecSymRef = cg->allocateLocalTemp(TR::Int64);
-      TR::MemoryReference * tempPrecMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempPrecSymRef, 8, cg);
+      TR::MemoryReference * tempPrecMR = TR::MemoryReference::createWithSymRef(cg, node, tempPrecSymRef, 8);
       generateMemSrc1Instruction(cg, TR::InstOpCode::std, node, tempPrecMR, cg->evaluate(node->getChild(2)));
 
       cg->generateGroupEndingNop(node);
 
       // load the precision
       generateTrg1MemInstruction(cg, TR::InstOpCode::lfd, node, precFPRegister,
-         new (cg->trHeapMemory()) TR::MemoryReference(node, tempPrecSymRef, 8, cg));
+         TR::MemoryReference::createWithSymRef(cg, node, tempPrecSymRef, 8));
 
       // load the dfp
       if (!dfpLoaded)
          {
          generateTrg1MemInstruction(cg, TR::InstOpCode::lfd, node, dfpFPRegister,
-            new (cg->trHeapMemory()) TR::MemoryReference(node, tempSymRef, 8, cg));
+            TR::MemoryReference::createWithSymRef(cg, node, tempSymRef, 8));
          }
       }
 
@@ -1692,7 +1700,9 @@ extern TR::Register *inlineBigDecimalCompareTo(
       TR::Node * node,
       TR::CodeGenerator * cg)
    {
-   bool p8DirectMoveTest = cg->comp()->target().cpu.id() == TR_PPCp8;
+   TR::Compilation *comp = cg->comp();
+
+   bool p8DirectMoveTest = comp->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P8);
 
    // load both operands into FPRs
    TR::Register * lhsFPRegister = NULL;
@@ -1713,7 +1723,7 @@ extern TR::Register *inlineBigDecimalCompareTo(
    bool rhsLoaded = loadAndEvaluateAsDouble(rhsNode, rhsFPRegister, cg);
 
    // if couldn't lfd either of them, overlap the move to FPRs
-   if (cg->comp()->target().is64Bit() && p8DirectMoveTest)
+   if (comp->target().is64Bit() && p8DirectMoveTest)
       {
       if (!lhsLoaded)
          {
@@ -1743,12 +1753,12 @@ extern TR::Register *inlineBigDecimalCompareTo(
 
          // need to store each register word into mem & then load
          tempLHSSymRef = cg->allocateLocalTemp(TR::Int64);
-         tempLHSMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempLHSSymRef, 8, cg);
-         if (cg->comp()->target().is32Bit())
+         tempLHSMR = TR::MemoryReference::createWithSymRef(cg, node, tempLHSSymRef, 8);
+         if (comp->target().is32Bit())
             {
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, tempLHSMR, lhsRegister->getHighOrder());
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node,
-                  new (cg->trHeapMemory()) TR::MemoryReference(node, *tempLHSMR, 4, 4, cg), lhsRegister->getLowOrder());
+                  TR::MemoryReference::createWithMemRef(cg, node, *tempLHSMR, 4, 4), lhsRegister->getLowOrder());
             }
          else //!p8DirectMoveTest
             generateMemSrc1Instruction(cg, TR::InstOpCode::std, node, tempLHSMR, lhsRegister);
@@ -1765,13 +1775,13 @@ extern TR::Register *inlineBigDecimalCompareTo(
 
          // need to store each register word into mem & then load
          tempRHSSymRef = cg->allocateLocalTemp(TR::Int64);
-         tempRHSMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempRHSSymRef, 8, cg);
+         tempRHSMR = TR::MemoryReference::createWithSymRef(cg, node, tempRHSSymRef, 8);
 
-         if (cg->comp()->target().is32Bit())
+         if (comp->target().is32Bit())
             {
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, tempRHSMR, rhsRegister->getHighOrder());
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node,
-                  new (cg->trHeapMemory()) TR::MemoryReference(node, *tempRHSMR, 4, 4, cg), rhsRegister->getLowOrder());
+                  TR::MemoryReference::createWithMemRef(cg, node, *tempRHSMR, 4, 4), rhsRegister->getLowOrder());
             }
          else //!p8DirectMoveTest
             generateMemSrc1Instruction(cg, TR::InstOpCode::std, node, tempRHSMR, rhsRegister);
@@ -1787,13 +1797,13 @@ extern TR::Register *inlineBigDecimalCompareTo(
          {
          rhsFPRegister = cg->allocateRegister(TR_FPR);
          generateTrg1MemInstruction(cg, TR::InstOpCode::lfd, node, rhsFPRegister,
-             new (cg->trHeapMemory()) TR::MemoryReference(node, tempRHSSymRef, 8, cg));
+             TR::MemoryReference::createWithSymRef(cg, node, tempRHSSymRef, 8));
          }
       if (!lhsLoaded)
          {
          lhsFPRegister = cg->allocateRegister(TR_FPR);
          generateTrg1MemInstruction(cg, TR::InstOpCode::lfd, node, lhsFPRegister,
-             new (cg->trHeapMemory()) TR::MemoryReference(node, tempLHSSymRef, 8, cg));
+             TR::MemoryReference::createWithSymRef(cg, node, tempLHSSymRef, 8));
          }
       }
 
@@ -1837,8 +1847,10 @@ extern TR::Register *inlineBigDecimalUnaryOp(
       TR::InstOpCode::Mnemonic op,
       bool precision)
    {
+   TR::Compilation *comp = cg->comp();
+
    // check for direct move
-   bool p8DirectMoveTest = cg->comp()->target().cpu.id() == TR_PPCp8;
+   bool p8DirectMoveTest = comp->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P8);
 
    // load DFP
    TR::Register * dfpFPRegister = NULL;
@@ -1847,7 +1859,7 @@ extern TR::Register *inlineBigDecimalUnaryOp(
    bool dfpLoaded = loadAndEvaluateAsDouble(dfpNode, dfpFPRegister, cg);
 
    // if couldn't lfd the load, overlap the move to FPRs
-   if (cg->comp()->target().is64Bit() && p8DirectMoveTest)
+   if (comp->target().is64Bit() && p8DirectMoveTest)
       {
       if (!dfpLoaded)
          {
@@ -1870,12 +1882,12 @@ extern TR::Register *inlineBigDecimalUnaryOp(
 
          // need to store each register word into mem & then load
          tempSymRef = cg->allocateLocalTemp(TR::Int64);
-         tempMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempSymRef, 8, cg);
-         if(cg->comp()->target().is32Bit())
+         tempMR = TR::MemoryReference::createWithSymRef(cg, node, tempSymRef, 8);
+         if(comp->target().is32Bit())
             {
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, tempMR, dfpRegister->getHighOrder());
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node,
-                  new (cg->trHeapMemory()) TR::MemoryReference(node, *tempMR, 4, 4, cg), dfpRegister->getLowOrder());
+                  TR::MemoryReference::createWithMemRef(cg, node, *tempMR, 4, 4), dfpRegister->getLowOrder());
             }
          else
             generateMemSrc1Instruction(cg, TR::InstOpCode::std, node, tempMR, dfpRegister);
@@ -1884,7 +1896,7 @@ extern TR::Register *inlineBigDecimalUnaryOp(
 
          dfpFPRegister = cg->allocateRegister(TR_FPR);
          generateTrg1MemInstruction(cg, TR::InstOpCode::lfd, node, dfpFPRegister,
-            new (cg->trHeapMemory()) TR::MemoryReference(node, tempSymRef, 8, cg));
+            TR::MemoryReference::createWithSymRef(cg, node, tempSymRef, 8));
          }
 
       }
@@ -1903,24 +1915,24 @@ extern TR::Register *inlineBigDecimalUnaryOp(
 
    // 64-bit platform allows a move from FPR to GPR
    // handles all 64-bit, as well as 32-bit dxex
-   if (cg->comp()->target().is64Bit() || op == TR::InstOpCode::dxex)
+   if (comp->target().is64Bit() || op == TR::InstOpCode::dxex)
       {
       resRegister = cg->allocateRegister();
-      if (cg->comp()->target().is64Bit() && p8DirectMoveTest)
+      if (comp->target().is64Bit() && p8DirectMoveTest)
          {
          generateTrg1Src1Instruction(cg, TR::InstOpCode::mfvsrd, node, resRegister, resFPRegister);
          }
       else
          {
          TR::SymbolReference * tempSymRef = cg->allocateLocalTemp(TR::Int64);
-         TR::MemoryReference * tempMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempSymRef, 8, cg);
+         TR::MemoryReference * tempMR = TR::MemoryReference::createWithSymRef(cg, node, tempSymRef, 8);
          generateMemSrc1Instruction(cg, TR::InstOpCode::stfd, node, tempMR, resFPRegister);
 
          // now finish off the Store-Load sequence in REVERSE!
          cg->generateGroupEndingNop(node);
 
          generateTrg1MemInstruction(cg, TR::InstOpCode::ld, node, resRegister,
-            new (cg->trHeapMemory()) TR::MemoryReference(node, tempSymRef, 8, cg));
+            TR::MemoryReference::createWithSymRef(cg, node, tempSymRef, 8));
          }
 
       //we can do 64-bit precision
@@ -1940,7 +1952,7 @@ extern TR::Register *inlineBigDecimalUnaryOp(
       {
       // Allocate temporary memory
       temp = cg->allocateLocalTemp(TR::Int64);
-      tempMR = new (cg->trHeapMemory()) TR::MemoryReference(node, temp, 8, cg);
+      tempMR = TR::MemoryReference::createWithSymRef(cg, node, temp, 8);
 
       // store the 64-bit result to memory
       generateMemSrc1Instruction(cg, TR::InstOpCode::stfd, node, tempMR, resFPRegister);
@@ -1954,9 +1966,9 @@ extern TR::Register *inlineBigDecimalUnaryOp(
       TR::Register           *lowRegister = cg->allocateRegister();
       resRegister = cg->allocateRegisterPair(lowRegister, highRegister);
       generateTrg1MemInstruction(cg, TR::InstOpCode::lwz, node, highRegister,
-         new (cg->trHeapMemory()) TR::MemoryReference(node, *tempMR, 0, 4, cg));
+         TR::MemoryReference::createWithMemRef(cg, node, *tempMR, 0, 4));
       generateTrg1MemInstruction(cg, TR::InstOpCode::lwz, node, lowRegister,
-         new (cg->trHeapMemory()) TR::MemoryReference(node, *tempMR, 4, 4, cg));
+         TR::MemoryReference::createWithMemRef(cg, node, *tempMR, 4, 4));
 
       // some extra processing for extracting significance
       if (precision)
@@ -2012,8 +2024,10 @@ extern TR::Register *inlineBigDecimalSetScale(
       TR::Node * node,
       TR::CodeGenerator * cg)
    {
+   TR::Compilation *comp = cg->comp();
+
    // check for direct move support
-   bool p8DirectMoveTest = cg->comp()->target().cpu.id() == TR_PPCp8;
+   bool p8DirectMoveTest = comp->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P8);
 
    TR::MemoryReference *tempMR = NULL;
    TR::SymbolReference * temp = NULL;
@@ -2060,7 +2074,7 @@ extern TR::Register *inlineBigDecimalSetScale(
    bool dfpLoaded = loadAndEvaluateAsDouble(dfpNode, dfpFPRegister, cg);
 
    // if couldn't lfd the load, overlap the move to FPRs
-   if (cg->comp()->target().is64Bit() && p8DirectMoveTest)
+   if (comp->target().is64Bit() && p8DirectMoveTest)
       {
 
       // move the desired exponent over first to avoid the sign extension penalty
@@ -2088,12 +2102,12 @@ extern TR::Register *inlineBigDecimalSetScale(
 
          // need to store each register word into mem & then load
          tempDFPSymRef = cg->allocateLocalTemp(TR::Int64);
-         tempDFPMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempDFPSymRef, 8, cg);
-         if (cg->comp()->target().is32Bit())
+         tempDFPMR = TR::MemoryReference::createWithSymRef(cg, node, tempDFPSymRef, 8);
+         if (comp->target().is32Bit())
             {
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, tempDFPMR, dfpRegister->getHighOrder());
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node,
-                  new (cg->trHeapMemory()) TR::MemoryReference(node, *tempDFPMR, 4, 4, cg), dfpRegister->getLowOrder());
+                  TR::MemoryReference::createWithMemRef(cg, node, *tempDFPMR, 4, 4), dfpRegister->getLowOrder());
             }
          else
             generateMemSrc1Instruction(cg, TR::InstOpCode::std, node, tempDFPMR, dfpRegister);
@@ -2104,26 +2118,26 @@ extern TR::Register *inlineBigDecimalSetScale(
 
       // setup for store 32-bits into stack slot
 
-      tempExpMR = new (cg->trHeapMemory()) TR::MemoryReference(cg->getStackPointerRegister(), -4, 4, cg);
+      tempExpMR = TR::MemoryReference::createWithDisplacement(cg, cg->getStackPointerRegister(), -4, 4);
       tempExpMR->forceIndexedForm(node, cg);
 
       // touch memory before performing Store-Load
       generateTrg1MemInstruction(cg, TR::InstOpCode::lfiwax, node, expFPRegister, tempExpMR);
 
       // store 32-bits into stack slot
-      generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, new (cg->trHeapMemory()) TR::MemoryReference(node, *tempExpMR, 0, 4, cg), expRegister);
+      generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, TR::MemoryReference::createWithMemRef(cg, node, *tempExpMR, 0, 4), expRegister);
 
       // now load them in REVERSE!
       cg->generateGroupEndingNop(node);
 
-      generateTrg1MemInstruction(cg, TR::InstOpCode::lfiwax, node, expFPRegister, new (cg->trHeapMemory()) TR::MemoryReference(node, *tempExpMR, 0, 4, cg));
+      generateTrg1MemInstruction(cg, TR::InstOpCode::lfiwax, node, expFPRegister, TR::MemoryReference::createWithMemRef(cg, node, *tempExpMR, 0, 4));
       tempExpMR->decNodeReferenceCounts(cg);
 
       if (!dfpLoaded)
          {
          dfpFPRegister = cg->allocateRegister(TR_FPR);
          generateTrg1MemInstruction(cg, TR::InstOpCode::lfd, node, dfpFPRegister,
-             new (cg->trHeapMemory()) TR::MemoryReference(node, tempDFPSymRef, 8, cg));
+             TR::MemoryReference::createWithSymRef(cg, node, tempDFPSymRef, 8));
          }
       }
 
@@ -2203,8 +2217,10 @@ extern TR::Register *inlineBigDecimalUnscaledValue(
       TR::Node * node,
       TR::CodeGenerator * cg)
    {
+   TR::Compilation *comp = cg->comp();
+
    // check for direct move support
-   bool p8DirectMoveTest = cg->comp()->target().cpu.id() == TR_PPCp8;
+   bool p8DirectMoveTest = comp->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P8);
 
    // load DFP to be quantized
    TR::Node * dfpNode = node->getFirstChild();
@@ -2223,7 +2239,7 @@ extern TR::Register *inlineBigDecimalUnscaledValue(
    bool dfpLoaded = loadAndEvaluateAsDouble(dfpNode, dfpFPRegister, cg);
 
    // if couldn't lfd the load, overlap the move to FPRs
-   if (cg->comp()->target().is64Bit() && p8DirectMoveTest)
+   if (comp->target().is64Bit() && p8DirectMoveTest)
       {
       // move the exponent over first to avoid the load constant penalty
       loadConstant(cg, node, (int64_t)CONSTANT64(0x18E), expRegister);
@@ -2255,39 +2271,39 @@ extern TR::Register *inlineBigDecimalUnscaledValue(
 
          // need to store each register word into mem & then load
          tempDFPSymRef = cg->allocateLocalTemp(TR::Int64);
-         tempDFPMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempDFPSymRef, 8, cg);
-         if (cg->comp()->target().is32Bit())
+         tempDFPMR = TR::MemoryReference::createWithSymRef(cg, node, tempDFPSymRef, 8);
+         if (comp->target().is32Bit())
             {
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, tempDFPMR, dfpRegister->getHighOrder());
             generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node,
-                  new (cg->trHeapMemory()) TR::MemoryReference(node, *tempDFPMR, 4, 4, cg), dfpRegister->getLowOrder());
+                  TR::MemoryReference::createWithMemRef(cg, node, *tempDFPMR, 4, 4), dfpRegister->getLowOrder());
             }
          else
              generateMemSrc1Instruction(cg, TR::InstOpCode::std, node, tempDFPMR, dfpRegister);
          }
 
       // prep the exponent for the Store-Load sequence
-      TR::MemoryReference * tempExpMR = new (cg->trHeapMemory()) TR::MemoryReference(cg->getStackPointerRegister(), -4, 4, cg);
+      TR::MemoryReference * tempExpMR = TR::MemoryReference::createWithDisplacement(cg, cg->getStackPointerRegister(), -4, 4);
       tempExpMR->forceIndexedForm(node, cg);
 
       // touch memory before performing Store-Load
       generateTrg1MemInstruction(cg, TR::InstOpCode::lfiwax, node, expFPRegister, tempExpMR);
 
       // store 32-bits into stack slot
-      generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, new (cg->trHeapMemory()) TR::MemoryReference(node, *tempExpMR, 0, 4, cg), expRegister);
+      generateMemSrc1Instruction(cg, TR::InstOpCode::stw, node, TR::MemoryReference::createWithMemRef(cg, node, *tempExpMR, 0, 4), expRegister);
       cg->stopUsingRegister(expRegister);
 
       // now load them in REVERSE!
       cg->generateGroupEndingNop(node);
 
-      generateTrg1MemInstruction(cg, TR::InstOpCode::lfiwax, node, expFPRegister, new (cg->trHeapMemory()) TR::MemoryReference(node, *tempExpMR, 0, 4, cg));
+      generateTrg1MemInstruction(cg, TR::InstOpCode::lfiwax, node, expFPRegister, TR::MemoryReference::createWithMemRef(cg, node, *tempExpMR, 0, 4));
       tempExpMR->decNodeReferenceCounts(cg);
 
       if (!dfpLoaded)
          {
          dfpFPRegister = cg->allocateRegister(TR_FPR);
          generateTrg1MemInstruction(cg, TR::InstOpCode::lfd, node, dfpFPRegister,
-             new (cg->trHeapMemory()) TR::MemoryReference(node, tempDFPSymRef, 8, cg));
+             TR::MemoryReference::createWithSymRef(cg, node, tempDFPSymRef, 8));
          }
       }
 
@@ -2308,7 +2324,7 @@ extern TR::Register *inlineBigDecimalUnscaledValue(
    generateTrg1Src1Instruction(cg, TR::InstOpCode::dctfix, node, dfpTempFPRegister, dfpTempFPRegister);
 
    // move fixed to GPR
-   if(cg->comp()->target().is64Bit() && p8DirectMoveTest)
+   if(comp->target().is64Bit() && p8DirectMoveTest)
       {
 	  // path for direct move sequence
       retRegister = cg->allocateRegister();
@@ -2318,7 +2334,7 @@ extern TR::Register *inlineBigDecimalUnscaledValue(
       {
       // Allocate temporary memory
       TR::SymbolReference * tempSymRef = cg->allocateLocalTemp(TR::Int64);
-      TR::MemoryReference * tempMR = new (cg->trHeapMemory()) TR::MemoryReference(node, tempSymRef, 8, cg);
+      TR::MemoryReference * tempMR = TR::MemoryReference::createWithSymRef(cg, node, tempSymRef, 8);
 
 
       // store the 64-bit result to memory
@@ -2329,21 +2345,21 @@ extern TR::Register *inlineBigDecimalUnscaledValue(
       cg->generateGroupEndingNop(node);
 
       //load the 64-bit fixed value into a reg pair
-      if (cg->comp()->target().is32Bit())
+      if (comp->target().is32Bit())
          {
          highRegister  = cg->allocateRegister();
          lowRegister = cg->allocateRegister();
          retRegister = cg->allocateRegisterPair(lowRegister, highRegister);
          generateTrg1MemInstruction(cg, TR::InstOpCode::lwz, node, highRegister,
-            new (cg->trHeapMemory()) TR::MemoryReference(node, *tempMR, 0, 4, cg));
+            TR::MemoryReference::createWithMemRef(cg, node, *tempMR, 0, 4));
          generateTrg1MemInstruction(cg, TR::InstOpCode::lwz, node, lowRegister,
-            new (cg->trHeapMemory()) TR::MemoryReference(node, *tempMR, 4, 4, cg));
+            TR::MemoryReference::createWithMemRef(cg, node, *tempMR, 4, 4));
          }
       else //!p8DirectMoveTest
          {
          retRegister = cg->allocateRegister();
          generateTrg1MemInstruction(cg, TR::InstOpCode::ld, node, retRegister,
-            new (cg->trHeapMemory()) TR::MemoryReference(node, tempSymRef, 8, cg));
+            TR::MemoryReference::createWithSymRef(cg, node, tempSymRef, 8));
          }
       }
    cg->stopUsingRegister(dfpTempFPRegister);

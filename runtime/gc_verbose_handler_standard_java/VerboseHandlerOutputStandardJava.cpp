@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -112,9 +112,9 @@ MM_VerboseHandlerOutputStandardJava::getThreadName(char *buf, UDATA bufLen, OMR_
 }
 
 void
-MM_VerboseHandlerOutputStandardJava::writeVmArgs(MM_EnvironmentBase* env)
+MM_VerboseHandlerOutputStandardJava::writeVmArgs(MM_EnvironmentBase* env, MM_VerboseBuffer* buffer)
 {
-	MM_VerboseHandlerJava::writeVmArgs(_manager, env, static_cast<J9JavaVM*>(_omrVM->_language_vm));
+	MM_VerboseHandlerJava::writeVmArgs(env, buffer, static_cast<J9JavaVM*>(_omrVM->_language_vm));
 }
 
 void
@@ -163,6 +163,7 @@ MM_VerboseHandlerOutputStandardJava::handleMarkEndInternal(MM_EnvironmentBase* e
 	outputReferenceInfo(env, 1, "phantom", &markJavaStats->_phantomReferenceStats, 0, 0);
 
 	outputStringConstantInfo(env, 1, markJavaStats->_stringConstantsCandidates, markJavaStats->_stringConstantsCleared);
+	outputMonitorReferenceInfo(env, 1, markJavaStats->_monitorReferenceCandidates, markJavaStats->_monitorReferenceCleared);
 
 	if (workPacketStats->getSTWWorkStackOverflowOccured()) {
 		_manager->getWriterChain()->formatAndOutput(env, 1, "<warning details=\"work packet overflow\" count=\"%zu\" packetcount=\"%zu\" />",
@@ -243,6 +244,8 @@ MM_VerboseHandlerOutputStandardJava::handleScavengeEndInternal(MM_EnvironmentBas
 		outputReferenceInfo(env, 1, "soft", &scavengerJavaStats->_softReferenceStats, extensions->getDynamicMaxSoftReferenceAge(), extensions->getMaxSoftReferenceAge());
 		outputReferenceInfo(env, 1, "weak", &scavengerJavaStats->_weakReferenceStats, 0, 0);
 		outputReferenceInfo(env, 1, "phantom", &scavengerJavaStats->_phantomReferenceStats, 0, 0);
+
+		outputMonitorReferenceInfo(env, 1, scavengerJavaStats->_monitorReferenceCandidates, scavengerJavaStats->_monitorReferenceCleared);
 	}
 }
 #endif /*defined(J9VM_GC_MODRON_SCAVENGER) */

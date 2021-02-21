@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -127,13 +127,13 @@ void TR_MethodToBeCompiled::releaseSlotMonitor(J9VMThread *vmThread)
    }
 
 bool
-TR_MethodToBeCompiled::isCompiled()
+TR_MethodToBeCompiled::isCompiled() const
    {
    return TR::CompilationInfo::isCompiled(getMethodDetails().getMethod());
    }
 
 bool
-TR_MethodToBeCompiled::isJNINative()
+TR_MethodToBeCompiled::isJNINative() const
    {
    return TR::CompilationInfo::isJNINative(getMethodDetails().getMethod());
    }
@@ -157,7 +157,7 @@ TR_MethodToBeCompiled::freeJITServerAllocations()
    {
    if (_clientOptions)
       {
-      _compInfoPT->getCompilationInfo()->persistentMemory()->freePersistentMemory((void *)_clientOptions);
+      TR::Compiler->persistentMemory()->freePersistentMemory((void *)_clientOptions);
       _clientOptions = NULL;
       }
    }

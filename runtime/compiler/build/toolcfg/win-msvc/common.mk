@@ -1,4 +1,4 @@
-# Copyright (c) 2000, 2019 IBM Corp. and others
+# Copyright (c) 2000, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -106,6 +106,7 @@ CX_FLAGS+=\
     -wd4244 \
     -wd4018 \
     -we4700 \
+    -wd4200 \
     -MD
 
 CXX_FLAGS+=\
@@ -217,16 +218,16 @@ ifeq ($(origin MSVC_VERSION), undefined)
         SOLINK_SLINK+=ucrt vcruntime
     endif
 else
-    ifneq (,$(filter 2015 2017, $(MSVC_VERSION)))
+    ifneq (,$(filter 2013 2015 2017 2019, $(MSVC_VERSION)))
         SOLINK_SLINK+=ucrt vcruntime
     endif
 endif
 
 SOLINK_DEF?=$(JIT_SCRIPT_DIR)/j9jit.def
-SOLINK_ORG?=0x12900000
 
 ifeq ($(HOST_BITS),32)
     SOLINK_FLAGS+=-machine:i386 -safeseh
+    SOLINK_ORG?=0x12900000
 endif
 
 ifeq ($(HOST_BITS),64)

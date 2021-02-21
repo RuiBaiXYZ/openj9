@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -22,6 +22,16 @@
 
 #if !defined(OBJECTHASH_HPP_)
 #define OBJECTHASH_HPP_
+
+#include "j9cfg.h"
+
+#if defined(OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES)
+#if OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES
+#define VM_ObjectHash VM_ObjectHashCompressed
+#else /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+#define VM_ObjectHash VM_ObjectHashFull
+#endif /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+#endif /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
 
 #include "j9.h"
 #include "j9accessbarrier.h"
@@ -211,12 +221,7 @@ public:
 		} else {
 #if defined(J9VM_GC_MODRON_COMPACTION) || defined(J9VM_GC_GENERATIONAL)
 			J9Class *objectClass = J9OBJECT_CLAZZ_VM(vm, objectPointer);
-
-			/* Technically, one should use J9OBJECT_FLAGS_FROM_CLAZZ macro to fetch the clazz flags.
-			 * However, considering the need to optimize hashcode code path and how we actually use
-			 * the flag, it is sufficient to fetch objectPointer->clazz.
-			 */
-			UDATA flags = (UDATA)(((J9Object*)objectPointer)->clazz);
+			UDATA flags = J9OBJECT_FLAGS_FROM_CLAZZ_VM(vm, objectPointer);
 
 			if (J9_ARE_ANY_BITS_SET(flags, OBJECT_HEADER_HAS_BEEN_MOVED_IN_CLASS)) {
 				if (J9CLASS_IS_ARRAY(objectClass)) {

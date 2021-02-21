@@ -31,7 +31,6 @@
 #include "modronapi.hpp"
 #include "modronopt.h"
 
-#include "Dispatcher.hpp"
 #include "EnvironmentBase.hpp"
 #include "GCExtensions.hpp"
 #include "HeapMemorySnapshot.hpp"
@@ -43,6 +42,7 @@
 #include "ObjectAllocationInterface.hpp"
 #include "ObjectModel.hpp"
 #include "OwnableSynchronizerObjectBuffer.hpp"
+#include "ParallelDispatcher.hpp"
 #include "MemorySpace.hpp"
 #include "MemorySubSpace.hpp"
 #include "MemoryPoolLargeObjects.hpp"
@@ -723,7 +723,7 @@ j9gc_get_gc_cause(OMR_VMThread *omrVMthread)
 		case J9MMCONSTANT_EXPLICIT_GC_RASDUMP_COMPACT :
 			ret = "a dump agent has requested compaction";
 			break;
-#if defined(J9VM_GC_IDLE_HEAP_MANAGER)
+#if defined(OMR_GC_IDLE_HEAP_MANAGER)
 		case J9MMCONSTANT_EXPLICIT_GC_IDLE_GC:
 			ret = "collect due to JVM becomes idle";
 			break;
@@ -863,25 +863,30 @@ j9gc_allocation_threshold_changed(J9VMThread *currentThread)
  * 
  * Examples:
  * 	To trigger an event whenever 4K objects have been allocated:
- *		j9gc_set_allocation_sampling_interval(vmThread, (UDATA)4096);
+ *		j9gc_set_allocation_sampling_interval(vm, (UDATA)4096);
  *	To trigger an event for every object allocation:
- *		j9gc_set_allocation_sampling_interval(vmThread, (UDATA)0);
- * The initial MM_GCExtensions::oolObjectSamplingBytesGranularity value is 16M
- * or set by command line option "-Xgc:allocationSamplingGranularity".
- * By default, the sampling interval is going to be set to 512 KB.
+ *		j9gc_set_allocation_sampling_interval(vm, (UDATA)0);
+ *	To disable allocation sampling
+ *		j9gc_set_allocation_sampling_interval(vm, UDATA_MAX);
+ * The initial MM_GCExtensionsBase::objectSamplingBytesGranularity value is UDATA_MAX.
  * 
- * @parm[in] vmThread The current VM Thread
+ * @parm[in] vm The J9JavaVM
  * @parm[in] samplingInterval The allocation sampling interval.
  */
 void 
-j9gc_set_allocation_sampling_interval(J9VMThread *vmThread, UDATA samplingInterval)
+j9gc_set_allocation_sampling_interval(J9JavaVM *vm, UDATA samplingInterval)
 {
-	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(vmThread->javaVM);
+	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(vm);
 	if (0 == samplingInterval) {
-		/* avoid (env->_oolTraceAllocationBytes) % 0 which could be undefined. */
+		/* avoid (env->_traceAllocationBytes) % 0 which could be undefined. */
 		samplingInterval = 1;
 	}
-	extensions->oolObjectSamplingBytesGranularity = samplingInterval;
+
+	if (samplingInterval != extensions->objectSamplingBytesGranularity) {
+		extensions->objectSamplingBytesGranularity = samplingInterval;
+		J9VMThread *currentThread = vm->internalVMFunctions->currentVMThread(vm);
+		j9gc_allocation_threshold_changed(currentThread);
+	}
 }
 
 /**
@@ -928,51 +933,51 @@ j9gc_get_bytes_allocated_by_thread(J9VMThread *vmThread)
 
 /**
  * Return information about the total CPU time consumed by GC threads, as well
- * as the number of GC threads. The time for the master and slave threads is
- * reported separately, with the slave threads returned as a total.
+ * as the number of GC threads. The time for the main and worker threads is
+ * reported separately, with the worker threads returned as a total.
  * 
  * @parm[in] vm The J9JavaVM
- * @parm[out] masterCpuMillis The amount of CPU time spent in the GC by the master thread, in milliseconds
- * @parm[out] slaveCpuMillis The amount of CPU time spent in the GC by the all slave threads, in milliseconds
- * @parm[out] maxThreads The maximum number of GC slave threads
- * @parm[out] currentThreads The number of GC slave threads that participated in the last collection
+ * @parm[out] mainCpuMillis The amount of CPU time spent in the GC by the main thread, in milliseconds
+ * @parm[out] workerCpuMillis The amount of CPU time spent in the GC by the all worker threads, in milliseconds
+ * @parm[out] maxThreads The maximum number of GC worker threads
+ * @parm[out] currentThreads The number of GC worker threads that participated in the last collection
  */
 void
-j9gc_get_CPU_times(J9JavaVM *javaVM, U_64 *masterCpuMillis, U_64 *slaveCpuMillis, U_32 *maxThreads, U_32 *currentThreads)
+j9gc_get_CPU_times(J9JavaVM *javaVM, U_64 *mainCpuMillis, U_64 *workerCpuMillis, U_32 *maxThreads, U_32 *currentThreads)
 {
 	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(javaVM);
 	GC_VMThreadListIterator iterator(javaVM);
-	U_64 masterMillis = 0;
-	U_64 slaveMillis = 0;
-	U_64 slaveNanos = 0;
+	U_64 mainMillis = 0;
+	U_64 workerMillis = 0;
+	U_64 workerNanos = 0;
 	J9VMThread *vmThread = iterator.nextVMThread();
 	while(NULL != vmThread) {
 		MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
-		if(!env->isMasterThread()) {
-			/* For a large number of slave threads and very long runs, a sum of 
+		if(!env->isMainThread()) {
+			/* For a large number of worker threads and very long runs, a sum of 
 			 * nanos might overflow a U_64. Sum the millis and nanos separately.
 			 */
-			slaveMillis += env->_slaveThreadCpuTimeNanos / 1000000;
-			slaveNanos += env->_slaveThreadCpuTimeNanos % 1000000;
+			workerMillis += env->_workerThreadCpuTimeNanos / 1000000;
+			workerNanos += env->_workerThreadCpuTimeNanos % 1000000;
 		}
 		vmThread = iterator.nextVMThread();
 	}
 
 	/* Adjust the total millis by the nanos, rounding up. */
-	slaveMillis += slaveNanos / 1000000;
-	if((slaveNanos % 1000000) > 500000) {
-		slaveMillis += 1;
+	workerMillis += workerNanos / 1000000;
+	if((workerNanos % 1000000) > 500000) {
+		workerMillis += 1;
 	}
 
-	/* Adjust the master millis by the nanos, rounding up. */
-	masterMillis = extensions->_masterThreadCpuTimeNanos / 1000000;
-	if((extensions->_masterThreadCpuTimeNanos % 1000000) > 500000) {
-		masterMillis += 1;
+	/* Adjust the main millis by the nanos, rounding up. */
+	mainMillis = extensions->_mainThreadCpuTimeNanos / 1000000;
+	if((extensions->_mainThreadCpuTimeNanos % 1000000) > 500000) {
+		mainMillis += 1;
 	}
 	
 	/* Store the results */
-	*masterCpuMillis = masterMillis;
-	*slaveCpuMillis = slaveMillis;
+	*mainCpuMillis = mainMillis;
+	*workerCpuMillis = workerMillis;
 	*maxThreads = (U_32)extensions->dispatcher->threadCountMaximum();	
 	*currentThreads = (U_32)extensions->dispatcher->activeThreadCount();
 }

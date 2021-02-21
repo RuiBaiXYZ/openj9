@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2019 IBM Corp. and others
+# Copyright (c) 2017, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,8 +20,13 @@
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
 
-add_library(j9gcchk SHARED
+set(gcchk_sources
 	gcchk.cpp
+)
+
+j9vm_add_library(j9gcchk SHARED
+	OUTPUT_NAME j9gcchk${J9VM_VERSION_SUFFIX}
+	${gcchk_sources}
 )
 
 target_link_libraries(j9gcchk
@@ -35,7 +40,7 @@ target_link_libraries(j9gcchk
 		j9stackmap
 		j9pool
 		j9hookable
-	
+
 		#TODO do we just want to link against j9gc?
 		j9gcbase
 		j9gcstructs
@@ -51,3 +56,38 @@ install(
 	LIBRARY DESTINATION ${j9vm_SOURCE_DIR}
 	RUNTIME DESTINATION ${j9vm_SOURCE_DIR}
 )
+
+if(OMR_MIXED_REFERENCES_MODE_STATIC)
+	j9vm_add_library(j9gcchk_full SHARED
+		OUTPUT_NAME j9gcchk_full${J9VM_VERSION_SUFFIX}
+		${gcchk_sources}
+	)
+
+	target_link_libraries(j9gcchk_full
+		PRIVATE
+			j9vm_interface
+			j9util
+			j9utilcore
+			j9avl
+			j9hashtable
+			j9thr
+			j9stackmap
+			j9pool
+			j9hookable
+
+			#TODO do we just want to link against j9gc?
+			j9gcbase_full
+			j9gcstructs_full
+			j9gcstats_full
+			j9gccheck_full
+			omrgc_full
+	)
+
+	omr_add_exports(j9gcchk_full J9VMDllMain)
+
+	install(
+		TARGETS j9gcchk_full
+		LIBRARY DESTINATION ${j9vm_SOURCE_DIR}
+		RUNTIME DESTINATION ${j9vm_SOURCE_DIR}
+	)
+endif()

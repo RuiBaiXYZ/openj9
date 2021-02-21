@@ -884,7 +884,7 @@ int TR_arraycopySequentialStores::numValidTrees(int maxEntries)
          break;
          }
       }
-   if ((entry == 1) && !hasConstValue() && _comp->cg()->getSupportsReverseLoadAndStore())
+   if ((entry == 1) && !hasConstValue() && _comp->cg()->supportsByteswap())
       {
 //      dumpOptDetails(comp(), "...no valid entries forward\n...see if reverse store finds any entries\n");
       _alternateDir = true;
@@ -1083,28 +1083,22 @@ static TR::TreeTop* generateArraycopyFromSequentialStores(TR::Compilation* comp,
       }
 
    TR::ILOpCodes opcode;
+   TR::ILOpCodes byteswapOpcode;
 
    // create a load/store of the right size
+   switch(numBytes)
+      {
+      case 2: opcode = TR::sstorei; byteswapOpcode = TR::sbyteswap; break;
+      case 4: opcode = TR::istorei; byteswapOpcode = TR::ibyteswap; break;
+      case 8: opcode = TR::lstorei; byteswapOpcode = TR::lbyteswap; break;
+      default: TR_ASSERT(0, " number of bytes unexpected\n"); break;
+      }
+
    if (arraycopy.alternateDir())
       {
-      switch(numBytes)
-         {
-         case 2: opcode = TR::irsstore; break;
-         case 4: opcode = TR::iristore; break;
-         case 8: opcode = TR::irlstore; break;
-         default: TR_ASSERT(0, " number of bytes unexpected\n"); break;
-         }
+      loadNode = TR::Node::create(byteswapOpcode, 1, loadNode);
       }
-   else
-      {
-      switch(numBytes)
-         {
-         case 2: opcode = TR::sstorei; break;
-         case 4: opcode = TR::istorei; break;
-         case 8: opcode = TR::lstorei; break;
-         default: TR_ASSERT(0, " number of bytes unexpected\n"); break;
-         }
-      }
+
    TR::Node* iXstoreNode = TR::Node::createWithSymRef(opcode, 2, 2, aiaddNode, loadNode, symRef);
    TR::TreeTop* treeTop = TR::TreeTop::create(comp, iXstoreNode);
    TR::TreeTop* nextTreeTop = prevTreeTop->getNextTreeTop();
@@ -1763,8 +1757,7 @@ static TR::TreeTop* generateArraysetFromSequentialStores(TR::Compilation* comp, 
                {
                opcode = TR::sstorei;
                int32_t constValue = (int32_t)arrayset.getConstant();
-               if (istoreNode->getOpCodeValue() == TR::bstorei ||
-                   istoreNode->getOpCodeValue() == TR::bustorei)
+               if (istoreNode->getOpCodeValue() == TR::bstorei)
                   {
                   uint8_t byteConstValue = (uint8_t) constValue;
                   constValue = (int32_t) byteConstValue;
@@ -1778,14 +1771,13 @@ static TR::TreeTop* generateArraysetFromSequentialStores(TR::Compilation* comp, 
                {
                opcode = TR::istorei;
                int32_t constValue = (int32_t)arrayset.getConstant();
-               if (istoreNode->getOpCodeValue() == TR::bstorei ||
-                   istoreNode->getOpCodeValue() == TR::bustorei)
+               if (istoreNode->getOpCodeValue() == TR::bstorei)
                   {
                   uint8_t byteConstValue = (uint8_t) constValue;
                   constValue = (int32_t) byteConstValue;
                   constValue = ((constValue << 24) | (constValue << 16) | (constValue << 8) | constValue);
                   }
-               else if ((istoreNode->getOpCodeValue() == TR::cstorei) || (istoreNode->getOpCodeValue() == TR::sstorei))
+               else if (istoreNode->getOpCodeValue() == TR::sstorei)
                   {
                   uint16_t shortConstValue = (uint16_t) constValue;
                   constValue = (int32_t) shortConstValue;
@@ -1802,15 +1794,14 @@ static TR::TreeTop* generateArraysetFromSequentialStores(TR::Compilation* comp, 
                int64_t longConstValue = (int64_t) constValue;
                constValueNode = TR::Node::create(istoreNode, TR::lconst, 0, 0);
 
-               if (istoreNode->getOpCodeValue() == TR::bstorei ||
-                   istoreNode->getOpCodeValue() == TR::bustorei)
+               if (istoreNode->getOpCodeValue() == TR::bstorei)
                   {
                   uint8_t byteConstValue = (uint8_t) longConstValue;
                   longConstValue = (int64_t) byteConstValue;
                   longConstValue = ((longConstValue << 56) | (longConstValue << 48) | (longConstValue << 40) | (longConstValue << 32) |
                                     (longConstValue << 24) | (longConstValue << 16) | (longConstValue << 8) | longConstValue);
                   }
-               else if ((istoreNode->getOpCodeValue() == TR::cstorei) || (istoreNode->getOpCodeValue() == TR::sstorei))
+               else if (istoreNode->getOpCodeValue() == TR::sstorei)
                   {
                   uint16_t shortConstValue = (uint16_t) longConstValue;
                   longConstValue = (int64_t) shortConstValue;

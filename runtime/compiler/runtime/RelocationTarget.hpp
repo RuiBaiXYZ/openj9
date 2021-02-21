@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -56,8 +56,8 @@ class TR_RelocationTarget
 
       virtual bool isOrderedPairRelocation(TR_RelocationRecord *reloRecord, TR_RelocationTarget *reloTarget);
 
-      virtual uintptrj_t loadRelocationRecordValue(uintptrj_t *address)     { return *address; }
-      virtual void storeRelocationRecordValue(uintptrj_t value, uintptrj_t *address) { *address = value; }
+      virtual uintptr_t loadRelocationRecordValue(uintptr_t *address)     { return *address; }
+      virtual void storeRelocationRecordValue(uintptr_t value, uintptr_t *address) { *address = value; }
 
       virtual uint8_t loadUnsigned8b(uint8_t *address)                      { return *address; }
       virtual void storeUnsigned8b(uint8_t value, uint8_t *address)	    { *address = value; }
@@ -145,8 +145,6 @@ class TR_RelocationTarget
       virtual uint8_t *arrayCopyHelperAddress(J9JavaVM *javaVM);
 
       virtual void patchNonVolatileFieldMemoryFence(J9ROMFieldShape* resolvedField, UDATA cpAddr, U_8 descriptorByte, U_8 *instructionAddress, U_8 *snippetStartAddress, J9JavaVM *javaVM);
-
-      virtual void patchMTIsolatedOffset(uint32_t offset, uint8_t *reloLocation);
 
       /**
        * @brief Adds a PIC guard that will invalidate a pointer when the class it is dependant on is unloaded.  Marks metadata as having class unload assumptions.

@@ -38,19 +38,16 @@ ifeq (zos_390-64_cmprssptrs, $(SPEC))
 		--enable-OMRTHREAD_LIB_ZOS \
 		--enable-OMR_ARCH_S390 \
 		--enable-OMR_ENV_DATA64 \
-		--enable-OMR_GC_COMPRESSED_POINTERS \
 		--enable-OMR_GC_CONCURRENT_SCAVENGER \
 		--enable-OMR_GC_IDLE_HEAP_MANAGER \
-		--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS
-endif
-
-ifeq (zos_390-64_cmprssptrs_purec, $(SPEC))
+		--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS \
+		OMR_GC_POINTER_MODE=compressed
+ifneq (8,$(VERSION_MAJOR))
 	CONFIGURE_ARGS += \
-		--enable-OMRTHREAD_LIB_ZOS \
-		--enable-OMR_ARCH_S390 \
-		--enable-OMR_ENV_DATA64 \
-		--enable-OMR_GC_COMPRESSED_POINTERS \
-		--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS
+		OMR_ZOS_COMPILE_ARCHITECTURE=10 \
+		OMR_ZOS_COMPILE_TARGET=zOSV2R3 \
+		OMR_ZOS_LINK_COMPAT=ZOSV2R3
+endif
 endif
 
 ifeq (zos_390-64, $(SPEC))
@@ -58,37 +55,25 @@ ifeq (zos_390-64, $(SPEC))
 		--enable-OMRTHREAD_LIB_ZOS \
 		--enable-OMR_ARCH_S390 \
 		--enable-OMR_ENV_DATA64 \
-		--enable-OMR_GC_FULL_POINTERS \
 		--enable-OMR_GC_CONCURRENT_SCAVENGER \
 		--enable-OMR_GC_IDLE_HEAP_MANAGER \
-		--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS
-endif
-
-ifeq (zos_390-64_purec, $(SPEC))
+		--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS \
+		OMR_GC_POINTER_MODE=full
+ifneq (8,$(VERSION_MAJOR))
 	CONFIGURE_ARGS += \
-		--enable-OMRTHREAD_LIB_ZOS \
-		--enable-OMR_ARCH_S390 \
-		--enable-OMR_ENV_DATA64 \
-		--enable-OMR_GC_FULL_POINTERS \
-		--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS
+		OMR_ZOS_COMPILE_ARCHITECTURE=10 \
+		OMR_ZOS_COMPILE_TARGET=zOSV2R3 \
+		OMR_ZOS_LINK_COMPAT=ZOSV2R3
+endif
 endif
 
 ifeq (zos_390, $(SPEC))
 	CONFIGURE_ARGS += \
 		--enable-OMRTHREAD_LIB_ZOS \
 		--enable-OMR_ARCH_S390 \
-		--enable-OMR_GC_FULL_POINTERS \
 		--enable-OMR_PORT_ZOS_CEEHDLRSUPPORT \
-		--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS
-endif
-
-ifeq (zos_390_purec, $(SPEC))
-	CONFIGURE_ARGS += \
-		--enable-OMRTHREAD_LIB_ZOS \
-		--enable-OMR_ARCH_S390 \
-		--enable-OMR_GC_FULL_POINTERS \
-		--enable-OMR_PORT_ZOS_CEEHDLRSUPPORT \
-		--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS
+		--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS \
+		OMR_GC_POINTER_MODE=full
 endif
 
 CONFIGURE_ARGS += libprefix=lib exeext= solibext=.so arlibext=.a objext=.o

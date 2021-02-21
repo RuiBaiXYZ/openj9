@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -38,14 +38,15 @@
 #include "env/jittypes.h"
 #include "runtime/MethodMetaData.h"
 #include "env/VMJ9.h"
+#include "env/VerboseLog.hpp"
 #include "runtime/asmprotos.h"
 
 // To transfer control to VM during OSR
 extern "C" {
 #if defined(TR_HOST_X86)
-void prepareForOSR(uintptrj_t vmThreadArg, int32_t currentInlinedSiteIndex, int32_t slotData)
+void prepareForOSR(uintptr_t vmThreadArg, int32_t currentInlinedSiteIndex, int32_t slotData)
 #else
-void _prepareForOSR(uintptrj_t vmThreadArg, int32_t currentInlinedSiteIndex, int32_t slotData)
+void _prepareForOSR(uintptr_t vmThreadArg, int32_t currentInlinedSiteIndex, int32_t slotData)
 #endif
    {
    const bool details = TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerboseOSRDetails);
@@ -177,7 +178,7 @@ void _prepareForOSR(uintptrj_t vmThreadArg, int32_t currentInlinedSiteIndex, int
                if (details)
                   {
                   TR_VerboseLog::vlogAcquire();
-                  TR_VerboseLog::writeLine(TR_Vlog_OSRD, "%X     Symbol #%d osrFrameDataOffset=%d scratchBufferOffset=%d size=%d data:", (int)vmThreadArg,
+                  TR_VerboseLog::write(TR_Vlog_OSRD, "%X     Symbol #%d osrFrameDataOffset=%d scratchBufferOffset=%d size=%d data:", (int)vmThreadArg,
                      i, osrFrameDataOffset, scratchBufferOffset, symSize);
                   switch (symSize)
                      {
@@ -191,6 +192,7 @@ void _prepareForOSR(uintptrj_t vmThreadArg, int32_t currentInlinedSiteIndex, int
                         // TODO: Dump binary
                         break;
                      }
+                  TR_VerboseLog::writeLine("");
                   TR_VerboseLog::vlogRelease();
                   }
                memcpy(

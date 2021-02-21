@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -42,12 +42,14 @@
 #include "il/ResolvedMethodSymbol.hpp"
 #include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
+#include "runtime/Runtime.hpp"
 #include "runtime/RuntimeAssumptions.hpp"
 #include "z/codegen/CallSnippet.hpp"
 #include "z/codegen/OpMemToMem.hpp"
 #include "z/codegen/S390Evaluator.hpp"
 #include "z/codegen/S390GenerateInstructions.hpp"
 #include "z/codegen/S390HelperCallSnippet.hpp"
+#include "z/codegen/S390J9CallSnippet.hpp"
 #include "z/codegen/S390StackCheckFailureSnippet.hpp"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -64,11 +66,12 @@ J9::Z::zLinuxSystemLinkage::zLinuxSystemLinkage(TR::CodeGenerator * codeGen)
 ////////////////////////////////////////////////////////////////////////////////
 void
 J9::Z::zLinuxSystemLinkage::generateInstructionsForCall(TR::Node * callNode,
-	TR::RegisterDependencyConditions * deps, intptrj_t targetAddress,
+	TR::RegisterDependencyConditions * deps, intptr_t targetAddress,
 	TR::Register * methodAddressReg, TR::Register * javaLitOffsetReg,
 	TR::LabelSymbol * returnFromJNICallLabel,
-	TR::S390JNICallDataSnippet * jniCallDataSnippet, bool isJNIGCPoint)
+	TR::Snippet * callDataSnippet, bool isJNIGCPoint)
    {
+   TR::S390JNICallDataSnippet * jniCallDataSnippet = static_cast<TR::S390JNICallDataSnippet *>(callDataSnippet);
    TR::CodeGenerator * codeGen = cg();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(codeGen->fe());
    J9::Z::PrivateLinkage * privateLinkage = static_cast<J9::Z::PrivateLinkage *>(cg()->getLinkage(TR_Private));
@@ -112,7 +115,7 @@ J9::Z::zLinuxSystemLinkage::generateInstructionsForCall(TR::Node * callNode,
 				   || jniCallDataSnippet))
       {
       generateRegLitRefInstruction(cg(), TR::InstOpCode::getLoadOpCode(), callNode, systemReturnAddressRegister,
-    		  (uintptrj_t) callNode->getSymbolReference(), TR_HelperAddress, NULL, NULL, NULL);
+    		  (uintptr_t) callNode->getSymbolReference(), TR_HelperAddress, NULL, NULL, NULL);
 	   }
    // get the address of the function descriptor
    else if (callNode->getSymbol()->isResolvedMethod() && jniCallDataSnippet) // unresolved means a helper being called using system linkage
@@ -124,7 +127,7 @@ J9::Z::zLinuxSystemLinkage::generateInstructionsForCall(TR::Node * callNode,
    else if (codeGen->needClassAndMethodPointerRelocations()
     		  && callNode->isPreparedForDirectJNI())
       {
-      uint32_t reloType;
+      TR_ExternalRelocationTargetKind reloType;
       if (callNode->getSymbol()->castToResolvedMethodSymbol()->isSpecial())
          reloType = TR_JNISpecialTargetAddress;
       else if (callNode->getSymbol()->castToResolvedMethodSymbol()->isStatic())
@@ -137,7 +140,7 @@ J9::Z::zLinuxSystemLinkage::generateInstructionsForCall(TR::Node * callNode,
          TR_ASSERT(0,"JNI relocation not supported.");
          }
       generateRegLitRefInstruction(cg(), TR::InstOpCode::getLoadOpCode(), callNode,
-				systemReturnAddressRegister, (uintptrj_t) targetAddress,
+				systemReturnAddressRegister, (uintptr_t) targetAddress,
 				reloType, NULL, NULL, NULL);
 	   }
    else

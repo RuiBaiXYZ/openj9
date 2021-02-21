@@ -36,15 +36,16 @@
 
 #if defined(TR_TARGET_POWER)
 
+// Target address prediction is based on 32-byte blocks on POWER
+// we adjust the trampoline size to align with this block-size
+// regardless 32bit or 64bit.
+#define TRAMPOLINE_SIZE       32
+
 #if defined(TR_TARGET_64BIT)
-#define TRAMPOLINE_SIZE       28
 #define OFFSET_IPIC_TO_CALL   36
 #else
-#define TRAMPOLINE_SIZE       16
 #define OFFSET_IPIC_TO_CALL   32
 #endif
-
-extern TR_Processor portLibCall_getProcessorType();
 
 #ifdef TR_HOST_POWER
 extern void     ppcCodeSync(uint8_t *, uint32_t);
@@ -54,33 +55,70 @@ void ppcCodeCacheConfig(int32_t ccSizeInByte, int32_t *numTempTrampolines)
    {
    // Estimated: 2KB per method, with 10% being recompiled(multi-times)
 
-   *numTempTrampolines = ccSizeInByte>>12;
+   *numTempTrampolines = TR::Compiler->target.cpu.isAtLeast(OMR_PROCESSOR_PPC_P10) ? 0 : (ccSizeInByte>>13);
    }
 
 void ppcCreateHelperTrampolines(uint8_t *trampPtr, int32_t numHelpers)
    {
    TR::CodeCacheConfig &config = TR::CodeCacheManager::instance()->codeCacheConfig();
-   static bool customP4 =  feGetEnv("TR_CustomP4Trampoline") ? true : false;
-   static TR_Processor proc = customP4 ? portLibCall_getProcessorType() :
-      TR_DefaultPPCProcessor;
 
    uint8_t *bufferStart = trampPtr, *buffer;
    for (int32_t cookie=1; cookie<numHelpers; cookie++)
       {
-      intptrj_t helper = (intptrj_t)runtimeHelperValue((TR_RuntimeHelper)cookie);
+      intptr_t helper = (intptr_t)runtimeHelperValue((TR_RuntimeHelper)cookie);
       // Skip over the first one for index 0
       bufferStart += config.trampolineCodeSize();
       buffer = bufferStart;
 
 #if defined(TR_TARGET_64BIT)
-         // ld gr11, [grPTOC, 8*(cookie-1)]
-         *(int32_t *)buffer = 0xe9700000 | (((cookie-1)*sizeof(intptrj_t)) & 0x0000ffff);
+      if (!TR::Compiler->target.cpu.isAtLeast(OMR_PROCESSOR_PPC_P10))
+         {
+         if (!TR::Options::getCmdLineOptions()->getOption(TR_DisableTOC))
+            {
+            // ld gr11, [grPTOC, 8*(cookie-1)]
+            *(int32_t *)buffer = 0xe9700000 | (((cookie-1)*sizeof(intptr_t)) & 0x0000ffff);
+            buffer += 4;
+            }
+         else
+            {
+            // only gr11 is available for helper dispatch
+
+            // lis gr11, upper 16-bits
+            *(int32_t *)buffer = 0x3d600000 | ((helper>>48) & 0x0000ffff);
+            buffer += 4;
+
+            // ori gr11, gr11, bits 16--31
+            *(int32_t *)buffer = 0x616b0000 | ((helper>>32) & 0x0000ffff);
+            buffer += 4;
+
+            // rldicr gr11, gr11, 32, 31
+            *(int32_t *)buffer = 0x796b07c6;
+            buffer += 4;
+
+            // oris gr11, gr11, bits 32-47
+            *(int32_t *)buffer = 0x656b0000 | ((helper>>16) & 0x0000ffff);
+            buffer += 4;
+
+            // ori gr11, gr11, bits 48--63
+            *(int32_t *)buffer = 0x616b0000 | (helper & 0x0000ffff);
+            buffer += 4;
+            }
+         }
+      else
+         {
+         // pld gr11, [,16], 1 (PC-relative)
+         *(int32_t *)buffer = 0x04100000;
          buffer += 4;
+         *(int32_t *)buffer = 0xe5600010;
+         buffer += 4;
+         }
 
 #else
+      if (!TR::Compiler->target.cpu.isAtLeast(OMR_PROCESSOR_PPC_P10))
+         {
          // For POWER4 which has a problem with the CTR/LR cache when the upper
          // bits are not 0 extended.. Use li/oris when the 16th bit is off
-         if( !(helper & 0x00008000) )
+         if (!(helper & 0x00008000))
             {
             // li r11, lower
             *(int32_t *)buffer = 0x39600000 | (helper & 0x0000ffff);
@@ -99,16 +137,22 @@ void ppcCreateHelperTrampolines(uint8_t *trampPtr, int32_t numHelpers)
             *(int32_t *)buffer = 0x396b0000 | (helper & 0x0000ffff);
             buffer += 4;
 
-            // Now, if highest bit is on we need to clear the sign extend bits on 64bit CPUs
-            // ** POWER4 pref fix **
-            if( (helper & 0x80000000) && (!customP4 || proc == TR_PPCgp))
+            if (helper & 0x80000000)
                {
                // rlwinm r11,r11,sh=0,mb=0,me=31
                *(int32_t *)buffer = 0x556b003e;
                buffer += 4;
                }
             }
-
+         }
+      else
+         {
+         // plwz gr11, [,16], 1 (PC-relative)
+         *(int32_t *)buffer = 0x06100000;
+         buffer += 4;
+         *(int32_t *)buffer = 0x81600010;
+         buffer += 4;
+         }
 #endif
 
       // mtctr r11
@@ -118,24 +162,28 @@ void ppcCreateHelperTrampolines(uint8_t *trampPtr, int32_t numHelpers)
       // bctr
       *(int32_t *)buffer = 0x4e800420;
       buffer += 4;
-   }
+
+      if (TR::Compiler->target.cpu.isAtLeast(OMR_PROCESSOR_PPC_P10))
+         {
+         *(intptr_t *)buffer = helper;
+         }
+      }
+
 #ifdef TR_HOST_POWER
    ppcCodeSync(trampPtr, config.trampolineCodeSize() * numHelpers);
 #endif
-
    }
 
 void ppcCreateMethodTrampoline(void *trampPtr, void *startPC, void *method)
    {
-   static bool customP4 =  feGetEnv("TR_CustomP4Trampoline") ? true : false;
-   static TR_Processor proc = customP4 ? portLibCall_getProcessorType() :
-      TR_DefaultPPCProcessor;
    uint8_t *buffer = (uint8_t *)trampPtr;
    J9::PrivateLinkage::LinkageInfo *linkInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
-   intptrj_t dispatcher = (intptrj_t)((uint8_t *)startPC + linkInfo->getReservedWord());
+   intptr_t dispatcher = (intptr_t)((uint8_t *)startPC + linkInfo->getReservedWord());
 
-      // Take advantage of both gr0 and gr11 ...
+   // Take advantage of both gr0 and gr11 ...
 #if defined(TR_TARGET_64BIT)
+   if (!TR::Compiler->target.cpu.isAtLeast(OMR_PROCESSOR_PPC_P10))
+      {
       // lis gr0, upper 16-bits
       *(int32_t *)buffer = 0x3c000000 | ((dispatcher>>48) & 0x0000ffff);
       buffer += 4;
@@ -155,41 +203,29 @@ void ppcCreateMethodTrampoline(void *trampPtr, void *startPC, void *method)
       // rldimi gr11, gr0, 32, 0
       *(int32_t *)buffer = 0x780b000e;
       buffer += 4;
+      }
+   else
+      {
+      // pld gr11, [,16], 1 (PC-relative)
+      *(int32_t *)buffer = 0x04100000;
+      buffer += 4;
+      *(int32_t *)buffer = 0xe5600010;
+      buffer += 4;
+      }
 #else
+   if (!TR::Compiler->target.cpu.isAtLeast(OMR_PROCESSOR_PPC_P10))
+      {
       // For POWER4 which has a problem with the CTR/LR cache when the upper
       // bits are not 0 extended. Use li/oris when the 16th bit is off
-      if (customP4)
+      if (!(dispatcher & 0x00008000))
          {
-         if ( !(dispatcher & 0x00008000) )
-            {
-            // li r11, lower
-            *(int32_t *)buffer = 0x39600000 | (dispatcher & 0x0000ffff);
-            buffer += 4;
+         // li r11, lower
+         *(int32_t *)buffer = 0x39600000 | (dispatcher & 0x0000ffff);
+         buffer += 4;
 
-            // oris r11, r11, upper
-            *(int32_t *)buffer = 0x656b0000 | ((dispatcher>>16) & 0x0000ffff);
-            buffer += 4;
-            }
-         else
-            {
-            // lis gr11, upper
-            *(int32_t *)buffer = 0x3d600000 |
-               (((dispatcher>>16) + (dispatcher&(1<<15)?1:0)) & 0x0000ffff);
-            buffer += 4;
-
-            // addi gr11, gr11, lower
-            *(int32_t *)buffer = 0x396b0000 | (dispatcher & 0x0000ffff);
-            buffer += 4;
-
-            // Now, if highest bit is on we need to clear the sign extend bits on 64bit CPUs
-            // ** POWER4 pref fix **
-            if ( (dispatcher & 0x80000000) && proc == TR_PPCgp)
-               {
-               // rlwinm r11,r11,sh=0,mb=0,me=31
-               *(int32_t *)buffer = 0x556b003e;
-               buffer += 4;
-               }
-            }
+         // oris r11, r11, upper
+         *(int32_t *)buffer = 0x656b0000 | ((dispatcher>>16) & 0x0000ffff);
+         buffer += 4;
          }
       else
          {
@@ -201,7 +237,23 @@ void ppcCreateMethodTrampoline(void *trampPtr, void *startPC, void *method)
          // addi gr11, gr11, lower
          *(int32_t *)buffer = 0x396b0000 | (dispatcher & 0x0000ffff);
          buffer += 4;
+
+         if (dispatcher & 0x80000000)
+            {
+            // rlwinm r11,r11,sh=0,mb=0,me=31
+            *(int32_t *)buffer = 0x556b003e;
+            buffer += 4;
+            }
          }
+      }
+   else
+      {
+      // plwz gr11, [,16], 1 (PC-relative)
+      *(int32_t *)buffer = 0x06100000;
+      buffer += 4;
+      *(int32_t *)buffer = 0x81600010;
+      buffer += 4;
+      }
 #endif
 
    // mtctr gr11
@@ -210,6 +262,12 @@ void ppcCreateMethodTrampoline(void *trampPtr, void *startPC, void *method)
 
    // bcctr
    *(int32_t *)buffer = 0x4e800420;
+   buffer += 4;
+
+   if (TR::Compiler->target.cpu.isAtLeast(OMR_PROCESSOR_PPC_P10))
+      {
+      *(intptr_t *)buffer = dispatcher;
+      }
 
 #if defined(TR_HOST_POWER)
    TR::CodeCacheConfig &config = TR::CodeCacheManager::instance()->codeCacheConfig();
@@ -309,7 +367,7 @@ bool ppcCodePatching(void *method, void *callSite, void *currentPC, void *curren
    {
    J9::PrivateLinkage::LinkageInfo *linkInfo = J9::PrivateLinkage::LinkageInfo::get(newPC);
    uint8_t        *entryAddress = (uint8_t *)newPC + linkInfo->getReservedWord();
-   intptrj_t       distance;
+   intptr_t       distance;
    uint8_t        *patchAddr;
    int32_t         currentDistance, oldBits = *(int32_t *)callSite;
    bool            isLinkStackPreservingIPIC = false;
@@ -322,7 +380,7 @@ bool ppcCodePatching(void *method, void *callSite, void *currentPC, void *curren
       currentDistance = ((oldBits << 6) >> 6) & 0xfffffffc;
       oldBits &= 0xfc000003;
       if (TR::Options::getCmdLineOptions()->getOption(TR_StressTrampolines) ||
-          !TR::Compiler->target.cpu.isTargetWithinIFormBranchRange((intptrj_t)entryAddress, (intptrj_t)callSite))
+          !TR::Compiler->target.cpu.isTargetWithinIFormBranchRange((intptr_t)entryAddress, (intptr_t)callSite))
          {
          if (currentPC == newPC)
             {
@@ -330,33 +388,52 @@ bool ppcCodePatching(void *method, void *callSite, void *currentPC, void *curren
             }
          else
             {
-            void *newTramp = mcc_replaceTrampoline(reinterpret_cast<TR_OpaqueMethodBlock *>(method), callSite, currentTramp, currentPC, newPC, true);
+            // On POWER10 or later, the trampoline can be patched in place atomically. No need temporary trampoline anymore
+
+            void *newTramp = mcc_replaceTrampoline(reinterpret_cast<TR_OpaqueMethodBlock *>(method), callSite, currentTramp, currentPC,
+                                newPC, !TR::Compiler->target.cpu.isAtLeast(OMR_PROCESSOR_PPC_P10));
             if (newTramp == NULL)
                {
                //if (currentTramp == NULL)
                   //FIXME we need an assume for runtime as well - TR_ASSERT(0, "This is an internal error.\n");
                return false;
                }
-            ppcCreateMethodTrampoline(newTramp, newPC, method);
+
+            // currentTramp==NULL or newTramp is a temporary trampoline
+            if (newTramp != currentTramp)
+               ppcCreateMethodTrampoline(newTramp, newPC, method);
+
             if (currentTramp == NULL)
                {
                distance = (uint8_t *)newTramp - patchAddr;
                }
             else
                {
-               if (currentDistance != ((uint8_t *)currentTramp - patchAddr))
+               if (currentTramp == newTramp)
                   {
-                  oldBits |= ((uint8_t *)currentTramp - patchAddr) & 0x03fffffc;
-                  *(int32_t *)patchAddr = oldBits;
-#if defined(TR_HOST_POWER)
-                  ppcCodeSync(patchAddr, 4);
-#endif
-                  }
+                  // this effectively is: we are on POWER10 or later, and we can patch the trampoline in place
 
-               patchAddr = (uint8_t *)currentTramp;
-               distance = (uint8_t *)newTramp - patchAddr;
-               currentDistance = 0;
-               oldBits = 0x48000000;
+                  *(uint8_t **)((uint8_t *)currentTramp + 16) = entryAddress;
+                  distance = (uint8_t *)currentTramp - patchAddr;
+                  }
+               else
+                  {
+                  // this effectively is: we are on pre-POWER10, and we need to take care of temporary trampolines
+
+                  if (currentDistance != ((uint8_t *)currentTramp - patchAddr))
+                     {
+                     oldBits |= ((uint8_t *)currentTramp - patchAddr) & 0x03fffffc;
+                     *(int32_t *)patchAddr = oldBits;
+#if defined(TR_HOST_POWER)
+                     ppcCodeSync(patchAddr, 4);
+#endif
+                     }
+
+                  patchAddr = (uint8_t *)currentTramp;
+                  distance = (uint8_t *)newTramp - patchAddr;
+                  currentDistance = 0;
+                  oldBits = 0x48000000;
+                  }
                }
             }
          }
@@ -403,25 +480,37 @@ bool ppcCodePatching(void *method, void *callSite, void *currentPC, void *curren
 
          oldBits = *(int32_t *)((uint8_t *)callSite - encodingStartOffset);     // The load of the first IPIC cache slot or rldimi
 #if defined(TR_TARGET_64BIT)
-         if (((oldBits>>26) & 0x0000003F) != 30)
+         if (TR::Compiler->target.cpu.isAtLeast(OMR_PROCESSOR_PPC_P10))
             {
-            // PTOC was used, oldBits is ld
-            currentDistance = oldBits<<16>>16;
-            if (((oldBits>>16) & 0x0000001F) == 12)
-               {
-               oldBits = *(int32_t *)((uint8_t *)callSite - encodingStartOffset - 4);
-               currentDistance += oldBits<<16;
-               }
-            patchAddr = *(uint8_t **)(*(intptrj_t *)extra + currentDistance);
+            // oldBits is the latter half of paddi
+            distance = *(int32_t *)((uint8_t *)callSite - encodingStartOffset - 4);
+            distance = (distance & 0x0003FFFF) << 16;  // Getting the top-18-bits and shifted into place
+            distance |= oldBits & 0x0000FFFF;          // Concatenate with the bottom-16-bits
+            distance = (distance << 30) >> 30;         // sign-extend
+            patchAddr = (uint8_t *)callSite - encodingStartOffset - 4 + distance;
             }
          else
             {
-            // PTOC was full and the load address is formed via 5 instructions: lis, lis, ori, rldimi, ldu; oldBits is the rldimi
-            distance  = ((intptrj_t)(*(int32_t *)((uint8_t *)callSite - encodingStartOffset - 12)) & 0x0000FFFF) << 48;
-            distance |= ((intptrj_t)(*(int32_t *)((uint8_t *)callSite - encodingStartOffset - 8)) & 0x0000FFFF) << 16;
-            distance |= ((intptrj_t)(*(int32_t *)((uint8_t *)callSite - encodingStartOffset - 4)) & 0x0000FFFF) << 32;
-            distance += ((intptrj_t)(*(int32_t *)((uint8_t *)callSite - encodingStartOffset + 4)) & 0x0000FFFC) << 48 >> 48;
-            patchAddr = (uint8_t *)distance;
+            if (((oldBits>>26) & 0x0000003F) != 30)
+               {
+               // PTOC was used, oldBits is ld
+               currentDistance = oldBits<<16>>16;
+               if (((oldBits>>16) & 0x0000001F) == 12)
+                  {
+                  oldBits = *(int32_t *)((uint8_t *)callSite - encodingStartOffset - 4);
+                  currentDistance += oldBits<<16;
+                  }
+               patchAddr = *(uint8_t **)(*(intptr_t *)extra + currentDistance);
+               }
+            else
+               {
+               // PTOC was full and the load address is formed via 5 instructions: lis, lis, ori, rldimi, ldu; oldBits is the rldimi
+               distance  = ((intptr_t)(*(int32_t *)((uint8_t *)callSite - encodingStartOffset - 12)) & 0x0000FFFF) << 48;
+               distance |= ((intptr_t)(*(int32_t *)((uint8_t *)callSite - encodingStartOffset - 8)) & 0x0000FFFF) << 16;
+               distance |= ((intptr_t)(*(int32_t *)((uint8_t *)callSite - encodingStartOffset - 4)) & 0x0000FFFF) << 32;
+               distance += ((intptr_t)(*(int32_t *)((uint8_t *)callSite - encodingStartOffset + 4)) & 0x0000FFFC) << 48 >> 48;
+               patchAddr = (uint8_t *)distance;
+               }
             }
 #else
          // oldBits is lwzu
@@ -430,24 +519,24 @@ bool ppcCodePatching(void *method, void *callSite, void *currentPC, void *curren
 #endif
          // patchAddr now points to the class ptr of the first cache slot
 
-         const intptrj_t *obj = *(intptrj_t **)((intptrj_t)extra + sizeof(intptrj_t));
+         const intptr_t *obj = *(intptr_t **)((intptr_t)extra + sizeof(intptr_t));
          // Discard high order 32 bits via cast to uint32_t to avoid shifting and masking when using compressed refs
-         intptrj_t currentReceiverJ9Class = 0;
+         intptr_t currentReceiverJ9Class = 0;
          if (TR::Compiler->om.compressObjectReferences())
             currentReceiverJ9Class = *(uint32_t *)((int8_t *)obj + TMP_OFFSETOF_J9OBJECT_CLAZZ);
          else
-            currentReceiverJ9Class = *(intptrj_t *)((int8_t *)obj + TMP_OFFSETOF_J9OBJECT_CLAZZ);
+            currentReceiverJ9Class = *(intptr_t *)((int8_t *)obj + TMP_OFFSETOF_J9OBJECT_CLAZZ);
 
          // Throwing away the flag bits in CLASS slot
          currentReceiverJ9Class &= ~(J9_REQUIRED_CLASS_ALIGNMENT - 1);
 
-         if (*(intptrj_t *)patchAddr == currentReceiverJ9Class)
+         if (*(intptr_t *)patchAddr == currentReceiverJ9Class)
             {
-            *(intptrj_t *)(patchAddr+sizeof(intptrj_t)) = (intptrj_t)entryAddress;
+            *(intptr_t *)(patchAddr+sizeof(intptr_t)) = (intptr_t)entryAddress;
             }
-         else if (*(intptrj_t *)(patchAddr+2*sizeof(intptrj_t)) == currentReceiverJ9Class)
+         else if (*(intptr_t *)(patchAddr+2*sizeof(intptr_t)) == currentReceiverJ9Class)
             {
-            *(intptrj_t *)(patchAddr+3*sizeof(intptrj_t)) = (intptrj_t)entryAddress;
+            *(intptr_t *)(patchAddr+3*sizeof(intptr_t)) = (intptr_t)entryAddress;
             }
          }
       else if (oldBits != 0x7d8903a6) // mtctr r12 used in virtual dispatch
@@ -467,20 +556,8 @@ bool ppcCodePatching(void *method, void *callSite, void *currentPC, void *curren
 
 void ppcCodeCacheParameters(int32_t *trampolineSize, void **callBacks, int32_t *numHelpers, int32_t* CCPreLoadedCodeSize)
    {
-   static bool customP4 =  feGetEnv("TR_CustomP4Trampoline") ? true : false;
-
-#if defined(TR_TARGET_64BIT)
    *trampolineSize = TRAMPOLINE_SIZE;
-#else
-   if (customP4)
-      {
-      *trampolineSize = portLibCall_getProcessorType() == TR_PPCgp ? TRAMPOLINE_SIZE + 4 : TRAMPOLINE_SIZE;
-      }
-   else
-      {
-      *trampolineSize = TRAMPOLINE_SIZE + 4;
-      }
-#endif
+
    //TR::CodeCacheConfig &config = TR::CodeCacheManager::instance()->codeCacheConfig();
    //fprintf(stderr, "Processor Offset: %d\n", portLibCall_getProcessorType() - TR_FirstPPCProcessor);
    //fprintf(stderr, "Trampoline Size: %d, %d\n", *trampolineSize, config.trampolineCodeSize);
@@ -508,7 +585,7 @@ void ppcCodeCacheParameters(int32_t *trampolineSize, void **callBacks, int32_t *
 
 #if defined(TR_TARGET_64BIT)
 /*FXME this IS_32BIT_RIP is already define in different places; should be moved to a header file*/
-#define IS_32BIT_RIP(x,rip)  ((intptrj_t)(x) == (intptrj_t)(rip) + (int32_t)((intptrj_t)(x) - (intptrj_t)(rip)))
+#define IS_32BIT_RIP(x,rip)  ((intptr_t)(x) == (intptr_t)(rip) + (int32_t)((intptr_t)(x) - (intptr_t)(rip)))
 #define TRAMPOLINE_SIZE    16
 #define CALL_INSTR_LENGTH  5
 
@@ -524,7 +601,7 @@ void amd64CreateHelperTrampolines(uint8_t *trampPtr, int32_t numHelpers)
 
    for (int32_t i=1; i<numHelpers; i++)
       {
-      intptrj_t helperAddr = (intptrj_t)runtimeHelperValue((TR_RuntimeHelper)i);
+      intptr_t helperAddr = (intptr_t)runtimeHelperValue((TR_RuntimeHelper)i);
 
       // Skip the first trampoline for index 0
       bufferStart += TRAMPOLINE_SIZE;
@@ -549,7 +626,7 @@ void amd64CreateMethodTrampoline(void *trampPtr, void *startPC, TR_OpaqueMethodB
    J9Method *ramMethod = reinterpret_cast<J9Method *>(method);
    uint8_t *buffer = (uint8_t *)trampPtr;
    J9::PrivateLinkage::LinkageInfo *linkInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
-   intptrj_t dispatcher = (intptrj_t)((uint8_t *)startPC + linkInfo->getReservedWord());
+   intptr_t dispatcher = (intptr_t)((uint8_t *)startPC + linkInfo->getReservedWord());
 
    // The code below is disabled because of a problem with direct call to JNI methods
    // through trampoline. The problem is that at the time of generation of the trampoline
@@ -565,12 +642,12 @@ void amd64CreateMethodTrampoline(void *trampPtr, void *startPC, TR_OpaqueMethodB
       // version of the patchJNICallSite routine.
       //
       if (TR::CompilationInfo::isCompiled(ramMethod))
-         startPC = (void *)(*((uintptrj_t *)((uint8_t *)startPC - 12)));
+         startPC = (void *)(*((uintptr_t *)((uint8_t *)startPC - 12)));
 
       *buffer++ = 0x49;
       *buffer++ = 0xbb;
-      *(intptrj_t *)buffer = (intptrj_t)startPC;
-      buffer += sizeof(intptrj_t);
+      *(intptr_t *)buffer = (intptr_t)startPC;
+      buffer += sizeof(intptr_t);
 
       *buffer++ = 0x41;
       *buffer++ = 0xff;
@@ -591,8 +668,8 @@ void amd64CreateMethodTrampoline(void *trampPtr, void *startPC, TR_OpaqueMethodB
       {
       *buffer++ = 0x48;
       *buffer++ = 0xbf;
-      *(intptrj_t *)buffer = dispatcher;
-      buffer += sizeof(intptrj_t);
+      *(intptr_t *)buffer = dispatcher;
+      buffer += sizeof(intptr_t);
 
       *buffer++ = 0x48;
       *buffer++ = 0xff;
@@ -612,11 +689,11 @@ int32_t amd64CodePatching(void *theMethod, void *callSite, void *currentPC, void
    J9::PrivateLinkage::LinkageInfo *linkInfo = J9::PrivateLinkage::LinkageInfo::get(newPC);
    uint8_t        *entryAddress = (uint8_t *)newPC + linkInfo->getReservedWord();
    uint8_t        *patchAddr = (uint8_t *)callSite;
-   intptrj_t       distance;
+   intptr_t       distance;
    int32_t         currentDistance;
 
    currentDistance = *(int32_t *)(patchAddr+1);
-   distance = (intptrj_t)entryAddress - (intptrj_t)patchAddr - CALL_INSTR_LENGTH;
+   distance = (intptr_t)entryAddress - (intptr_t)patchAddr - CALL_INSTR_LENGTH;
    if (TR::Options::getCmdLineOptions()->getOption(TR_StressTrampolines) || !IS_32BIT_RIP(distance, 0))
       {
       if (currentPC == newPC)
@@ -640,7 +717,7 @@ int32_t amd64CodePatching(void *theMethod, void *callSite, void *currentPC, void
             patchingFence16(currentTramp);
 
             // Store the new address
-            *(intptrj_t *)((uint8_t *)currentTramp + 2) = (intptrj_t)entryAddress;
+            *(intptr_t *)((uint8_t *)currentTramp + 2) = (intptr_t)entryAddress;
             patchingFence16(currentTramp);
 
             // Restore the MOV instruction
@@ -654,7 +731,7 @@ int32_t amd64CodePatching(void *theMethod, void *callSite, void *currentPC, void
       {
       // Patch the call displacement
       //
-      if (((uintptrj_t)patchAddr+4) % INSTRUCTION_PATCH_ALIGNMENT_BOUNDARY >= 3)
+      if (((uintptr_t)patchAddr+4) % INSTRUCTION_PATCH_ALIGNMENT_BOUNDARY >= 3)
          {
          // Displacement is entirely between the boundaries, so just patch it
          //
@@ -664,7 +741,7 @@ int32_t amd64CodePatching(void *theMethod, void *callSite, void *currentPC, void
          {
          // Must use self-loop
          //
-         //TR_ASSERT(((uintptrj_t)patchAddr+1) % INSTRUCTION_PATCH_ALIGNMENT_BOUNDARY != 0,
+         //TR_ASSERT(((uintptr_t)patchAddr+1) % INSTRUCTION_PATCH_ALIGNMENT_BOUNDARY != 0,
          //   "Self-loop can't cross instruction patch alignment boundary");
 
          // (We don't need any mutual exclusion on this patching because the
@@ -750,7 +827,7 @@ void armCreateHelperTrampolines(void *trampPtr, int32_t numHelpers)
       //
       *buffer = 0xe51ff004;
       buffer += 1;
-      *buffer = (intptrj_t)runtimeHelperValue((TR_RuntimeHelper)i);
+      *buffer = (intptr_t)runtimeHelperValue((TR_RuntimeHelper)i);
       buffer += 1;
       }
 
@@ -765,7 +842,7 @@ void armCreateMethodTrampoline(void *trampPtr, void *startPC, void *method)
    {
    uint32_t *buffer = (uint32_t *)trampPtr;
    J9::PrivateLinkage::LinkageInfo *linkInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
-   intptrj_t dispatcher = (intptrj_t)((uint8_t *)startPC + linkInfo->getReservedWord());
+   intptr_t dispatcher = (intptr_t)((uint8_t *)startPC + linkInfo->getReservedWord());
 
    // LDR  PC, [PC, #-4]
    // DCD  dispatcher
@@ -786,7 +863,7 @@ bool armCodePatching(void *callee, void *callSite, void *currentPC, void *curren
    {
    J9::PrivateLinkage::LinkageInfo *linkInfo = J9::PrivateLinkage::LinkageInfo::get(newAddrOfCallee);
    uint8_t        *entryAddress = (uint8_t *)newAddrOfCallee + linkInfo->getReservedWord();
-   intptrj_t       distance;
+   intptr_t       distance;
    int32_t         currentDistance;
    int32_t         branchInstr = *(int32_t *)callSite;
    void           *newTramp;
@@ -801,7 +878,7 @@ bool armCodePatching(void *callee, void *callSite, void *currentPC, void *curren
       return true;
       }
 
-   if (TR::Options::getCmdLineOptions()->getOption(TR_StressTrampolines) || distance>(intptrj_t)BRANCH_FORWARD_LIMIT || distance<(intptrj_t)BRANCH_BACKWARD_LIMIT)
+   if (TR::Options::getCmdLineOptions()->getOption(TR_StressTrampolines) || distance>(intptr_t)BRANCH_FORWARD_LIMIT || distance<(intptr_t)BRANCH_BACKWARD_LIMIT)
       {
       if (currentPC == newAddrOfCallee)
          {
@@ -863,6 +940,10 @@ void armCodeCacheParameters(int32_t *trampolineSize, void **callBacks, int32_t *
 
 #define TRAMPOLINE_SIZE         16
 
+#if defined(TR_HOST_ARM64)
+extern void arm64CodeSync(uint8_t *, uint32_t);
+#endif
+
 void arm64CodeCacheConfig(int32_t ccSizeInByte, int32_t *numTempTrampolines)
    {
    *numTempTrampolines = 0;
@@ -877,29 +958,37 @@ void arm64CreateHelperTrampolines(void *trampPtr, int32_t numHelpers)
       buffer += 1;
       *buffer = 0xD61F0200; //BR R16
       buffer += 1;
-      *((intptrj_t *)buffer) = (intptrj_t)runtimeHelperValue((TR_RuntimeHelper)i);
+      *((intptr_t *)buffer) = (intptr_t)runtimeHelperValue((TR_RuntimeHelper)i);
       buffer += 2;
       }
+
+#if defined(TR_HOST_ARM64)
+   arm64CodeSync((uint8_t*)trampPtr, TRAMPOLINE_SIZE * numHelpers);
+#endif
    }
 
 void arm64CreateMethodTrampoline(void *trampPtr, void *startPC, void *method)
    {
    uint32_t *buffer = (uint32_t *)trampPtr;
    J9::PrivateLinkage::LinkageInfo *linkInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
-   intptrj_t dispatcher = (intptrj_t)((uint8_t *)startPC + linkInfo->getReservedWord());
+   intptr_t dispatcher = (intptr_t)((uint8_t *)startPC + linkInfo->getReservedWord());
 
    *buffer = 0x58000050; //LDR R16 PC+8
    buffer += 1;
    *buffer = 0xD61F0200; //BR R16
    buffer += 1;
-   *((intptrj_t *)buffer) = dispatcher;
+   *((intptr_t *)buffer) = dispatcher;
+
+#if defined(TR_HOST_ARM64)
+   arm64CodeSync((uint8_t*)trampPtr, TRAMPOLINE_SIZE);
+#endif
    }
 
 bool arm64CodePatching(void *callee, void *callSite, void *currentPC, void *currentTramp, void *newAddrOfCallee, void *extra)
    {
    J9::PrivateLinkage::LinkageInfo *linkInfo = J9::PrivateLinkage::LinkageInfo::get(newAddrOfCallee);
    uint8_t        *entryAddress = (uint8_t *)newAddrOfCallee + linkInfo->getReservedWord();
-   intptrj_t       distance;
+   intptr_t       distance;
    int32_t         currentDistance;
    int32_t         branchInstr = *(int32_t *)callSite;
    void           *newTramp;
@@ -915,8 +1004,8 @@ bool arm64CodePatching(void *callee, void *callSite, void *currentPC, void *curr
       }
 
    if (TR::Options::getCmdLineOptions()->getOption(TR_StressTrampolines)
-            || distance>(intptrj_t)TR::Compiler->target.cpu.maxUnconditionalBranchImmediateForwardOffset()
-            || distance<(intptrj_t)TR::Compiler->target.cpu.maxUnconditionalBranchImmediateBackwardOffset()
+            || distance>(intptr_t)TR::Compiler->target.cpu.maxUnconditionalBranchImmediateForwardOffset()
+            || distance<(intptr_t)TR::Compiler->target.cpu.maxUnconditionalBranchImmediateBackwardOffset()
    )  {
       if (currentPC == newAddrOfCallee)
          {
@@ -934,6 +1023,9 @@ bool arm64CodePatching(void *callee, void *callSite, void *currentPC, void *curr
          else
             {
             *((uint64_t*)currentTramp+1) = (uint64_t)entryAddress;
+#if defined(TR_HOST_ARM64)
+            arm64CodeSync((uint8_t*)currentTramp+8, 8);
+#endif
             }
          }
 
@@ -944,6 +1036,9 @@ bool arm64CodePatching(void *callee, void *callSite, void *currentPC, void *curr
       {
       branchInstr |= (distance >> 2) & 0x03ffffff;
       *(int32_t *)callSite = branchInstr;
+#if defined(TR_HOST_ARM64)
+      arm64CodeSync((uint8_t*)callSite, 4);
+#endif
       }
 
    return true;
@@ -997,7 +1092,7 @@ void s390zOS31CodeCacheParameters(int32_t *trampolineSize, void **callBacks, int
 
 // Atomic Storage of a 4 byte value - Picbuilder.m4
 extern "C" void _Store4(int32_t * addr, uint32_t newData);
-extern "C" void _Store8(intptrj_t * addr, uintptrj_t newData);
+extern "C" void _Store8(intptr_t * addr, uintptr_t newData);
 
 
 //Note method trampolines no longer used
@@ -1021,7 +1116,7 @@ void s390zOS64CreateHelperTrampoline(void *trampPtr, int32_t numHelpers)
    for (int32_t i = 1; i < numHelpers; i++)
       {
       // Get the helper address
-      intptrj_t helperAddr = (intptrj_t)runtimeHelperValue((TR_RuntimeHelper)i);
+      intptr_t helperAddr = (intptr_t)runtimeHelperValue((TR_RuntimeHelper)i);
 
       // Skip the first trampoline for index 0
       bufferStart += TRAMPOLINE_SIZE;
@@ -1068,7 +1163,7 @@ void s390zOS64CreateMethodTrampoline(void *trampPtr, void *startPC, void *method
    // Get the Entry Pointer (should be r15 for zOS64).
    uint16_t rEP = 15;
    J9::PrivateLinkage::LinkageInfo *linkInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
-   intptrj_t dispatcher = (intptrj_t)((uint8_t *)startPC + linkInfo->getReservedWord());
+   intptr_t dispatcher = (intptr_t)((uint8_t *)startPC + linkInfo->getReservedWord());
 
    // Trampoline Code:
    // IIHF rEP addr
@@ -1104,7 +1199,7 @@ bool s390zOS64CodePatching(void *method, void *callSite, void *currentPC, void *
    // The location of the callsite.
    uint8_t        *patchAddress = (uint8_t *)callSite;
    // Distance between the call site and branch target.
-   intptrj_t      distance = (intptrj_t)entryAddress - (intptrj_t)patchAddress - CALL_INSTR_LENGTH;
+   intptr_t      distance = (intptr_t)entryAddress - (intptr_t)patchAddress - CALL_INSTR_LENGTH;
    // Current Displacement of call site instruction
    int32_t        currentDistance = *(int32_t *)(patchAddress + 2);
 
@@ -1114,7 +1209,7 @@ bool s390zOS64CodePatching(void *method, void *callSite, void *currentPC, void *
    fprintf(stderr, "Checking Trampoline: Distance - %ld\n",distance);
    #endif
 
-   //#define CHECK_32BIT_TRAMPOLINE_RANGE(x,rip)  (((intptrj_t)(x) == (intptrj_t)(rip) + (int32_t)((intptrj_t)(x) - (intptrj_t)(rip))) && (x % 2 == 0))
+   //#define CHECK_32BIT_TRAMPOLINE_RANGE(x,rip)  (((intptr_t)(x) == (intptr_t)(rip) + (int32_t)((intptr_t)(x) - (intptr_t)(rip))) && (x % 2 == 0))
 
    // call instruction should be BASRL rRA,Imm  with immediate field aligned.
    if (TR::Options::getCmdLineOptions()->getOption(TR_StressTrampolines) || !CHECK_32BIT_TRAMPOLINE_RANGE(distance,0))
@@ -1142,7 +1237,7 @@ bool s390zOS64CodePatching(void *method, void *callSite, void *currentPC, void *
             // Patch the existing trampoline.
             // Should not require Self-loops in patching since trampolines addresses
             // should be aligned by 8-bytes, and STG is atomic.
-            _Store8((intptrj_t *)((uint32_t *)currentTramp + 4), (intptrj_t)entryAddress);
+            _Store8((intptr_t *)((uint32_t *)currentTramp + 4), (intptr_t)entryAddress);
             }
          }
       }
@@ -1217,7 +1312,7 @@ void s390zLinux31CodeCacheParameters(int32_t *trampolineSize, void **callBacks, 
 
 // Atomic Storage of a 4 byte value - Picbuilder.m4
 extern "C" void _Store4(int32_t * addr, uint32_t newData);
-extern "C" void _Store8(intptrj_t * addr, uintptrj_t newData);
+extern "C" void _Store8(intptr_t * addr, uintptr_t newData);
 
 // zLinux64 Configuration of Code Cache.
 void s390zLinux64CodeCacheConfig(int32_t ccSizeInByte, int32_t *numTempTrampolines)
@@ -1239,7 +1334,7 @@ void s390zLinux64CreateHelperTrampoline(void *trampPtr, int32_t numHelpers)
       {
 
       // Get the helper address
-      intptrj_t helperAddr = (intptrj_t)runtimeHelperValue((TR_RuntimeHelper)i);
+      intptr_t helperAddr = (intptr_t)runtimeHelperValue((TR_RuntimeHelper)i);
 
       // Skip the first trampoline for index 0
       bufferStart += TRAMPOLINE_SIZE;
@@ -1284,7 +1379,7 @@ void s390zLinux64CreateMethodTrampoline(void *trampPtr, void *startPC, void *met
    // Get the Entry Pointer (should be r4 for zLinux64).
    uint16_t rEP = 4;  // Joran TODO: useEPRegNum instead.
    J9::PrivateLinkage::LinkageInfo *linkInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
-   intptrj_t dispatcher = (intptrj_t)((uint8_t *) startPC + linkInfo->getReservedWord());
+   intptr_t dispatcher = (intptr_t)((uint8_t *) startPC + linkInfo->getReservedWord());
 
    //Alternative Trampoline code
    // IIHF rEP addr
@@ -1320,7 +1415,7 @@ bool s390zLinux64CodePatching (void *method, void *callSite, void *currentPC, vo
    // The location of the callsite.
    uint8_t        *patchAddress = (uint8_t *)callSite;
    // Distance between the call site and branch target.
-   intptrj_t      distance = (intptrj_t)entryAddress - (intptrj_t)patchAddress - CALL_INSTR_LENGTH;
+   intptr_t      distance = (intptr_t)entryAddress - (intptr_t)patchAddress - CALL_INSTR_LENGTH;
    // Current Displacement of call site instruction
    int32_t        currentDistance = *(int32_t *)(patchAddress + 2);
 
@@ -1330,7 +1425,7 @@ bool s390zLinux64CodePatching (void *method, void *callSite, void *currentPC, vo
    fprintf(stderr, "Checking Trampoline: Distance - %ld\n",distance);
 #endif
 
-//#define CHECK_32BIT_TRAMPOLINE_RANGE(x,rip)  (((intptrj_t)(x) == (intptrj_t)(rip) + (int32_t)((intptrj_t)(x) - (intptrj_t)(rip))) && (x % 2 == 0))
+//#define CHECK_32BIT_TRAMPOLINE_RANGE(x,rip)  (((intptr_t)(x) == (intptr_t)(rip) + (int32_t)((intptr_t)(x) - (intptr_t)(rip))) && (x % 2 == 0))
 
    // call instruction should be BASRL rRA,Imm  with immediate field aligned.
    if (TR::Options::getCmdLineOptions()->getOption(TR_StressTrampolines) || !CHECK_32BIT_TRAMPOLINE_RANGE(distance,0))
@@ -1357,7 +1452,7 @@ bool s390zLinux64CodePatching (void *method, void *callSite, void *currentPC, vo
             {  // Patch the existing trampoline.
             // Should not require Self-loops in patching since trampolines addresses
             // should be aligned by 8-bytes, and STG is atomic.
-            _Store8((intptrj_t *)((uint32_t *)currentTramp + 4),(intptrj_t)entryAddress);
+            _Store8((intptr_t *)((uint32_t *)currentTramp + 4),(intptr_t)entryAddress);
             }
          }
       }

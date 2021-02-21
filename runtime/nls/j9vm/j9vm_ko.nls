@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000, 2019 IBM Corp. and others
+# Copyright (c) 2000, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -970,7 +970,7 @@ J9NLS_VM_XSCDMX_IGNORED.system_action=-Xscdmx will be ignored.
 J9NLS_VM_XSCDMX_IGNORED.user_response=Ignore this message, remove -Xscdmx, or enable -Xshareclasses.
 # END NON-TRANSLATABLE
 
-# Help text for the -Xlog option. Note: please do not translate the text of the option flags: help, all, none, warn, error, info, config, vital
+# Help text for the -Xsyslog option. Note: please do not translate the text of the option flags: help, all, none, warn, error, info, config, vital
 J9NLS_VM_XLOG_HELP01=\n\uc0ac\uc6a9\ubc95:\n
 # START NON-TRANSLATABLE
 J9NLS_VM_XLOG_HELP01.explanation=NOTAG
@@ -978,64 +978,64 @@ J9NLS_VM_XLOG_HELP01.system_action=
 J9NLS_VM_XLOG_HELP01.user_response=
 # END NON-TRANSLATABLE
 
-# -Xlog:help is not translatable
-J9NLS_VM_XLOG_HELP02=  -Xlog:help            JVM -Xlog \ub3c4\uc6c0\ub9d0\uc744 \uc778\uc1c4\ud569\ub2c8\ub2e4.
+# -Xsyslog:help is not translatable
+J9NLS_VM_XLOG_HELP02=  -Xsyslog:help              JVM -Xsyslog \ub3c4\uc6c0\ub9d0\uc744 \uc778\uc1c4\ud569\ub2c8\ub2e4.
 # START NON-TRANSLATABLE
 J9NLS_VM_XLOG_HELP02.explanation=NOTAG
 J9NLS_VM_XLOG_HELP02.system_action=
 J9NLS_VM_XLOG_HELP02.user_response=
 # END NON-TRANSLATABLE
 
-# -Xlog:none is not translatable
-J9NLS_VM_XLOG_HELP03=  -Xlog:none            \uc138\ubd80\uc0ac\ud56d\uc744 \ube44\ub86f\ud558\uc5ec \uc774\uc804\uc5d0 \uc9c0\uc815\ub41c JVM \ub85c\uadf8 \uc635\uc158\uc744 \uc0ac\uc6a9 \uc548\ud568\uc73c\ub85c \uc124\uc815\ud569\ub2c8\ub2e4.
+# -Xsyslog:none is not translatable
+J9NLS_VM_XLOG_HELP03=  -Xsyslog:none              \uae30\ubcf8\uac12\uc744 \ud3ec\ud568\ud558\uc5ec \uc774\uc804\uc5d0 \uc9c0\uc815\ub41c JVM \ub85c\uadf8 \uc635\uc158\uc744 \uc0ac\uc6a9 \uc548\ud568\uc73c\ub85c \uc124\uc815\ud569\ub2c8\ub2e4.
 # START NON-TRANSLATABLE
 J9NLS_VM_XLOG_HELP03.explanation=NOTAG
 J9NLS_VM_XLOG_HELP03.system_action=
 J9NLS_VM_XLOG_HELP03.user_response=
 # END NON-TRANSLATABLE
 
-# -Xlog:all is not translatable
-J9NLS_VM_XLOG_HELP04=  -Xlog:all             \ubaa8\ub4e0 JVM \uba54\uc2dc\uc9c0\ub97c \ub85c\uadf8\ud569\ub2c8\ub2e4.
+# -Xsyslog:all is not translatable
+J9NLS_VM_XLOG_HELP04=  -Xsyslog:all               \ubaa8\ub4e0 JVM \uba54\uc2dc\uc9c0\ub97c \ub85c\uae45\ud569\ub2c8\ub2e4.
 # START NON-TRANSLATABLE
 J9NLS_VM_XLOG_HELP04.explanation=NOTAG
 J9NLS_VM_XLOG_HELP04.system_action=
 J9NLS_VM_XLOG_HELP04.user_response=
 # END NON-TRANSLATABLE
 
-# -Xlog:info is not translatable
-J9NLS_VM_XLOG_HELP05=  -Xlog:info            JVM \uc815\ubcf4 \uba54\uc2dc\uc9c0\ub97c \ub85c\uadf8\ud569\ub2c8\ub2e4.
+# -Xsyslog:info is not translatable
+J9NLS_VM_XLOG_HELP05=  -Xsyslog:info              JVM \uc815\ubcf4 \uba54\uc2dc\uc9c0\ub97c \ub85c\uae45\ud569\ub2c8\ub2e4.
 # START NON-TRANSLATABLE
 J9NLS_VM_XLOG_HELP05.explanation=NOTAG
 J9NLS_VM_XLOG_HELP05.system_action=
 J9NLS_VM_XLOG_HELP05.user_response=
 # END NON-TRANSLATABLE
 
-# -Xlog:warn is not translatable
-J9NLS_VM_XLOG_HELP06=  -Xlog:warn            JVM \uacbd\uace0 \uba54\uc2dc\uc9c0\ub97c \ub85c\uadf8\ud569\ub2c8\ub2e4.
+# -Xsyslog:warn is not translatable
+J9NLS_VM_XLOG_HELP06=  -Xsyslog:warn              JVM \uacbd\uace0 \uba54\uc2dc\uc9c0\ub97c \ub85c\uae45\ud569\ub2c8\ub2e4.
 # START NON-TRANSLATABLE
 J9NLS_VM_XLOG_HELP06.explanation=NOTAG
 J9NLS_VM_XLOG_HELP06.system_action=
 J9NLS_VM_XLOG_HELP06.user_response=
 # END NON-TRANSLATABLE
 
-# -Xlog:error is not translatable
-J9NLS_VM_XLOG_HELP07=  -Xlog:error           JVM \uc624\ub958 \uba54\uc2dc\uc9c0\ub97c \ub85c\uadf8\ud569\ub2c8\ub2e4. \uc774\ub294 \uae30\ubcf8\uc801\uc73c\ub85c \ucf1c\uc838 \uc788\uc2b5\ub2c8\ub2e4.
+# -Xsyslog:error is not translatable
+J9NLS_VM_XLOG_HELP07=  -Xsyslog:error             JVM \uc624\ub958 \uba54\uc2dc\uc9c0\ub97c \ub85c\uae45\ud569\ub2c8\ub2e4. \uc774\ub294 \uae30\ubcf8\uc801\uc73c\ub85c \ucf1c\uc838 \uc788\uc2b5\ub2c8\ub2e4.
 # START NON-TRANSLATABLE
 J9NLS_VM_XLOG_HELP07.explanation=NOTAG
 J9NLS_VM_XLOG_HELP07.system_action=
 J9NLS_VM_XLOG_HELP07.user_response=
 # END NON-TRANSLATABLE
 
-# -Xlog:vital is not translatable
-J9NLS_VM_XLOG_HELP08=  -Xlog:vital           JVM \ud544\uc218 \uba54\uc2dc\uc9c0\ub97c \ub85c\uadf8\ud569\ub2c8\ub2e4. \uc774\ub294 \uae30\ubcf8\uc801\uc73c\ub85c \ucf1c\uc838 \uc788\uc2b5\ub2c8\ub2e4.
+# -Xsyslog:vital is not translatable
+J9NLS_VM_XLOG_HELP08=  -Xsyslog:vital             JVM \uc911\uc694 \uba54\uc2dc\uc9c0\ub97c \ub85c\uae45\ud569\ub2c8\ub2e4. \uc774\ub294 \uae30\ubcf8\uc801\uc73c\ub85c \ucf1c\uc838 \uc788\uc2b5\ub2c8\ub2e4.
 # START NON-TRANSLATABLE
 J9NLS_VM_XLOG_HELP08.explanation=NOTAG
 J9NLS_VM_XLOG_HELP08.system_action=
 J9NLS_VM_XLOG_HELP08.user_response=
 # END NON-TRANSLATABLE
 
-# -Xlog:config is not translatable
-J9NLS_VM_XLOG_HELP09=  -Xlog:config          JVM \uad6c\uc131 \uba54\uc2dc\uc9c0\ub97c \ub85c\uadf8\ud569\ub2c8\ub2e4. \n
+# -Xsyslog:config is not translatable
+J9NLS_VM_XLOG_HELP09=  -Xsyslog:config            JVM \uad6c\uc131 \uba54\uc2dc\uc9c0\ub97c \ub85c\uae45\ud569\ub2c8\ub2e4.\n
 # START NON-TRANSLATABLE
 J9NLS_VM_XLOG_HELP09.explanation=NOTAG
 J9NLS_VM_XLOG_HELP09.system_action=
@@ -1050,16 +1050,16 @@ J9NLS_VM_XLOG_HELP10.system_action=
 J9NLS_VM_XLOG_HELP10.user_response=
 # END NON-TRANSLATABLE
 
-# -Xlog:error,warn is not translatable
-J9NLS_VM_XLOG_HELP11=  -Xlog:error,warn
+# -Xsyslog:error,warn is not translatable
+J9NLS_VM_XLOG_HELP11=  -Xsyslog:error,warn
 # START NON-TRANSLATABLE
 J9NLS_VM_XLOG_HELP11.explanation=NOTAG
 J9NLS_VM_XLOG_HELP11.system_action=
 J9NLS_VM_XLOG_HELP11.user_response=
 # END NON-TRANSLATABLE
 
-# -Xlog:info,warn,error is not translatable
-J9NLS_VM_XLOG_HELP12=  -Xlog:info,warn,error\n
+# -Xsyslog:info,warn,error is not translatable
+J9NLS_VM_XLOG_HELP12=  -Xsyslog:info,warn,error\n
 # START NON-TRANSLATABLE
 J9NLS_VM_XLOG_HELP12.explanation=NOTAG
 J9NLS_VM_XLOG_HELP12.system_action=
@@ -1938,4 +1938,75 @@ J9NLS_VM_XVERIFYNONE_DEPRECATED=-Xverify:none \ubc0f -noverify\ub294 \uc81c\uac7
 J9NLS_VM_XVERIFYNONE_DEPRECATED.explanation=Since Java 13 -Xverify:none and -noverify were deprecated for removal and may not be accepted options in the future.
 J9NLS_VM_XVERIFYNONE_DEPRECATED.system_action=The JVM will show a warning and continue to recognize the options.
 J9NLS_VM_XVERIFYNONE_DEPRECATED.user_response=Consider not using these options as they will likely be removed in a future release.
+# END NON-TRANSLATABLE
+
+# Message for failed validation of class relationships for a particular class
+# Arguments 1 and 2 are the child class name
+# Arguments 3 and 4 are the parent class name
+J9NLS_VM_CLASS_RELATIONSHIP_INVALID=\ud558\uc704: %2$.*1$s, \uc0c1\uc704: %4$.*3$s\uc5d0 \ub300\ud574 \uc62c\ubc14\ub974\uc9c0 \uc54a\uc740 \ud074\ub798\uc2a4 \ub85c\ub4dc \uad00\uacc4
+# START NON-TRANSLATABLE
+J9NLS_VM_CLASS_RELATIONSHIP_INVALID.sample_input_1=10
+J9NLS_VM_CLASS_RELATIONSHIP_INVALID.sample_input_2=ChildClassName
+J9NLS_VM_CLASS_RELATIONSHIP_INVALID.sample_input_3=11
+J9NLS_VM_CLASS_RELATIONSHIP_INVALID.sample_input_4=ParentClassName
+J9NLS_VM_CLASS_RELATIONSHIP_INVALID.explanation=The specified child class fails verification since it has an invalid class relationship.
+J9NLS_VM_CLASS_RELATIONSHIP_INVALID.system_action=The JVM will throw a java/lang/VerifyError.
+J9NLS_VM_CLASS_RELATIONSHIP_INVALID.user_response=Ensure that all class relationships are valid.
+# END NON-TRANSLATABLE
+
+# No arguments
+J9NLS_VM_PACKAGES_IS_NULL=\ud328\ud0a4\uc9c0 \ubc30\uc5f4\uc774 \ub110\uc785\ub2c8\ub2e4.
+# START NON-TRANSLATABLE
+J9NLS_VM_PACKAGES_IS_NULL.explanation=Incoming package array can't be NULL.
+J9NLS_VM_PACKAGES_IS_NULL.system_action=The JVM will throw a java/lang/NullPointerException.
+J9NLS_VM_PACKAGES_IS_NULL.user_response=Don't pass a NULL package array.
+# END NON-TRANSLATABLE
+
+# No arguments
+J9NLS_VM_PACKAGE_IS_NULL=\ud328\ud0a4\uc9c0 \ubb38\uc790\uc5f4\uc774 \ub110\uc785\ub2c8\ub2e4.
+# START NON-TRANSLATABLE
+J9NLS_VM_PACKAGE_IS_NULL.explanation=Incoming package String can't be NULL.
+J9NLS_VM_PACKAGE_IS_NULL.system_action=The JVM will throw a java/lang/NullPointerException.
+J9NLS_VM_PACKAGE_IS_NULL.user_response=Don't pass a NULL package String.
+# END NON-TRANSLATABLE
+
+# Message to use when two incompatible options are used together
+# Arguments 1 and 2 are the incompatible command line options
+J9NLS_VM_INCOMPATIBLE_CMDLINE_OPTIONS_ERROR=%1$s\uc740(\ub294) %2$s\uacfc(\uc640) \ud568\uaed8 \uc0ac\uc6a9\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.
+# START NON-TRANSLATABLE
+J9NLS_VM_INCOMPATIBLE_CMDLINE_OPTIONS_ERROR.sample_input_1=-XX:+HandleSIGABRT
+J9NLS_VM_INCOMPATIBLE_CMDLINE_OPTIONS_ERROR.sample_input_2=-Xrs
+J9NLS_VM_INCOMPATIBLE_CMDLINE_OPTIONS_ERROR.explanation=The two command line options are incompatible. Please refer to their documentation.
+J9NLS_VM_INCOMPATIBLE_CMDLINE_OPTIONS_ERROR.system_action=The JVM will terminate while processing the command line options.
+J9NLS_VM_INCOMPATIBLE_CMDLINE_OPTIONS_ERROR.user_response=Remove one of the incompatible command line options in order to resolve the issue.
+# END NON-TRANSLATABLE
+
+# Message to use when class is not permitted in PermittedSubclasses attribute of sealed super class
+# argument 1 is the class name
+J9NLS_VM_CLASS_LOADING_ERROR_CLASS_NOT_PERMITTED_BY_SEALEDCLASS=%2$.*1$s \ud074\ub798\uc2a4\ub294 \ubd09\uc778\ub41c \uc218\ud37c\ud074\ub798\uc2a4\uc5d0\uc11c \uc0c1\uc18d\ud558\ub3c4\ub85d \ud5c8\uc6a9\ub418\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.
+# START NON-TRANSLATABLE
+J9NLS_VM_CLASS_LOADING_ERROR_CLASS_NOT_PERMITTED_BY_SEALEDCLASS.explanation=The specified class is not permitted to extend its sealed super class.
+J9NLS_VM_CLASS_LOADING_ERROR_CLASS_NOT_PERMITTED_BY_SEALEDCLASS.system_action=The JVM will throw an IncompatibleClassChangeError.
+J9NLS_VM_CLASS_LOADING_ERROR_CLASS_NOT_PERMITTED_BY_SEALEDCLASS.user_response=Contact the provider of the classfile for a corrected version.
+# END NON-TRANSLATABLE
+
+# Message to use when class is not permitted in PermittedSubclasses attribute of sealed super interface
+# argument 1 is the class name,
+J9NLS_VM_CLASS_LOADING_ERROR_CLASS_NOT_PERMITTED_BY_SEALEDINTERFACE=%2$.*1$s \ud074\ub798\uc2a4\ub294 \ubd09\uc778\ub41c \uc218\ud37c\uc778\ud130\ud398\uc774\uc2a4\uc5d0\uc11c \uc0c1\uc18d\ud558\ub3c4\ub85d \ud5c8\uc6a9\ub418\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.
+# START NON-TRANSLATABLE
+J9NLS_VM_CLASS_LOADING_ERROR_CLASS_NOT_PERMITTED_BY_SEALEDINTERFACE.explanation=The specified class is not permitted to extend its sealed super interface.
+J9NLS_VM_CLASS_LOADING_ERROR_CLASS_NOT_PERMITTED_BY_SEALEDINTERFACE.system_action=The JVM will throw an IncompatibleClassChangeError.
+J9NLS_VM_CLASS_LOADING_ERROR_CLASS_NOT_PERMITTED_BY_SEALEDINTERFACE.user_response=Contact the provider of the classfile for a corrected version.
+# END NON-TRANSLATABLE
+
+# Message for an improper attempt to synchronize on an instance of value-based class.
+# argument 1 is the length of the class name
+# argument 2 is the string of the class name
+J9NLS_VM_ERROR_BYTECODE_OBJECTREF_CANNOT_BE_VALUE_BASED=\uc798\ubabb\ub41c \uc624\ube0c\uc81d\ud2b8 \uc720\ud615 %2$.*1$s: \ub3d9\uae30\ud654\ub41c \uc624\ube0c\uc81d\ud2b8\uac00 \uac12 \uae30\ubc18\uc785\ub2c8\ub2e4.
+# START NON-TRANSLATABLE
+J9NLS_VM_ERROR_BYTECODE_OBJECTREF_CANNOT_BE_VALUE_BASED.sample_input_1=3
+J9NLS_VM_ERROR_BYTECODE_OBJECTREF_CANNOT_BE_VALUE_BASED.sample_input_2=Foo
+J9NLS_VM_ERROR_BYTECODE_OBJECTREF_CANNOT_BE_VALUE_BASED.explanation=The class has specified the bytecode monitorenter or monitorexit operation which cannot be performed on a value-based class but the object on stack is an instance of value-based class.
+J9NLS_VM_ERROR_BYTECODE_OBJECTREF_CANNOT_BE_VALUE_BASED.system_action=The JVM will throw an VirtualMachineError.
+J9NLS_VM_ERROR_BYTECODE_OBJECTREF_CANNOT_BE_VALUE_BASED.user_response=Contact the provider of the classfile for a corrected version.
 # END NON-TRANSLATABLE

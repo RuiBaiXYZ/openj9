@@ -1,4 +1,4 @@
-# Copyright (c) 1998, 2019 IBM Corp. and others
+# Copyright (c) 1998, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -309,14 +309,22 @@ LIBCDEFS := $(word 1,$(wildcard $(foreach d,$(TPF_ROOT),$d/base/lib/libCDEFSFORA
 %$(UMA_DOT_II): %.cpp
 	$(CXX) $(CXXFLAGS) -E -dDI -o $@ $<
 
+<#elseif uma.spec.type.zos>
+
+<#if uma.spec.flags.opt_useOmrDdr.enabled>
+# Optimization is limited when using '-Wc,debug', but *.dbg files are required for DDR.
+# Compile C and C++ code twice: once with '-Wc,debug', and a second time without that option.
 </#if>
-<#if uma.spec.type.zos>
+
 # compilation rule for C files.
-%$(UMA_DOT_O): %.c
+%$(UMA_DOT_O) : %.c
+<#if uma.spec.flags.opt_useOmrDdr.enabled>
+	$(CC) $(CFLAGS) -Wc,debug -c -o $@ $< > /dev/null
+</#if>
 	$(CC) $(CFLAGS) -c -o $@ $< > $*.asmlist
 
 # compilation rule for metal-C files.
-%$(UMA_DOT_O): %.mc
+%$(UMA_DOT_O) : %.mc
 	cp $< $*.c
 	xlc $(MCFLAGS) -qnosearch -I /usr/include/metal/ -qmetal -qlongname -S -o $*.s $*.c > $*.asmlist
 	rm -f $*.c
@@ -324,9 +332,12 @@ LIBCDEFS := $(word 1,$(wildcard $(foreach d,$(TPF_ROOT),$d/base/lib/libCDEFSFORA
 	rm -f $*.s
 
 # compilation rule for C++ files.
-%$(UMA_DOT_O): %.cpp
-	$(CXX) $(CXXFLAGS) -c $< > $*.asmlist
-<#elseif !uma.spec.type.ztpf>
+%$(UMA_DOT_O) : %.cpp
+<#if uma.spec.flags.opt_useOmrDdr.enabled>
+	$(CXX) $(CXXFLAGS) -Wc,debug -c -o $@ $< > /dev/null
+</#if>
+	$(CXX) $(CXXFLAGS) -c -o $@ $< > $*.asmlist
+<#else>
 
 # compilation rule for C files.
 %$(UMA_DOT_O): %.c
@@ -355,8 +366,14 @@ DDR_SED_COMMAND := \
 
 DDR_NOLIST := <#if uma.spec.type.zos>-Wc,noconvlit -Wc,nolist,nooffset</#if>
 
+# On z/OS, also suppress these C preprocessor errors:
+# - CCN3211 Parameter list must be empty, or consist of one or more identifiers separated by commas.
+# - CCN3766 The universal character name "0x**" is not in the allowable range for an identifier.
+
+DDR_C_SUPPRESS := <#if uma.spec.type.zos>-qsuppress=CCN3211:CCN3766</#if>
+
 %.i : %.c
-	$(CC) $(CFLAGS) $(DDR_NOLIST) -E $< | $(DDR_SED_COMMAND) > $@
+	$(CC) $(CFLAGS) $(DDR_NOLIST) $(DDR_C_SUPPRESS) -E $< | $(DDR_SED_COMMAND) > $@
 
 %.i : %.cpp
 	$(CXX) $(CXXFLAGS) $(DDR_NOLIST) -E $< | $(DDR_SED_COMMAND) > $@
@@ -520,14 +537,23 @@ CLANG_CXXFLAGS+=-std=c++0x -D_CRT_SUPPRESS_RESTRICT -DVS12AndHigher
 	CLANG_CXXFLAGS+=-D_M_X64
 </#if>
 endif
-# special handling BytecodeInterpreter.cpp and DebugBytecodeInterpreter.cpp
-BytecodeInterpreter$(UMA_DOT_O):BytecodeInterpreter.cpp
+# special handling MHInterpreterFull.cpp, MHInterpreterCompressed.cpp, BytecodeInterpreterFull.cpp, BytecodeInterpreterCompressed.cpp, DebugBytecodeInterpreterFull.cpp and DebugBytecodeInterpreterCompressed.cpp
+BytecodeInterpreterFull$(UMA_DOT_O):BytecodeInterpreterFull.cpp
 	$(CLANG_CXX) $(CLANG_CXXFLAGS) -c $< -o $@
 
-DebugBytecodeInterpreter$(UMA_DOT_O):DebugBytecodeInterpreter.cpp
+BytecodeInterpreterCompressed$(UMA_DOT_O):BytecodeInterpreterCompressed.cpp
 	$(CLANG_CXX) $(CLANG_CXXFLAGS) -c $< -o $@
 
-MHInterpreter$(UMA_DOT_O):MHInterpreter.cpp
+DebugBytecodeInterpreterFull$(UMA_DOT_O):DebugBytecodeInterpreterFull.cpp
+	$(CLANG_CXX) $(CLANG_CXXFLAGS) -c $< -o $@
+
+DebugBytecodeInterpreterCompressed$(UMA_DOT_O):DebugBytecodeInterpreterCompressed.cpp
+	$(CLANG_CXX) $(CLANG_CXXFLAGS) -c $< -o $@
+
+MHInterpreterFull$(UMA_DOT_O):MHInterpreterFull.cpp
+	$(CLANG_CXX) $(CLANG_CXXFLAGS) -c $< -o $@
+
+MHInterpreterCompressed$(UMA_DOT_O):MHInterpreterCompressed.cpp
 	$(CLANG_CXX) $(CLANG_CXXFLAGS) -c $< -o $@
 
 endif
@@ -548,7 +574,7 @@ SharedService$(UMA_DOT_O):SharedService.c
 
 <#if uma.spec.processor.ppc>
 ifndef USE_PPC_GCC
-# special handling BytecodeInterpreter.cpp and DebugBytecodeInterpreter.cpp
+# special handling BytecodeInterpreterFull.cpp, BytecodeInterpreterCompressed.cpp, DebugBytecodeInterpreterFull.cpp and DebugBytecodeInterpreterCompressed.cpp
 FLAGS_TO_REMOVE += -O3
 NEW_OPTIMIZATION_FLAG=-O2 -qdebug=lincomm:ptranl:tfbagg
 <#if uma.spec.type.linux>
@@ -557,13 +583,22 @@ NEW_OPTIMIZATION_FLAG+=-qmaxmem=-1 -qpic
 </#if>
 SPECIALCXXFLAGS=$(filter-out $(FLAGS_TO_REMOVE),$(CXXFLAGS))
 
-BytecodeInterpreter$(UMA_DOT_O):BytecodeInterpreter.cpp
+BytecodeInterpreterFull$(UMA_DOT_O):BytecodeInterpreterFull.cpp
 	$(CXX) $(SPECIALCXXFLAGS) $(NEW_OPTIMIZATION_FLAG) -c $<
 
-DebugBytecodeInterpreter$(UMA_DOT_O):DebugBytecodeInterpreter.cpp
+BytecodeInterpreterCompressed$(UMA_DOT_O):BytecodeInterpreterCompressed.cpp
 	$(CXX) $(SPECIALCXXFLAGS) $(NEW_OPTIMIZATION_FLAG) -c $<
 
-MHInterpreter$(UMA_DOT_O):MHInterpreter.cpp
+DebugBytecodeInterpreterFull$(UMA_DOT_O):DebugBytecodeInterpreterFull.cpp
+	$(CXX) $(SPECIALCXXFLAGS) $(NEW_OPTIMIZATION_FLAG) -c $<
+
+DebugBytecodeInterpreterCompressed$(UMA_DOT_O):DebugBytecodeInterpreterCompressed.cpp
+	$(CXX) $(SPECIALCXXFLAGS) $(NEW_OPTIMIZATION_FLAG) -c $<
+
+MHInterpreterFull$(UMA_DOT_O):MHInterpreterFull.cpp
+	$(CXX) $(SPECIALCXXFLAGS) $(NEW_OPTIMIZATION_FLAG) -c $<
+
+MHInterpreterCompressed$(UMA_DOT_O):MHInterpreterCompressed.cpp
 	$(CXX) $(SPECIALCXXFLAGS) $(NEW_OPTIMIZATION_FLAG) -c $<
 
 endif

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -97,9 +97,6 @@ SH_ClasspathManagerImpl2::CpLinkedListImpl::initialize(I_16 CPEIndex_, const Shc
 	 * synchronization.
 	 */
 	_next = this;
-#if defined(J9SHR_CACHELET_SUPPORT)
-	_cachelet = cachelet_;
-#endif
 
 	Trc_SHR_CMI_CpLinkedListImpl_initialize_Exit();
 }
@@ -563,22 +560,9 @@ SH_ClasspathManagerImpl2::cpeTableLookup(J9VMThread* currentThread, const char* 
 	Trc_SHR_CMI_cpeTableLookup_Entry(currentThread, keySize, key, isToken);
 
 	if (lockHashTable(currentThread, "cpeTableLookup")) {
-
-#if defined(J9SHR_CACHELET_SUPPORT)
-		if (_isRunningNested) {
-			UDATA hint = cpeHashFn(&dummy, currentThread->javaVM->internalVMFunctions);
-			
-			if (startupHintCachelets(currentThread, hint) == -1) {
-				goto exit_lockFailed;
-			}
-		}
-#endif
 		returnVal = cpeTableLookupHelper(currentThread, &dummy);
 		unlockHashTable(currentThread, "cpeTableLookup");
 	} else {
-#if defined(J9SHR_CACHELET_SUPPORT)
-exit_lockFailed:
-#endif
 		PORT_ACCESS_FROM_PORT(_portlib);
 		M_ERR_TRACE(J9NLS_SHRC_CMI_FAILED_ENTER_CPEMUTEX);
 		Trc_SHR_CMI_cpeTableLookup_Exit1(currentThread, MONITOR_ENTER_RETRY_TIMES);
@@ -705,24 +689,24 @@ SH_ClasspathManagerImpl2::localUpdate_FindIdentified(J9VMThread* currentThread, 
  * Associates a classpath in the cache with a classpath from a local classloader by adding it to the identified array.
  * Note that since the modified context does not change for a single JVM, it is irrelevant to classpath cacheing.
  * Returns 0 if ok or -1 for failure.
+ * 
+ * Caller must hold _identifiedMutex.
  */
 IDATA
 SH_ClasspathManagerImpl2::local_StoreIdentified(J9VMThread* currentThread, ClasspathItem* localCP, ClasspathWrapper* cpInCache) 
 {
 	Trc_SHR_CMI_local_StoreIdentified_Entry(currentThread, localCP, cpInCache);
+	Trc_SHR_Assert_ShouldHaveLocalMutex(_identifiedMutex);
 
-	if (_cache->enterLocalMutex(currentThread, _identifiedMutex, "identifiedMutex", "local_StoreIdentified")==0) {
-		if (testForClasspathReset(currentThread)) {
-			setIdentifiedClasspath(currentThread, &_identifiedClasspaths, localCP->getHelperID(), localCP->getItemsAdded(), NULL, 0, cpInCache);
-		}
-		_cache->exitLocalMutex(currentThread, _identifiedMutex, "identifiedMutex", "local_StoreIdentified");
-		if ((_identifiedClasspaths == NULL) || (_identifiedClasspaths->size == 0)) {
-			/* Now that we can choose to make the identified array NULL if we exceed a number of classpaths, this is no longer an error condition */
-			/* CMI_ERR_TRACE(J9NLS_SHRC_CMI_FAILED_CREATE_IDCPARRAY); */
-			*_runtimeFlagsPtr &= ~J9SHR_RUNTIMEFLAG_ENABLE_LOCAL_CACHEING;
-			Trc_SHR_CMI_local_StoreIdentified_Exit1(currentThread);
-			return -1;
-		}
+	if (testForClasspathReset(currentThread)) {
+		setIdentifiedClasspath(currentThread, &_identifiedClasspaths, localCP->getHelperID(), localCP->getItemsAdded(), NULL, 0, cpInCache);
+	}
+	if ((_identifiedClasspaths == NULL) || (_identifiedClasspaths->size == 0)) {
+		/* Now that we can choose to make the identified array NULL if we exceed a number of classpaths, this is no longer an error condition */
+		/* CMI_ERR_TRACE(J9NLS_SHRC_CMI_FAILED_CREATE_IDCPARRAY); */
+		*_runtimeFlagsPtr &= ~J9SHR_RUNTIMEFLAG_ENABLE_LOCAL_CACHEING;
+		Trc_SHR_CMI_local_StoreIdentified_Exit1(currentThread);
+		return -1;
 	}
 
 	Trc_SHR_CMI_local_StoreIdentified_Exit2(currentThread);
@@ -773,7 +757,7 @@ SH_ClasspathManagerImpl2::localUpdate_CheckManually(J9VMThread* currentThread, C
  * @warning Must always be called with write mutex held
  * param[in] currentThread The current thread
  * param[in] localCP The ClasspathItem from the caller classloader
- * param[in] cpeIndex The index in localCP that that ROMClass was loaded from
+ * param[in] cpeIndex The index in localCP that ROMClass was loaded from
  * param[out] foundCP A ClasspathItem in the cache that exactly matches localCP and has been proved non-stale
  *
  * @return 0 for success, non-zero for failure
@@ -831,9 +815,16 @@ SH_ClasspathManagerImpl2::update(J9VMThread* currentThread, ClasspathItem* local
 
 	/* If we found the classpath in the cache, it wasn't stale and it hasn't already been identified, add it to the identified array */
 	if ((*foundCP && !foundIdentified) && (localCP->getType()==CP_TYPE_CLASSPATH) && (*_runtimeFlagsPtr & J9SHR_RUNTIMEFLAG_ENABLE_LOCAL_CACHEING)) {
-		if (local_StoreIdentified(currentThread, localCP, *foundCP)==-1) {
-			Trc_SHR_CMI_Update_Exit1(currentThread);
-			return -1;		/* Error already reported */
+		if (0 == _cache->enterLocalMutex(currentThread, _identifiedMutex, "identifiedMutex", "update")) {
+			if (local_StoreIdentified(currentThread, localCP, *foundCP)==-1) {
+				Trc_SHR_CMI_Update_Exit1(currentThread);
+				_cache->exitLocalMutex(currentThread, _identifiedMutex, "identifiedMutex", "update");
+				return -1;		/* Error already reported */
+			}
+			_cache->exitLocalMutex(currentThread, _identifiedMutex, "identifiedMutex", "update");
+		} else {
+			Trc_SHR_CMI_Update_Exit5(currentThread);
+			return -1;
 		}
 	}
 
@@ -845,6 +836,8 @@ SH_ClasspathManagerImpl2::update(J9VMThread* currentThread, ClasspathItem* local
  * Looks for identified classpath in identified array.
  * Note that since the modified context does not change for a single JVM, it is irrelevant to classpath cacheing.
  * Returns helperID of identified classpath if one is found. Else returns ID_NOT_FOUND.
+ * 
+ * Caller must hold _identifiedMutex.
  */
 IDATA
 SH_ClasspathManagerImpl2::localValidate_FindIdentified(J9VMThread* currentThread, ClasspathWrapper* cpInCache, IDATA walkFromID) 
@@ -852,14 +845,10 @@ SH_ClasspathManagerImpl2::localValidate_FindIdentified(J9VMThread* currentThread
 	IDATA identifiedID = ID_NOT_FOUND;
 
 	Trc_SHR_CMI_localValidate_FindIdentified_Entry(currentThread, cpInCache);
-
-	if (_cache->enterLocalMutex(currentThread, _identifiedMutex, "identifiedMutex", "localValidate_FindIdentified")==0) {
-		if (testForClasspathReset(currentThread)) {
-			identifiedID = getIDForIdentified(_portlib, _identifiedClasspaths, cpInCache, walkFromID);
-		}
-		_cache->exitLocalMutex(currentThread, _identifiedMutex, "identifiedMutex", "localValidate_FindIdentified");
-	} /* If monitor_enter fails, just do manual match */
-
+	Trc_SHR_Assert_ShouldHaveLocalMutex(_identifiedMutex);
+	if (testForClasspathReset(currentThread)) {
+		identifiedID = getIDForIdentified(_portlib, _identifiedClasspaths, cpInCache, walkFromID);
+	}
 	if (identifiedID==ID_NOT_FOUND) {
 		Trc_SHR_CMI_localValidate_FindIdentified_ExitNotFound(currentThread);
 	} else {
@@ -899,6 +888,7 @@ SH_ClasspathManagerImpl2::localValidate_CheckAndTimestampManually(J9VMThread* cu
 	if ((indexInCompare < 0) || (indexInCompare > testCPIndex)) {
 		if (!(foundIdentified & (ID_NOT_FOUND | ID_NOT_SET)) && (compareTo->getType()==CP_TYPE_CLASSPATH) && (*_runtimeFlagsPtr & J9SHR_RUNTIMEFLAG_ENABLE_LOCAL_CACHEING)) {
 			Trc_SHR_CMI_localValidate_CheckAndTimestampManually_RegisterFailed(currentThread);
+			Trc_SHR_Assert_ShouldHaveLocalMutex(_identifiedMutex);
 			registerFailedMatch(currentThread, _identifiedClasspaths, compareTo->getHelperID(), foundIdentified, testCPIndex, NULL, 0);
 		}
 		Trc_SHR_CMI_localValidate_CheckAndTimestampManually_Exit1(currentThread, indexInCompare);
@@ -978,6 +968,10 @@ SH_ClasspathManagerImpl2::localValidate_CheckAndTimestampManually(J9VMThread* cu
 				Bootstrap loader is always helperID==0 and it DOES lock its jars, so this is safe. */
 			if (rc == 1) {
 				Trc_SHR_CMI_localValidate_CheckAndTimestampManually_DetectedStaleCPEI(currentThread, foundItem);
+				if (_cache->getCompositeCacheAPI()->isRunningReadOnly()) {
+					/* If we're running in read-only mode, disable sharing for this local classpath as it's too expensive to keep checking */
+					compareTo->flags |= MARKED_STALE_FLAG;
+				}
 				if (!(*staleItem)) {
 					*staleItem = foundItem;
 				}
@@ -1029,6 +1023,7 @@ SH_ClasspathManagerImpl2::validate(J9VMThread* currentThread, ROMClassWrapper* f
 	ClasspathItem* testCPI = NULL;
 	I_16 localFoundAtIndex = -1;
 	bool addToIdentified = false;
+	bool releaseIdentifiedMutex = false;
 	IDATA result = -2;
 	IDATA foundIdentified = ID_NOT_SET;
 
@@ -1065,29 +1060,35 @@ SH_ClasspathManagerImpl2::validate(J9VMThread* currentThread, ROMClassWrapper* f
 		IDATA prevMatch = ID_NOT_FOUND;
 
 		foundIdentified = -1;
-
-		/* Multiple ClassLoaders could have the same classpath, so search until the matching helperID is found */
-		do {
-			if ((foundIdentified = localValidate_FindIdentified(currentThread, testCP, foundIdentified+1)) != ID_NOT_FOUND) {
-				prevMatch = foundIdentified;
-			}
-		} while ((foundIdentified != ID_NOT_FOUND) && (foundIdentified != compareToID));
-
-		/* This means we have a positive match - testCP is the same classpath as that of the caller classloader */
-		if (foundIdentified==compareToID) {
-			localFoundAtIndex = testCPIndex;
-		} else {
-			/* At this point, foundIdentified will always be ID_NOT_FOUND. This means that testCP is not exactly the same classpath as the caller
-			 * classloader's, but we have identified it and it could still be a valid match. Test to see if we have tried this match before and failed it. */
-			foundIdentified = prevMatch;
-			if (foundIdentified != ID_NOT_FOUND) {
-				if (hasMatchFailedBefore(currentThread, _identifiedClasspaths, compareToID, foundIdentified, testCPIndex, NULL, 0)) {
-					/* trace event is at level 1 and trace exit message is at level 2 as per CMVC 155318/157683 */
-					Trc_SHR_CMI_validate_ExitFailedBefore_Event(currentThread, foundROMClass, compareTo, confirmedEntries);
-					Trc_SHR_CMI_validate_ExitFailedBefore(currentThread);
-					goto _done;
+		if (0 == _cache->enterLocalMutex(currentThread, _identifiedMutex, "identifiedMutex", "validate")) {
+			releaseIdentifiedMutex = true;
+			/* Multiple ClassLoaders could have the same classpath, so search until the matching helperID is found */
+			do {
+				if ((foundIdentified = localValidate_FindIdentified(currentThread, testCP, foundIdentified+1)) != ID_NOT_FOUND) {
+					prevMatch = foundIdentified;
+				}
+			} while ((foundIdentified != ID_NOT_FOUND) && (foundIdentified != compareToID));
+	
+			/* This means we have a positive match - testCP is the same classpath as that of the caller classloader */
+			if (foundIdentified==compareToID) {
+				localFoundAtIndex = testCPIndex;
+			} else {
+				/* At this point, foundIdentified will always be ID_NOT_FOUND. This means that testCP is not exactly the same classpath as the caller
+				 * classloader's, but we have identified it and it could still be a valid match. Test to see if we have tried this match before and failed it. */
+				foundIdentified = prevMatch;
+				if (foundIdentified != ID_NOT_FOUND) {
+					if (hasMatchFailedBefore(currentThread, _identifiedClasspaths, compareToID, foundIdentified, testCPIndex, NULL, 0)) {
+						/* trace event is at level 1 and trace exit message is at level 2 as per CMVC 155318/157683 */
+						Trc_SHR_CMI_validate_ExitFailedBefore_Event(currentThread, foundROMClass, compareTo, confirmedEntries);
+						Trc_SHR_CMI_validate_ExitFailedBefore(currentThread);
+						_cache->exitLocalMutex(currentThread, _identifiedMutex, "identifiedMutex", "validate");
+						goto _done;
+					}
 				}
 			}
+		} else {
+			Trc_SHR_CMI_validate_Exit_IdentifiedMutex_Failed(currentThread);
+			return -1;
 		}
 	}
 
@@ -1099,7 +1100,34 @@ SH_ClasspathManagerImpl2::validate(J9VMThread* currentThread, ROMClassWrapper* f
 	if (localFoundAtIndex == -1) {
 		/* We didn't find an exact classpath match. Walk the classpaths and check for validity. Note that the timestamp check is incorporated for efficiency. */
 		localFoundAtIndex = localValidate_CheckAndTimestampManually(currentThread, testCP, testCPIndex, compareTo, foundIdentified, &addToIdentified, staleItem);
+		/* If the classpath has just been identified by localValidate_CheckAndTimestampManually, store it in the identified array */
+		if (addToIdentified 
+			&& (CP_TYPE_CLASSPATH == compareTo->getType()) 
+			&& J9_ARE_ALL_BITS_SET(*_runtimeFlagsPtr, J9SHR_RUNTIMEFLAG_ENABLE_LOCAL_CACHEING)
+		) {
+			if (!releaseIdentifiedMutex) {
+				if (0 == _cache->enterLocalMutex(currentThread, _identifiedMutex, "identifiedMutex", "validate")) {
+					releaseIdentifiedMutex = true;
+				}
+			}
+			/* Identification succeeded. Store identified classpath. */
+			if (releaseIdentifiedMutex) {
+				if (-1 == local_StoreIdentified(currentThread, compareTo, testCP)) {
+					/* trace event is at level 1 and trace exit message is at level 2 as per CMVC 155318/157683  */
+					Trc_SHR_CMI_validate_ExitError_Event(currentThread, foundROMClass, compareTo, confirmedEntries);
+					Trc_SHR_CMI_validate_ExitError(currentThread);
+					_cache->exitLocalMutex(currentThread, _identifiedMutex, "identifiedMutex", "validate");
+					return -1;		/* Error already reported */
+				}
+			}
+		}
+		if (releaseIdentifiedMutex) {
+			_cache->exitLocalMutex(currentThread, _identifiedMutex, "identifiedMutex", "validate");
+		}
 	} else {
+		if (releaseIdentifiedMutex) {
+			_cache->exitLocalMutex(currentThread, _identifiedMutex, "identifiedMutex", "validate");
+		}
 		/* If we found an identified classpath, check timestamps on the entries from jarsLockedToIndex upto and including localFoundAtIndex */
 		if ((compareTo->getType()!=CP_TYPE_TOKEN) && (*_runtimeFlagsPtr & J9SHR_RUNTIMEFLAG_ENABLE_TIMESTAMP_CHECKS)) {
 			I_16 jarsLockedToIndex = compareTo->getJarsLockedToIndex();
@@ -1133,17 +1161,6 @@ SH_ClasspathManagerImpl2::validate(J9VMThread* currentThread, ROMClassWrapper* f
 				}
 			}
 			compareTo->setJarsLockedToIndex(jarsLockedToIndex);
-		}
-	}
-
-	/* If the classpath has just been identified by localValidate_CheckAndTimestampManually, store it in the identified array */
-	if (addToIdentified && (compareTo->getType()==CP_TYPE_CLASSPATH) && (*_runtimeFlagsPtr & J9SHR_RUNTIMEFLAG_ENABLE_LOCAL_CACHEING)) {
-		/* Identification succeeded. Store identified classpath. */
-		if (local_StoreIdentified(currentThread, compareTo, testCP)==-1) {
-			/* trace event is at level 1 and trace exit message is at level 2 as per CMVC 155318/157683  */
-			Trc_SHR_CMI_validate_ExitError_Event(currentThread, foundROMClass, compareTo, confirmedEntries);
-			Trc_SHR_CMI_validate_ExitError(currentThread);
-			return -1;		/* Error already reported */
 		}
 	}
 
@@ -1424,147 +1441,3 @@ SH_ClasspathManagerImpl2::getNumItemsByType(UDATA* numClasspaths, UDATA* numURLs
 	*numURLs = _urlCount;
 	*numTokens = _tokenCount;
 }
-
-#if defined(J9SHR_CACHELET_SUPPORT)
-
-/**
- * Walk the managed items hashtable in this cachelet. Allocate and populate an array
- * of hints, one for each hash entry.
- *
- * @param[in] self a data type manager
- * @param[in] vmthread the current VMThread
- * @param[out] hints a CacheletHints structure. This function fills in its
- * contents.
- *
- * @retval 0 success
- * @retval -1 failure
- */
-IDATA
-SH_ClasspathManagerImpl2::createHintsForCachelet(J9VMThread* vmthread, SH_CompositeCache* cachelet, CacheletHints* hints)
-{
-	Trc_SHR_Assert_True(hints != NULL);
-
-	/* hints->dataType should have been set by the caller */
-	Trc_SHR_Assert_True(hints->dataType == _dataTypesRepresented[0]);
-	
-	return cpeCollectHashes(vmthread, cachelet, hints);
-}
-
-/**
- * add a (_hashValue, cachelet) entry to the hash table
- * only called with hints of the right data type 
- *
- * each hint is a UDATA-length hash of a string
- * 
- * This method is not threadsafe.
- */
-IDATA
-SH_ClasspathManagerImpl2::primeHashtables(J9VMThread* vmthread, SH_CompositeCache* cachelet, U_8* hintsData, UDATA dataLength)
-{
-	UDATA* hashSlot = (UDATA*)hintsData;
-	UDATA hintCount = 0;
-
-	if ((dataLength == 0) || (hintsData == NULL)) {
-		return 0;
-	}
-
-	hintCount = dataLength / sizeof(UDATA);
-	while (hintCount-- > 0) {
-		Trc_SHR_CMI_primeHashtables_addingHint(vmthread, cachelet, *hashSlot);
-		if (!_hints.addHint(vmthread, *hashSlot, cachelet)) {
-			/* If we failed to finish priming the hints, just give up.
-			 * Stuff should still work, just suboptimally.
-			 */
-			Trc_SHR_CMI_primeHashtables_failedToPrimeHint(vmthread, this, cachelet, *hashSlot);
-			break;
-		}
-		++hashSlot;
-	}
-	
-	return 0;
-}
-
-/**
- * A hash table do function. Collect hash values of entries in a cachelet.
- */
-UDATA
-SH_ClasspathManagerImpl2::cpeCollectHashOfEntry(void* entry, void* userData)
-{
-	CpLinkedListHdr* node = (CpLinkedListHdr*)entry;
-	CpLinkedListImpl* item = node->_list;
-	CacheletHintHashData* data = (CacheletHintHashData*)userData;
-
-	if (item) {
-		do {
-			if (data->cachelet == item->_cachelet) {
-				*data->hashSlot++ = cpeHashFn(node, data->userData);
-				break;
-			}
-			item = (CpLinkedListImpl*)item->_next;
-		} while (item != node->_list);
-	}
-	return FALSE; /* don't remove entry */
-}
-
-/**
- * A hash table do function. Count number of entries in a cachelet.
- */
-UDATA
-SH_ClasspathManagerImpl2::cpeCountCacheletHashes(void* entry, void* userData)
-{
-	CpLinkedListHdr* node = (CpLinkedListHdr*)entry;
-	CpLinkedListImpl* item = node->_list;
-	CacheletHintCountData* data = (CacheletHintCountData*)userData;
-
-	if (item) {
-		do {
-			if (data->cachelet == item->_cachelet) {
-				data->hashCount++;
-				break;
-			}
-			item = (CpLinkedListImpl*)item->_next;
-		} while (item != node->_list);
-	}
-	return FALSE; /* don't remove entry */
-}
-
-/**
- * Collect the hash entry hashes into a cachelet hint.
- */
-IDATA
-SH_ClasspathManagerImpl2::cpeCollectHashes(J9VMThread* currentThread, SH_CompositeCache* cachelet, CacheletHints* hints)
-{
-	PORT_ACCESS_FROM_VMC(currentThread);
-	CacheletHintHashData hashes;
-	CacheletHintCountData counts;
-
-	/* count hashes in this cachelet */
-	counts.cachelet = cachelet;
-	counts.hashCount = 0;
-	hashTableForEachDo(_hashTable, cpeCountCacheletHashes, (void*)&counts);
-	/* TODO trace hints written. Note this runs after trace engine has shut down. */
-	
-	/* allocate hash array */
-	hints->length = counts.hashCount * sizeof(UDATA);
-	if (hints->length == 0) {
-		hints->data = NULL;
-		return 0;
-	}
-	hints->data = (U_8*)j9mem_allocate_memory(hints->length, J9MEM_CATEGORY_CLASSES);
-	if (!hints->data) {
-		/* TODO trace alloc failure */
-		hints->length = 0;
-		return -1;
-	}
-
-	/* collect hashes */
-	hashes.cachelet = cachelet;
-	hashes.hashSlot = (UDATA*)hints->data;
-	hashes.userData = (void*)currentThread->javaVM->internalVMFunctions;
-	hashTableForEachDo(_hashTable, cpeCollectHashOfEntry, (void*)&hashes);
-	/* TODO trace hints written */
-
-	return 0;
-}
-
-#endif /* J9SHR_CACHELET_SUPPORT */

@@ -1,5 +1,4 @@
-/*[INCLUDE-IF Sidecar18-SE-OpenJ9]*/
-
+/*[INCLUDE-IF Sidecar18-SE-OpenJ9 & !OPENJDK_METHODHANDLES]*/
 /*******************************************************************************
  * Copyright (c) 2017, 2020 IBM Corp. and others
  *
@@ -21,25 +20,23 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
-
 package java.lang.invoke;
 
-/*[IF Java14]*/
+/*[IF JAVA_SPEC_VERSION >= 11]*/
 import java.lang.reflect.Method;
-/*[ENDIF] Java14 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 
 /*
  * Stub class to compile OpenJDK j.l.i.MethodHandleImpl
  */
-
 final class MemberName {
 	/*[IF Sidecar18-SE-OpenJ9&!Sidecar19-SE-OpenJ9]*/
 	static final class Factory {
 		public static Factory INSTANCE = null;
 	}
 	/*[ENDIF]*/
-	
-	/*[IF Java11]*/
+
+	/*[IF JAVA_SPEC_VERSION >= 11]*/
 	private MethodHandle mh;
 
 	public MemberName() {
@@ -48,10 +45,8 @@ final class MemberName {
 	public MemberName(MethodHandle methodHandle) {
 		mh = methodHandle;
 	}
-	/*[ENDIF] Java11 */
 
-	/*[IF Java14]*/
-	Method method;
+	private Method method;
 
 	public MemberName(Method method) {
 		this.method = method;
@@ -60,7 +55,7 @@ final class MemberName {
 	public boolean isStatic() {
 		throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
 	}
-	/*[ENDIF] Java14 */
+	/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 
 	public boolean isVarargs() {
 		throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
@@ -85,19 +80,26 @@ final class MemberName {
 	public boolean isNative() {
 		throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
 	}
-	
-	/*[IF Java10]*/
+
+	/*[IF JAVA_SPEC_VERSION >= 11]*/
 	public MethodType getMethodType() {
-		throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
+		if (method != null) {
+			return MethodType.methodType(method.getReturnType(), method.getParameterTypes());
+		}
+		throw new UnsupportedOperationException("MemberName.method is null.");
 	}
-	
+
 	String getMethodDescriptor() {
 		throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
 	}
+
 	public Class<?> getDeclaringClass() {
-		throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
+		if (method != null) {
+			return method.getDeclaringClass();
+		}
+		throw new UnsupportedOperationException("MemberName.method is null.");
 	}
-	/*[IF Java11]*/
+
 	public boolean isFinal() {
 		if (mh instanceof FieldHandle) {
 			return ((FieldHandle)mh).isFinal();
@@ -105,6 +107,11 @@ final class MemberName {
 		/*[MSG "K0675", "Unexpected MethodHandle instance: {0} with {1}"]*/
 		throw new InternalError(com.ibm.oti.util.Msg.getString("K0675", mh, mh.getClass())); //$NON-NLS-1$
 	}
-	/*[ENDIF]*/
-	/*[ENDIF]*/
+	/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
+
+	/*[IF JAVA_SPEC_VERSION >= 15]*/
+	public byte getReferenceKind() {
+		throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
+	}
+	/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 }

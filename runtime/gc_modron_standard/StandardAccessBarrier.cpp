@@ -492,6 +492,10 @@ MM_StandardAccessBarrier::jniGetStringCritical(J9VMThread* vmThread, jstring str
 			isCompressed = true;
 			shouldCopy = true;
 		}
+	} else if (_extensions->isConcurrentScavengerEnabled()) {
+		/* reading value field from String object may trigger object movement */
+		VM_VMAccess::inlineEnterVMFromJNI(vmThread);
+		hasVMAccess = true;
 	}
 
 	if (shouldCopy) {
@@ -513,7 +517,7 @@ MM_StandardAccessBarrier::jniGetStringCritical(J9VMThread* vmThread, jstring str
 				jint i;
 				
 				for (i = 0; i < length; i++) {
-					data[i] = (jchar)J9JAVAARRAYOFBYTE_LOAD(vmThread, (j9object_t)valueObject, i) & (jchar)0xFF;
+					data[i] = (jchar)(U_8)J9JAVAARRAYOFBYTE_LOAD(vmThread, (j9object_t)valueObject, i);
 				}
 			} else {
 				if (J9_ARE_ANY_BITS_SET(javaVM->runtimeFlags, J9_RUNTIME_STRING_BYTE_ARRAY)) {
@@ -767,14 +771,14 @@ MM_StandardAccessBarrier::asConstantPoolObject(J9VMThread *vmThread, J9Object* t
 
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
 bool
-MM_StandardAccessBarrier::preMonitorTableSlotRead(J9VMThread *vmThread, j9object_t *srcAddress)
+MM_StandardAccessBarrier::preWeakRootSlotRead(J9VMThread *vmThread, j9object_t *srcAddress)
 {
 	omrobjectptr_t object = (omrobjectptr_t)*srcAddress;
 	bool const compressed = compressObjectReferences();
 
 	if ((NULL != _extensions->scavenger) && _extensions->scavenger->isObjectInEvacuateMemory(object)) {
 		MM_EnvironmentStandard *env = MM_EnvironmentStandard::getEnvironment(vmThread->omrVMThread);
-		Assert_MM_true(_extensions->scavenger->isConcurrentInProgress());
+		Assert_MM_true(_extensions->scavenger->isConcurrentCycleInProgress());
 		Assert_MM_true(_extensions->scavenger->isMutatorThreadInSyncWithCycle(env));
 
 		MM_ForwardedHeader forwardHeader(object, compressed);
@@ -797,13 +801,13 @@ MM_StandardAccessBarrier::preMonitorTableSlotRead(J9VMThread *vmThread, j9object
 }
 
 bool
-MM_StandardAccessBarrier::preMonitorTableSlotRead(J9JavaVM *vm, j9object_t *srcAddress)
+MM_StandardAccessBarrier::preWeakRootSlotRead(J9JavaVM *vm, j9object_t *srcAddress)
 {
 	omrobjectptr_t object = (omrobjectptr_t)*srcAddress;
 	bool const compressed = compressObjectReferences();
 
 	if ((NULL != _extensions->scavenger) && _extensions->scavenger->isObjectInEvacuateMemory(object)) {
-		Assert_MM_true(_extensions->scavenger->isConcurrentInProgress());
+		Assert_MM_true(_extensions->scavenger->isConcurrentCycleInProgress());
 
 		MM_ForwardedHeader forwardHeader(object, compressed);
 		omrobjectptr_t forwardPtr = forwardHeader.getForwardedObject();
@@ -829,7 +833,7 @@ MM_StandardAccessBarrier::preObjectRead(J9VMThread *vmThread, J9Class *srcClass,
 
 	if ((NULL != _extensions->scavenger) && _extensions->scavenger->isObjectInEvacuateMemory(object)) {
 		MM_EnvironmentStandard *env = MM_EnvironmentStandard::getEnvironment(vmThread->omrVMThread);
-		Assert_MM_true(_extensions->scavenger->isConcurrentInProgress());
+		Assert_MM_true(_extensions->scavenger->isConcurrentCycleInProgress());
 		Assert_MM_true(_extensions->scavenger->isMutatorThreadInSyncWithCycle(env));
 
 		MM_ForwardedHeader forwardHeader(object, compressed);
@@ -875,7 +879,7 @@ MM_StandardAccessBarrier::preObjectRead(J9VMThread *vmThread, J9Object *srcObjec
 		MM_EnvironmentStandard *env = MM_EnvironmentStandard::getEnvironment(vmThread->omrVMThread);
 		Assert_GC_true_with_message(env, !_extensions->scavenger->isObjectInEvacuateMemory((omrobjectptr_t)srcAddress) || _extensions->isScavengerBackOutFlagRaised(), "readObject %llx in Evacuate\n", srcAddress);
 		if (_extensions->scavenger->isObjectInEvacuateMemory(object)) {
-			Assert_GC_true_with_message2(env, _extensions->scavenger->isConcurrentInProgress(),
+			Assert_GC_true_with_message2(env, _extensions->scavenger->isConcurrentCycleInProgress(),
 					"CS not in progress, found a object in Survivor: slot %llx object %llx\n", srcAddress, object);
 			Assert_MM_true(_extensions->scavenger->isMutatorThreadInSyncWithCycle(env));
 			/* since object is still in evacuate, srcObject has not been scanned yet => we cannot assert

@@ -25,6 +25,7 @@ import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.Scanner;
+import java.util.ArrayList;
 import java.io.File;
 import java.io.IOException;
 import java.io.FileNotFoundException;
@@ -55,7 +56,7 @@ public class JITServerTest {
 		final String CLIENT_PROGRAM = System.getProperty("CLIENT_PROGRAM");
 		// -Xjit options may already be on the command line so add extra JIT options via TR_Options instead to avoid one overriding the other.
 		final String JIT_LOG_ENV_OPTION = "verbose={compileEnd|JITServer|heartbeat}";
-		final String JITSERVER_PORT_OPTION_FORMAT_STRING = "-XX:JITServerPort=%0$d";
+		final String JITSERVER_PORT_OPTION_FORMAT_STRING = "-XX:JITServerPort=%d";
 		// Most systems have a specified ephemeral ports range. We're not bothering to find the actual range, just choosing a range that is outside the reserved area, reasonably large, and well-behaved.
 		// The range chosen here is within the actual ephemeral range on recent Linux systems and others (at the time of writing).
 		final int EPHEMERAL_PORTS_START = 33000, EPHEMERAL_PORTS_LAST = 60000;
@@ -79,8 +80,15 @@ public class JITServerTest {
 			logger.info("Chose random port for server: " + randomPort + ", set " + SERVER_PORT_ENV_VAR_NAME + " in your env to override.");
 		}
 
-		clientBuilder = new ProcessBuilder(String.join(" ", CLIENT_EXE, "-XX:+UseJITServer", portOption, CLIENT_PROGRAM).split(" +"));
-		serverBuilder = new ProcessBuilder(String.join(" ", SERVER_EXE, portOption).split(" +"));
+		// This handy regex pattern uses positive lookahead to match a string containing either zero or an even number of " (double quote) characters.
+		// If a character is followed by this pattern it means that the character itself is not in a quoted string, otherwise it would be followed by
+		// an odd number of " characters. Note that this doesn't handle ' (single quote) characters.
+		final String QUOTES_LOOKAHEAD_PATTERN = "(?=([^\"]*\"[^\"]*\")*[^\"]*$)";
+		// We want to split the client program string on whitespace, unless the space appears in a quoted string.
+		final String SPLIT_ARGS_PATTERN = "\\s+" + QUOTES_LOOKAHEAD_PATTERN;
+		clientBuilder = new ProcessBuilder(stripQuotesFromEachArg(String.join(" ", CLIENT_EXE, "-XX:+UseJITServer", portOption, CLIENT_PROGRAM).split(SPLIT_ARGS_PATTERN)));
+		serverBuilder = new ProcessBuilder(stripQuotesFromEachArg(String.join(" ", SERVER_EXE, portOption).split(SPLIT_ARGS_PATTERN)));
+
 		// Redirect stderr to stdout, one log for each of the client and server is sufficient.
 		clientBuilder.redirectErrorStream(true);
 		serverBuilder.redirectErrorStream(true);
@@ -89,14 +97,23 @@ public class JITServerTest {
 		serverBuilder.environment().compute("TR_Options", (k, v) -> v != null && !v.isEmpty() ? String.join(",", v, JIT_LOG_ENV_OPTION) : JIT_LOG_ENV_OPTION);
 	}
 
+	private static String[] stripQuotesFromEachArg(String[] args) {
+		for (int i = 0; i < args.length; ++i) {
+			args[i] = args[i].replaceAll("\"", "");
+		}
+		return args;
+	}
+
 	private static void dumpProcessLog(final ProcessBuilder b) {
 		File log = b.redirectOutput().file();
 		try {
+			final String topAndBottom = "////////////////////////////////////////////////////////////////////////";
+			final String leftMargin = "//// ";
 			Scanner s = new Scanner(log);
-			System.err.println("Dumping the contents of log file: " + log.getAbsolutePath() + "\n");
+			System.err.println("Dumping the contents of log file: " + log.getAbsolutePath() + "\n" + topAndBottom);
 			while (s.hasNextLine())
-				System.err.println(s.nextLine());
-			System.err.println("");
+				System.err.println(leftMargin + s.nextLine());
+			System.err.println(topAndBottom);
 		}
 		catch (FileNotFoundException e) {
 			System.err.println("Attempted to dump the log file '" + log.getAbsolutePath() + "' but it was not found.\n" + e.getMessage());
@@ -111,27 +128,36 @@ public class JITServerTest {
 
 		p.destroy();
 
-		Thread.sleep(PROCESS_DESTROY_WAIT_TIME_MS);
+		int waitCount = 0;
+		while (p.isAlive() && (waitCount <= 3)) {
+			Thread.sleep(PROCESS_DESTROY_WAIT_TIME_MS);
+			waitCount++;
+		}
 
 		final int exitValue = p.exitValue();
 
 		// The process may exit normally before we can destroy it so we have to accept two possible return values.
 		if ((exitValue != SUCCESS_RETURN_VALUE) && (exitValue != SIGTERM_RETURN_VALUE)) {
-			System.err.println("Expected a return value of " + SUCCESS_RETURN_VALUE + " or " + SIGTERM_RETURN_VALUE + ", got " + exitValue + " instead.");
+			final String errorText = "Expected an exit value of " + SUCCESS_RETURN_VALUE + " or " + SIGTERM_RETURN_VALUE + ", got " + exitValue + " instead.";
+			System.err.println(errorText);
 			dumpProcessLog(builder);
-			AssertJUnit.fail();
+			AssertJUnit.fail(errorText);
 		}
 	}
 
 	private static Process startProcess(final ProcessBuilder builder, final String name) throws IOException, InterruptedException {
-		logger.info("Starting " + name + " with command line:\n" + String.join(" ", builder.command()));
+		// Wrap any arguments containing whitespace in quotes for display (we have to make a copy of ProcessBuilder.command() to avoid modifying our PB's commands).
+		ArrayList<String> command = new ArrayList<String>(builder.command());
+		command.replaceAll(s -> s.matches("\\S+") ? s : "\"" + s + "\"");
+		logger.info("Starting " + name + " with command line:\n" + String.join(" ", command));
 		logger.info("With stdout/stderr redirected to:\n" + builder.redirectOutput().file().getAbsolutePath());
 		final Process p = builder.start();
 		// We expect these processes to be fairly long running; if they exit almost immediately abort the test.
 		if (p.waitFor(PROCESS_START_WAIT_TIME_MS, TimeUnit.MILLISECONDS)) {
-			System.err.println("Failed to start " + name);
+			final String errorText = "Failed to properly start " + name + ", it terminated prematurely with exit value: " + p.exitValue();
+			System.err.println(errorText);
 			dumpProcessLog(builder);
-			AssertJUnit.fail();
+			AssertJUnit.fail(errorText);
 		}
 		return p;
 	}

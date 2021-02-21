@@ -49,8 +49,8 @@ IlGeneratorMethodDetails::clone(TR::IlGeneratorMethodDetails &storage, const TR:
 
    if (other.isOrdinaryMethod())
       return new (&storage) TR::IlGeneratorMethodDetails(static_cast<const TR::IlGeneratorMethodDetails &>(other));
-   else if (other.isDumpMethod())
-      return new (&storage) DumpMethodDetails(static_cast<const DumpMethodDetails &>(other));
+   else if (other.isJitDumpMethod())
+      return new (&storage) JitDumpMethodDetails(static_cast<const JitDumpMethodDetails &>(other));
    else if (other.isNewInstanceThunk())
       return new (&storage) NewInstanceThunkDetails(static_cast<const NewInstanceThunkDetails &>(other));
    else if (other.isMethodInProgress())
@@ -78,7 +78,7 @@ IlGeneratorMethodDetails::clone(TR::IlGeneratorMethodDetails &storage, const TR:
    if (type & ORDINARY_METHOD)
       return new (&storage) TR::IlGeneratorMethodDetails(static_cast<const TR::IlGeneratorMethodDetails &>(other));
    else if (type & DUMP_METHOD)
-      return new (&storage) DumpMethodDetails(static_cast<const DumpMethodDetails &>(other));
+      return new (&storage) JitDumpMethodDetails(static_cast<const JitDumpMethodDetails &>(other));
    else if (type & NEW_INSTANCE_THUNK)
       return new (&storage) NewInstanceThunkDetails(static_cast<const NewInstanceThunkDetails &>(other));
    else if (type & METHOD_IN_PROGRESS)
@@ -115,9 +115,9 @@ IlGeneratorMethodDetails::getRomClass() const
    }
 
 const J9ROMMethod *
-IlGeneratorMethodDetails::getRomMethod() const
+IlGeneratorMethodDetails::getRomMethod(TR_J9VMBase *fe)
    {
-   return J9_ROM_METHOD_FROM_RAM_METHOD(self()->getMethod());
+   return fe->getROMMethodFromRAMMethod(self()->getMethod());
    }
 
 #if defined(J9VM_OPT_JITSERVER)
@@ -126,7 +126,7 @@ IlGeneratorMethodDetails::getType() const
    {
    int type = EMPTY;
    if (self()->isOrdinaryMethod()) type |= ORDINARY_METHOD;
-   if (self()->isDumpMethod()) type |= DUMP_METHOD;
+   if (self()->isJitDumpMethod()) type |= DUMP_METHOD;
    if (self()->isNewInstanceThunk()) type |= NEW_INSTANCE_THUNK;
    if (self()->isMethodInProgress()) type |= METHOD_IN_PROGRESS;
    if (self()->isArchetypeSpecimen()) type |= ARCHETYPE_SPECIMEN;
@@ -289,7 +289,7 @@ MethodHandleThunkDetails::printDetails(TR_FrontEnd *fe, TR::FILE *file)
    // annoying: knot can only be accessed from the compilation object which isn't always handy: wait for thread locals
    TR::KnownObjectTable *knot = fe->getKnownObjectTable();
    if (knot)
-      trfprintf(file, "obj%d,%s", knot->getIndexAt(getHandleRef()), fe->sampleSignature((TR_OpaqueMethodBlock *)getMethod()));
+      trfprintf(file, "obj%d,%s", knot->getOrCreateIndexAt(getHandleRef()), fe->sampleSignature((TR_OpaqueMethodBlock *)getMethod()));
    else
 #endif
       trfprintf(file, "%p,%s", getHandleRef(), fe->sampleSignature((TR_OpaqueMethodBlock *)getMethod()));
@@ -310,7 +310,7 @@ ShareableInvokeExactThunkDetails::isSameThunk(MethodHandleThunkDetails & other, 
    if (!other.isShareable())
       return false;
 
-   uintptrj_t thisThunkTuple, otherThunkTuple;
+   uintptr_t thisThunkTuple, otherThunkTuple;
 
    // Consider: there is a race condition here.  If there are two shareable thunks requested,
    // and then we change the thunktuple of one of the handles, then this code will not detect

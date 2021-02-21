@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -48,14 +48,14 @@
 #ifndef INTERPRETER_EMULATOR_INCL
 #define INTERPRETER_EMULATOR_INCL
 
+#include "compile/Compilation.hpp"
+#include "env/TRMemory.hpp"
 #include "il/Block.hpp"
 #include "ilgen/ByteCodeIteratorWithState.hpp"
 #include "ilgen/J9ByteCodeIterator.hpp"
-#include "compile/Compilation.hpp"
 #include "optimizer/Inliner.hpp"
-#include "optimizer/J9Inliner.hpp"
 #include "optimizer/J9EstimateCodeSize.hpp"
-#include "env/TRMemory.hpp"
+#include "optimizer/J9Inliner.hpp"
 
 class IconstOperand;
 class KnownObjOperand;
@@ -157,7 +157,7 @@ class InterpreterEmulator : public TR_ByteCodeIteratorWithState<TR_J9ByteCode, J
             TR::ResolvedMethodSymbol * methodSymbol,
             TR_J9VMBase * fe,
             TR::Compilation * comp,
-            TR_InlinerTracer *tracer,
+            TR_LogTracer *tracer,
             TR_EstimateCodeSize *ecs)
          : Base(methodSymbol, comp),
            _calltarget(calltarget),
@@ -169,7 +169,7 @@ class InterpreterEmulator : public TR_ByteCodeIteratorWithState<TR_J9ByteCode, J
          _flags = NULL;
          _stacks = NULL;
          }
-      TR_InlinerTracer *tracer() { return _tracer; }
+      TR_LogTracer *tracer() { return _tracer; }
       /* \brief Initialize data needed for looking for callsites
        *
        * \param blocks
@@ -277,6 +277,10 @@ class InterpreterEmulator : public TR_ByteCodeIteratorWithState<TR_J9ByteCode, J
       bool isGenerated(int32_t bcIndex) { return _iteratorWithState ? Base::isGenerated(bcIndex): false; }
       void visitInvokedynamic();
       void visitInvokevirtual();
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+      void visitInvokehandle();
+      void updateKnotAndCreateCallSiteUsingInvokeCacheArray(TR_ResolvedJ9Method* owningMethod, uintptr_t * invokeCacheArray, int32_t cpIndex);
+#endif
       void visitInvokespecial();
       void visitInvokestatic();
       void visitInvokeinterface();
@@ -284,7 +288,7 @@ class InterpreterEmulator : public TR_ByteCodeIteratorWithState<TR_J9ByteCode, J
       bool isCurrentCallUnresolvedOrCold(TR_ResolvedMethod *resolvedMethod, bool isUnresolvedInCP);
       void debugUnresolvedOrCold(TR_ResolvedMethod *resolvedMethod);
 
-      TR_InlinerTracer *_tracer;
+      TR_LogTracer *_tracer;
       TR_EstimateCodeSize *_ecs;
       Operand * _unknownOperand; // used whenever the iterator can't reason about an operand
       TR_CallTarget *_calltarget; // the target method to inline

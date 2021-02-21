@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -32,8 +32,11 @@ static int values = 0;
 
 static UDATA writeConstant(OMRPortLibrary *OMRPORTLIB, IDATA fd, char const *name, UDATA value);
 static jint writeConstants(OMRPortLibrary *OMRPORTLIB, IDATA fd);
-static jint writeMacros(OMRPortLibrary *OMRPORTLIB, IDATA fd);
 static IDATA createConstant(OMRPortLibrary *OMRPORTLIB, char const *name, UDATA value);
+
+#if defined(J9VM_ARCH_X86)
+static jint writeMacros(OMRPortLibrary *OMRPORTLIB, IDATA fd);
+#endif
 
 static jint
 writeHeader(OMRPortLibrary *OMRPORTLIB, IDATA fd)
@@ -67,9 +70,9 @@ createConstant(OMRPortLibrary *OMRPORTLIB, char const *name, UDATA value)
 	if (values) {
 		return omrstr_printf(line, sizeof(line), "J9CONST({%s},%zu)dnl\n", name, value);
 	}
-#if defined(J9VM_ARCH_POWER) || defined(J9VM_ARCH_ARM)
+#if defined(J9VM_ARCH_POWER) || defined(J9VM_ARCH_ARM) || defined(J9VM_ARCH_AARCH64)
 	return omrstr_printf(line, sizeof(line), "#define %s %zu\n", name, value);
-#elif defined(J9VM_ARCH_X86) /* J9VM_ARCH_POWER || J9VM_ARCH_ARM */
+#elif defined(J9VM_ARCH_X86) /* J9VM_ARCH_POWER || J9VM_ARCH_ARM || J9VM_ARCH_AARCH64 */
 	return omrstr_printf(line, sizeof(line), "%%define %s %zu\n", name, value);
 #elif defined(LINUX) /* J9VM_ARCH_X86 */
 	return omrstr_printf(line, sizeof(line), "%s = %zu\n", name, value);
@@ -77,7 +80,7 @@ createConstant(OMRPortLibrary *OMRPORTLIB, char const *name, UDATA value)
 	return omrstr_printf(line, sizeof(line), "%s EQU %zu\n", name, value);
 #else
 #error "Unknown constant format"
-#endif /* J9VM_ARCH_POWER || J9VM_ARCH_ARM */
+#endif /* J9VM_ARCH_POWER || J9VM_ARCH_ARM || J9VM_ARCH_AARCH64 */
 }
 
 #if defined(J9VM_ARCH_X86)
@@ -587,11 +590,13 @@ writeConstants(OMRPortLibrary *OMRPORTLIB, IDATA fd)
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitResolveInvokeDynamic", offsetof(J9JITConfig, old_slow_jitResolveInvokeDynamic)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitResolveConstantDynamic", offsetof(J9JITConfig, old_slow_jitResolveConstantDynamic)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitResolveHandleMethod", offsetof(J9JITConfig, old_slow_jitResolveHandleMethod)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitResolveFlattenableField", offsetof(J9JITConfig, old_slow_jitResolveFlattenableField)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitRetranslateCaller", offsetof(J9JITConfig, old_slow_jitRetranslateCaller)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitRetranslateCallerWithPreparation", offsetof(J9JITConfig, old_slow_jitRetranslateCallerWithPreparation)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitRetranslateMethod", offsetof(J9JITConfig, old_slow_jitRetranslateMethod)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitThrowCurrentException", offsetof(J9JITConfig, old_slow_jitThrowCurrentException)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitThrowException", offsetof(J9JITConfig, old_slow_jitThrowException)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitThrowUnreportedException", offsetof(J9JITConfig, old_slow_jitThrowUnreportedException)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitThrowAbstractMethodError", offsetof(J9JITConfig, old_slow_jitThrowAbstractMethodError)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitThrowArithmeticException", offsetof(J9JITConfig, old_slow_jitThrowArithmeticException)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitThrowArrayIndexOutOfBounds", offsetof(J9JITConfig, old_slow_jitThrowArrayIndexOutOfBounds)) |
@@ -632,6 +637,13 @@ writeConstants(OMRPortLibrary *OMRPORTLIB, IDATA fd)
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitReportStaticFieldRead", offsetof(J9JITConfig, old_slow_jitReportStaticFieldRead)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitReportStaticFieldWrite", offsetof(J9JITConfig, old_slow_jitReportStaticFieldWrite)) |
 
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitGetFlattenableField", offsetof(J9JITConfig, old_fast_jitGetFlattenableField)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitWithFlattenableField", offsetof(J9JITConfig, old_fast_jitWithFlattenableField)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitPutFlattenableField", offsetof(J9JITConfig, old_fast_jitPutFlattenableField)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitGetFlattenableStaticField", offsetof(J9JITConfig, old_fast_jitGetFlattenableStaticField)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitPutFlattenableStaticField", offsetof(J9JITConfig, old_fast_jitPutFlattenableStaticField)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitLoadFlattenableArrayElement", offsetof(J9JITConfig, old_fast_jitLoadFlattenableArrayElement)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitStoreFlattenableArrayElement", offsetof(J9JITConfig, old_fast_jitStoreFlattenableArrayElement)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitAcmpHelper", offsetof(J9JITConfig, old_fast_jitAcmpHelper)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_fast_jitNewValue", offsetof(J9JITConfig, fast_jitNewValue)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_fast_jitNewValueNoZeroInit", offsetof(J9JITConfig, fast_jitNewValueNoZeroInit)) |

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2019 IBM Corp. and others
+ * Copyright (c) 2018, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -51,8 +51,10 @@ class CompilationInfoPerThreadRemote : public TR::CompilationInfoPerThread
 
    uint32_t getSeqNo() const { return _seqNo; }; // For ordering requests at the server
    void setSeqNo(uint32_t seqNo) { _seqNo = seqNo; }
-   void updateSeqNo(ClientSessionData *clientSession);
+   uint32_t getExpectedSeqNo() const { return _expectedSeqNo; }
+   void setExpectedSeqNo(uint32_t seqNo) { _expectedSeqNo = seqNo; }
 
+   void notifyAndDetachWaitingRequests(ClientSessionData *clientSession);
    void waitForMyTurn(ClientSessionData *clientSession, TR_MethodToBeCompiled &entry); // Return false if timeout
    bool getWaitToBeNotified() const { return _waitToBeNotified; }
    void setWaitToBeNotified(bool b) { _waitToBeNotified = b; }
@@ -60,7 +62,7 @@ class CompilationInfoPerThreadRemote : public TR::CompilationInfoPerThread
    bool cacheIProfilerInfo(TR_OpaqueMethodBlock *method, uint32_t byteCodeIndex, TR_IPBytecodeHashTableEntry *entry);
    TR_IPBytecodeHashTableEntry *getCachedIProfilerInfo(TR_OpaqueMethodBlock *method, uint32_t byteCodeIndex, bool *methodInfoPresent);
 
-   void cacheResolvedMethod(TR_ResolvedMethodKey key, TR_OpaqueMethodBlock *method, uint32_t vTableSlot, const TR_ResolvedJ9JITServerMethodInfo &methodInfo);
+   void cacheResolvedMethod(TR_ResolvedMethodKey key, TR_OpaqueMethodBlock *method, uint32_t vTableSlot, const TR_ResolvedJ9JITServerMethodInfo &methodInfo, int32_t ttlForUnresolved = 2);
    bool getCachedResolvedMethod(TR_ResolvedMethodKey key, TR_ResolvedJ9JITServerMethod *owningMethod, TR_ResolvedMethod **resolvedMethod, bool *unresolvedInCP = NULL);
    TR_ResolvedMethodKey getResolvedMethodKey(TR_ResolvedMethodType type, TR_OpaqueClassBlock *ramClass, int32_t cpIndex, TR_OpaqueClassBlock *classObject = NULL);
 
@@ -138,6 +140,7 @@ class CompilationInfoPerThreadRemote : public TR::CompilationInfoPerThread
 
    TR_PersistentMethodInfo *_recompilationMethodInfo;
    uint32_t _seqNo;
+   uint32_t _expectedSeqNo; // this request is allowed to go if _expectedSeqNo is processed
    bool _waitToBeNotified; // accessed with clientSession->_sequencingMonitor in hand
    IPTableHeap_t *_methodIPDataPerComp;
    TR_ResolvedMethodInfoCache *_resolvedMethodInfoMap;

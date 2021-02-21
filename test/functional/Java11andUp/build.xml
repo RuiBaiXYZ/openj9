@@ -36,13 +36,15 @@
 	<property name="src" location="./src"/>
 	<property name="build" location="./bin"/>
 	<property name="transformerListener" location="${TEST_ROOT}/Utils/src"/>
+	<property name="LIB" value="asm,testng,jcommander"/>
+	<import file="${TEST_ROOT}/TKG/scripts/getDependencies.xml"/>
 
 	<target name="init">
 		<mkdir dir="${DEST}" />
 		<mkdir dir="${build}"/>
 	</target>
 
-	<target name="compile_generator" depends="init" description="Compile CondyGenerator">
+	<target name="compile_generator" depends="init,getDependentLibs" description="Compile CondyGenerator">
 		<echo>Compiling CondyTest helpers</echo>
 		<echo>Ant version is ${ant.version}"</echo>
 		<property name="compiler.javac" value="${TEST_JDK_HOME}/bin/javac" />
@@ -56,7 +58,7 @@
 			<include name="**/condy/BootstrapMethods.java" />
 			<include name="**/condy/CondyGenerator.java" />
 			<classpath>
-				<pathelement location="${LIB_DIR}/asm-7.3.jar" />
+				<pathelement location="${LIB_DIR}/asm.jar" />
 			</classpath>
 		</javac>
 	</target>
@@ -67,7 +69,7 @@
 		<java classname="org.openj9.test.condy.CondyGenerator" fork="true" failonerror="true" logError="true" jvm="${javaexecutable.java}">
 			<jvmarg value="-Xverify:none" />
 			<classpath>
-				<pathelement location="${LIB_DIR}/asm-7.3.jar" />
+				<pathelement location="${LIB_DIR}/asm.jar" />
 				<pathelement location="${build}" />
 			</classpath>
 		</java>
@@ -94,7 +96,7 @@
 			<classpath>
 				<pathelement location="${LIB_DIR}/testng.jar"/>
 				<pathelement location="${LIB_DIR}/jcommander.jar"/>
-				<pathelement location="${LIB_DIR}/asm-7.3.jar" />
+				<pathelement location="${LIB_DIR}/asm.jar" />
 				<pathelement location="${build}" />
 			</classpath>
 		</javac>

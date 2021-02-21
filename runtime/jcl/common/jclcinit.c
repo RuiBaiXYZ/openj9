@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2020 IBM Corp. and others
+ * Copyright (c) 1998, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -581,6 +581,11 @@ initializeRequiredClasses(J9VMThread *vmThread, char* dllName)
 			J9VMCONSTANTPOOL_JAVALANGCLASSNOTFOUNDEXCEPTION,
 			J9VMCONSTANTPOOL_JAVALANGLINKAGEERROR,
 			J9VMCONSTANTPOOL_JAVALANGNOCLASSDEFFOUNDERROR,
+			J9VMCONSTANTPOOL_JAVALANGNULLPOINTEREXCEPTION,
+#if JAVA_SPEC_VERSION >= 15
+			J9VMCONSTANTPOOL_JDKINTERNALLOADERNATIVELIBRARIES,
+			J9VMCONSTANTPOOL_JDKINTERNALLOADERNATIVELIBRARIESNATIVELIBRARYIMPL,
+#endif /* JAVA_SPEC_VERSION >= 15 */
 	};
 
 	/* Determine java/lang/String.value signature before any required class is initialized */
@@ -609,6 +614,17 @@ initializeRequiredClasses(J9VMThread *vmThread, char* dllName)
 	if (0 != vmFuncs->addHiddenInstanceField(vm, "java/lang/Module", "modulePointer", "J", &vm->modulePointerOffset)) {
 		return 1;
 	}
+
+#ifdef J9VM_OPT_OPENJDK_METHODHANDLE
+	if (0 != vmFuncs->addHiddenInstanceField(vm, "java/lang/invoke/MemberName", "vmindex", "J", &vm->vmindexOffset)) {
+		return 1;
+	}
+
+	if (0 != vmFuncs->addHiddenInstanceField(vm, "java/lang/invoke/MemberName", "vmtarget", "J", &vm->vmtargetOffset)) {
+		return 1;
+	}
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
+
 
 	vmThread->privateFlags |= J9_PRIVATE_FLAGS_REPORT_ERROR_LOADING_CLASS;
 

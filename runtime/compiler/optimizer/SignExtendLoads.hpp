@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -40,9 +40,7 @@ class TR_SignExtendLoads : public TR::Optimization
    public:
    TR_SignExtendLoads(TR::OptimizationManager *manager)
       : TR::Optimization(manager)
-      {
-      setTrace(comp()->getOption(TR_TraceSEL));
-      }
+      {}
    static TR::Optimization *create(TR::OptimizationManager *manager)
       {
       return new (manager->allocator()) TR_SignExtendLoads(manager);
@@ -73,7 +71,7 @@ class TR_SignExtendLoads : public TR::Optimization
       };
 
    int32_t nodeHashBucket(TR::Node *node)
-               {return ((uintptrj_t)node >> 2) % _sharedNodesHash._numBuckets;}
+               {return ((uintptr_t)node >> 2) % _sharedNodesHash._numBuckets;}
 
    void    InitializeHashTable();
    TR_ScratchList<TR::Node> * getListFromHash(TR::Node *node);

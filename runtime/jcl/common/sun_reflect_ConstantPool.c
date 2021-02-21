@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2019 IBM Corp. and others
+ * Copyright (c) 1998, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -24,6 +24,7 @@
 #include "jcl.h"
 #include "jclprots.h"
 #include "jclglob.h"
+#include "jcl_internal.h"
 #include "jniidcacheinit.h"
 #include "j9.h"
 
@@ -480,7 +481,7 @@ Java_sun_reflect_ConstantPool_getFieldAtIfLoaded0(JNIEnv *env, jobject unusedObj
  * @throws  IllegalArgumentException if cpIndex has wrong type
  */
 jobject JNICALL
-Java_java_lang_invoke_MethodHandle_getCPClassNameAt(JNIEnv *env, jobject unusedObject, jobject constantPoolOop, jint cpIndex)
+Java_java_lang_invoke_MethodHandleResolver_getCPClassNameAt(JNIEnv *env, jobject unusedObject, jobject constantPoolOop, jint cpIndex)
 {
 	jobject classNameObject = NULL;
 	J9VMThread *vmThread = (J9VMThread *) env;
@@ -667,7 +668,7 @@ Java_sun_reflect_ConstantPool_getUTF8At0(JNIEnv *env, jobject unusedObject, jobj
  * Return the result of J9_CP_TYPE(J9Class->romClass->cpShapeDescription, index)
  */
 jint JNICALL
-Java_java_lang_invoke_MethodHandle_getCPTypeAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex)
+Java_java_lang_invoke_MethodHandleResolver_getCPTypeAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex)
 {
 	UDATA cpType = J9CPTYPE_UNUSED;
 	J9VMThread *vmThread = (J9VMThread *) env;
@@ -700,7 +701,7 @@ Java_java_lang_invoke_MethodHandle_getCPTypeAt(JNIEnv *env, jclass unusedClass, 
  * equivalent for MethodType.
  */
 jobject JNICALL
-Java_java_lang_invoke_MethodHandle_getCPMethodTypeAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex)
+Java_java_lang_invoke_MethodHandleResolver_getCPMethodTypeAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex)
 {
 	jobject returnValue = NULL;
 	J9VMThread *vmThread = (J9VMThread *) env;
@@ -735,7 +736,7 @@ Java_java_lang_invoke_MethodHandle_getCPMethodTypeAt(JNIEnv *env, jclass unusedC
  * equivalent for MethodHandle.
  */
 jobject JNICALL
-Java_java_lang_invoke_MethodHandle_getCPMethodHandleAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex)
+Java_java_lang_invoke_MethodHandleResolver_getCPMethodHandleAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex)
 {
 	jobject returnValue = NULL;
 	J9VMThread *vmThread = (J9VMThread *) env;
@@ -751,7 +752,10 @@ Java_java_lang_invoke_MethodHandle_getCPMethodHandleAt(JNIEnv *env, jclass unuse
 			j9object_t methodHandleObject = J9STATIC_OBJECT_LOAD(vmThread, ramClass, &ramMethodHandleRef->methodHandle);
 
 			if (NULL == methodHandleObject) {
-				methodHandleObject = vmFunctions->resolveMethodHandleRef(vmThread, J9_CP_FROM_CLASS(ramClass), cpIndex, J9_RESOLVE_FLAG_RUNTIME_RESOLVE);
+				/* Avoid initializing the class from there so as to postpone the static initialization
+				 * to the invocation of the specified method of the class.
+				 */
+				methodHandleObject = vmFunctions->resolveMethodHandleRef(vmThread, J9_CP_FROM_CLASS(ramClass), cpIndex, J9_RESOLVE_FLAG_RUNTIME_RESOLVE | J9_RESOLVE_FLAG_NO_CLASS_INIT);
 			}
 			if (NULL != methodHandleObject) {
 				returnValue = vmFunctions->j9jni_createLocalRef(env, methodHandleObject);
@@ -766,7 +770,7 @@ Java_java_lang_invoke_MethodHandle_getCPMethodHandleAt(JNIEnv *env, jclass unuse
 }
 
 jobject JNICALL
-Java_java_lang_invoke_MethodHandle_getCPConstantDynamicAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex)
+Java_java_lang_invoke_MethodHandleResolver_getCPConstantDynamicAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex)
 {
 	jobject returnValue = NULL;
 	J9VMThread *vmThread = (J9VMThread *) env;
@@ -779,7 +783,7 @@ Java_java_lang_invoke_MethodHandle_getCPConstantDynamicAt(JNIEnv *env, jclass un
 		result = getRAMConstantRef(vmThread, constantPoolOop, cpIndex, J9CPTYPE_CONSTANT_DYNAMIC, (J9RAMConstantRef **) &ramConstantDynamicRef);
 		if (OK == result) {
 			J9Class *ramClass = J9CLASS_FROMCPINTERNALRAMCLASS(vmThread, constantPoolOop);
-			j9object_t value = J9STATIC_OBJECT_LOAD(vmThread, ramClass, &ramConstantDynamicRef->value);;
+			j9object_t value = J9STATIC_OBJECT_LOAD(vmThread, ramClass, &ramConstantDynamicRef->value);
 
 			/* Check if the value is resolved, Void.Class exception represents a valid null reference */
 			if ((NULL == value) && (ramConstantDynamicRef->exception != vmThread->javaVM->voidReflectClass->classObject)) {
@@ -907,6 +911,7 @@ registerJdkInternalReflectConstantPoolNatives(JNIEnv *env) {
 			(void *)&Java_sun_reflect_ConstantPool_getUTF8At0,
 		},
 	};
+	jint numNatives = sizeof(natives)/sizeof(JNINativeMethod);
 
 	/* jdk.internal.reflect.ConstantPool is currently cached in CLS_sun_reflect_ConstantPool */
 	jclass jdk_internal_reflect_ConstantPool = JCL_CACHE_GET(env, CLS_sun_reflect_ConstantPool);
@@ -922,7 +927,10 @@ registerJdkInternalReflectConstantPoolNatives(JNIEnv *env) {
 		Assert_JCL_true(NULL != jdk_internal_reflect_ConstantPool);
 	}
 
-	result = (*env)->RegisterNatives(env, jdk_internal_reflect_ConstantPool, natives, sizeof(natives)/sizeof(JNINativeMethod));
+	result = (*env)->RegisterNatives(env, jdk_internal_reflect_ConstantPool, natives, numNatives);
+#if defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT)
+	clearNonZAAPEligibleBit(env, jdk_internal_reflect_ConstantPool, natives, numNatives);
+#endif /* J9VM_OPT_JAVA_OFFLOAD_SUPPORT */
 
 _end:
 	return result;

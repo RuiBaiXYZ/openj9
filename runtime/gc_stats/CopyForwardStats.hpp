@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -50,7 +50,7 @@ class MM_CopyForwardStats : public MM_CopyForwardStatsCore
 	 * Data members 
 	 */
 public:
-
+	/* The below stats include both marked and copied cases */
 	UDATA _unfinalizedCandidates;  /**< unfinalized objects that are candidates to be finalized visited this cycle */
 	UDATA _unfinalizedEnqueued;  /**< unfinalized objects that are enqueued during this cycle (MUST be less than or equal _unfinalizedCandidates) */
 
@@ -63,6 +63,9 @@ public:
 
 	UDATA _stringConstantsCleared;  /**< The number of string constants that have been cleared during marking */
 	UDATA _stringConstantsCandidates; /**< The number of string constants that have been visited in string table during marking */
+
+	UDATA _monitorReferenceCleared; /**< The number of monitor references that have been cleared during marking */
+	UDATA _monitorReferenceCandidates; /**< The number of monitor references that have been visited in monitor table during marking */
 
 #if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
 	UDATA _doubleMappedArrayletsCleared; /**< The number of double mapped arraylets that have been cleared durign marking */
@@ -93,6 +96,9 @@ public:
 		_stringConstantsCleared = 0;
 		_stringConstantsCandidates = 0;
 
+		_monitorReferenceCleared = 0;
+		_monitorReferenceCandidates = 0;
+
 #if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
 		_doubleMappedArrayletsCleared = 0;
 		_doubleMappedArrayletsCandidates = 0;
@@ -117,6 +123,9 @@ public:
 		_stringConstantsCleared += stats->_stringConstantsCleared;
 		_stringConstantsCandidates += stats->_stringConstantsCandidates;
 
+		_monitorReferenceCleared += stats->_monitorReferenceCleared;
+		_monitorReferenceCandidates += stats->_monitorReferenceCandidates;
+
 #if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
 		_doubleMappedArrayletsCleared += stats->_doubleMappedArrayletsCleared;
 		_doubleMappedArrayletsCandidates += stats->_doubleMappedArrayletsCandidates;
@@ -134,6 +143,8 @@ public:
 		, _phantomReferenceStats()
 		, _stringConstantsCleared(0)
 		, _stringConstantsCandidates(0)
+		, _monitorReferenceCleared(0)
+		, _monitorReferenceCandidates(0)
 #if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
 		, _doubleMappedArrayletsCleared(0)
 		, _doubleMappedArrayletsCandidates(0)

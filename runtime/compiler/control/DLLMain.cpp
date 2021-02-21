@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2018 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -25,11 +25,15 @@
 #include "control/Options.hpp"
 #include "env/ClassLoaderTable.hpp"
 #include "env/annotations/AnnotationBase.hpp"
+#include "env/ut_j9jit.h"
 #include "control/CompilationRuntime.hpp"
 #include "control/CompilationThread.hpp"
 #include "env/VMJ9.h"
 #include "runtime/IProfiler.hpp"
 #include "runtime/J9Profiler.hpp"
+#if defined(J9VM_OPT_JITSERVER)
+#include "runtime/Listener.hpp"
+#endif /* J9VM_OPT_JITSERVER */
 #include "runtime/codertinit.hpp"
 #include "rossa.h"
 
@@ -66,7 +70,6 @@ IDATA J9VMDllMain(J9JavaVM* vm, IDATA stage, void * reserved)
    IDATA argIndexXjit = 0;
    IDATA argIndexXaot = 0;
    IDATA argIndexXnojit = 0;
-   IDATA argIndexXnoaot = 0;
 
    IDATA argIndexClient = 0;
    IDATA argIndexServer = 0;
@@ -125,7 +128,6 @@ IDATA J9VMDllMain(J9JavaVM* vm, IDATA stage, void * reserved)
          argIndexXjit = FIND_AND_CONSUME_ARG(OPTIONAL_LIST_MATCH, "-Xjit", 0);
          argIndexXaot = FIND_AND_CONSUME_ARG(OPTIONAL_LIST_MATCH, "-Xaot", 0);
          argIndexXnojit = FIND_AND_CONSUME_ARG(OPTIONAL_LIST_MATCH, "-Xnojit", 0);
-         argIndexXnoaot = FIND_AND_CONSUME_ARG(OPTIONAL_LIST_MATCH, "-Xnoaot", 0);
 
          argIndexRIEnabled = FIND_AND_CONSUME_ARG(EXACT_MATCH, "-XX:+RuntimeInstrumentation", 0);
          argIndexRIDisabled = FIND_AND_CONSUME_ARG(EXACT_MATCH, "-XX:-RuntimeInstrumentation", 0);
@@ -165,7 +167,7 @@ IDATA J9VMDllMain(J9JavaVM* vm, IDATA stage, void * reserved)
 
          /* setup field to indicate whether we will allow AOT compilation and perform AOT runtime
           * initializations to allow AOT code to be loaded from the shared cache as well as from JXEs */
-         if (argIndexXaot >= argIndexXnoaot)
+         if ((J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_AOT)))
             {
             isAOT = true;
             }
@@ -201,8 +203,7 @@ IDATA J9VMDllMain(J9JavaVM* vm, IDATA stage, void * reserved)
             //if disableDualTLH is specified, revert back to old semantics.
             // Do not batch clear, JIT has to zeroinit all code on TLH.
             //Non P6, P7 and up are allowed to batch clear however.
-            TR_Processor ptype = TR_J9VMBase::getPPCProcessorType();
-            static bool disableZeroedTLHPages =  disableDualTLH && (((notlhPrefetch >= 0) || (ptype != TR_PPCp6 && ptype != TR_PPCp7)));
+            bool disableZeroedTLHPages = disableDualTLH && (((notlhPrefetch >= 0) || (!TR::Compiler->target.cpu.is(OMR_PROCESSOR_PPC_P6) && !TR::Compiler->target.cpu.is(OMR_PROCESSOR_PPC_P7))));
 #endif//TR_HOST_POWER
 #endif//TR_HOST_X86
            /*in testmode, the JIT will be loaded by a native. At this point it's too late to change
@@ -220,7 +221,8 @@ IDATA J9VMDllMain(J9JavaVM* vm, IDATA stage, void * reserved)
 #endif//TR_HOST_X86
             )
                {
-               J9VMDllLoadInfo* gcLoadInfo = FIND_DLL_TABLE_ENTRY( J9_GC_DLL_NAME );
+               J9VMDllLoadInfo *gcLoadInfo = getGCDllLoadInfo(vm);
+
                if (!IS_STAGE_COMPLETED(gcLoadInfo->completedBits, JCL_INITIALIZED) )//&& vm->memoryManagerFunctions)
                   {
                   vm->memoryManagerFunctions->allocateZeroedTLHPages(vm, true);
@@ -432,6 +434,13 @@ IDATA J9VMDllMain(J9JavaVM* vm, IDATA stage, void * reserved)
                TR::Options::getAOTCmdLineOptions()->setOption(TR_DisableGuardedCountingRecompilations);
                }
 
+            if (isAOT
+                && TR::Options::getAOTCmdLineOptions()->getOption(TR_EnableClassChainValidationCaching)
+                && (TR::Options::getCmdLineOptions()->getOption(TR_DisableCHOpts)))
+               {
+               TR::Options::getAOTCmdLineOptions()->setOption(TR_EnableClassChainValidationCaching, false);
+               }
+
             if (rv == -1)
                {
                // cannot free JIT config because shutdown stage expects it to exist
@@ -589,6 +598,16 @@ IDATA J9VMDllMain(J9JavaVM* vm, IDATA stage, void * reserved)
                TR_J9VMBase *trvm = TR_J9VMBase::get(vm->jitConfig, 0);
                if (!trvm->isAOT_DEPRECATED_DO_NOT_USE() && trvm->_compInfo)
                   {
+#if defined(J9VM_OPT_JITSERVER)
+                  if (trvm->_compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER)
+                     {
+                     TR_Listener *listener = ((TR_JitPrivateConfig*)(vm->jitConfig->privateConfig))->listener;
+                     if (listener)
+                        {
+                        listener->stop();
+                        }
+                     }
+#endif /* defined(J9VM_OPT_JITSERVER) */
                   trvm->_compInfo->stopCompilationThreads();
                   }
                JitShutdown(vm->jitConfig);

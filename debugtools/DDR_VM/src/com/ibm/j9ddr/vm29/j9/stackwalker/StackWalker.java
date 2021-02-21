@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2009, 2019 IBM Corp. and others
+ * Copyright (c) 2009, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -35,7 +35,6 @@ import com.ibm.j9ddr.vm29.j9.AlgorithmVersion;
 import com.ibm.j9ddr.vm29.j9.BaseAlgorithm;
 import com.ibm.j9ddr.vm29.j9.ConstantPoolHelpers;
 import com.ibm.j9ddr.vm29.j9.IAlgorithm;
-import com.ibm.j9ddr.vm29.j9.J9ConfigFlags;
 import com.ibm.j9ddr.vm29.pointer.PointerPointer;
 import com.ibm.j9ddr.vm29.pointer.U32Pointer;
 import com.ibm.j9ddr.vm29.pointer.U8Pointer;
@@ -257,14 +256,14 @@ public class StackWalker
 
 						/* fetch the Java stack for the platform directly from the register file */
 						String javaSPName = "";
-						if (J9ConfigFlags.arch_power) {
+						if (J9BuildFlags.arch_power) {
 							/* AIX shows as POWER not PPC */
 							/* gpr14 */
 							javaSPName = "gpr14";
-						} else if (J9ConfigFlags.arch_s390) {
+						} else if (J9BuildFlags.arch_s390) {
 							/* r5 */
 							javaSPName = "r5";
-						} else if (J9ConfigFlags.arch_x86) {
+						} else if (J9BuildFlags.arch_x86) {
 							if (J9BuildFlags.env_data64) {
 								/* rsp */
 								javaSPName = "rsp";
@@ -272,6 +271,8 @@ public class StackWalker
 								/* esp */
 								javaSPName = "esp";
 							}
+						} else if (J9BuildFlags.arch_aarch64) {
+							javaSPName = "r20";
 						} else {
 							throw new IllegalArgumentException("Unsupported platform");
 						}

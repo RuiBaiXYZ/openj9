@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2018 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -207,7 +207,7 @@ public class AutoRun {
 	
 	/**
 	 * This method is responsible for running the test suite in regular DDR testing
-	 * @param coreFilePath - Full path to the core file with with to Initialize DDR
+	 * @param coreFilePath - Full path to the core file with to Initialize DDR
 	 * @param testCaseList - Comma separated list of test suite classes to execute
 	 */
 	public static void runTest(String coreFilePath, String testCaseList) {
@@ -429,6 +429,14 @@ public class AutoRun {
 			suite.addTestSuite(TestDDRExtensionGeneral.class);
 			suite.addTestSuite(TestFindExt.class);
 			suite.addTestSuite(TestTypeResolution.class);
+			suite.addTestSuite(TestCollisionResilientHashtable.class);
+			suite.addTestSuite(TestStackMap.class);
+			suite.addTestSuite(TestDeadlockCase1.class);
+			suite.addTestSuite(TestDeadlockCase2.class);
+			suite.addTestSuite(TestDeadlockCase3.class);
+			suite.addTestSuite(TestDeadlockCase4.class);
+			suite.addTestSuite(TestDeadlockCase5.class);
+			suite.addTestSuite(TestDeadlockCase6.class);
 		} else {
 			String[] testCases = testCaseList.split(",");
 			for (String aTest : testCases) {
@@ -441,7 +449,7 @@ public class AutoRun {
 					suite.addTestSuite(TestSharedClassesExt.class);
 				} else if (aTest.trim().equalsIgnoreCase("TestClassExt")) {
 					suite.addTestSuite(TestClassExt.class);
-				} else if (aTest.trim().equalsIgnoreCase("CollisionResilientHashtable")) {
+				} else if (aTest.trim().equalsIgnoreCase("TestCollisionResilientHashtable")) {
 					suite.addTestSuite(TestCollisionResilientHashtable.class);
 				} else if (aTest.trim().equalsIgnoreCase("TestCallsites")) {
 					suite.addTestSuite(TestCallsites.class);
@@ -450,6 +458,7 @@ public class AutoRun {
 					suite.addTestSuite(TestDDRExtensionGeneral.class);
 				} else if (aTest.trim().equalsIgnoreCase("TestFindExt")) {
 					suite.addTestSuite(TestFindExt.class);
+					suite.addTestSuite(TestThread.class);
 				} else if (aTest.trim().equalsIgnoreCase("TestStackMap")) {
 					suite.addTestSuite(TestStackMap.class);
 				} else if (aTest.trim().equalsIgnoreCase("TestTenants")) {

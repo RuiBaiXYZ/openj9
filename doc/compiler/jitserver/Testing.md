@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2018, 2020 IBM Corp. and others
+Copyright (c) 2018, 2021 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -29,17 +29,18 @@ There are currently 2 supported test procedures. Select the one that best suits 
 
 These are the steps to run the tests on your machine.
 
-1. Compile a debug build of openj9 from scratch. To do this pass the flag `--with-debug-level=slowdebug` to `configure`.
+1. Compile a build of openj9 from scratch. (Optional: compile a debug build if you need it. To do this pass the flag `--with-debug-level=slowdebug` to `configure`.
+   Please note that debug build is much slower and the tests will take very long time to finish).
 
 2. Install [prerequisites](https://github.com/eclipse/openj9/blob/master/test/docs/Prerequisites.md)
 
-   Example installation can be found [here](https://github.com/eclipse/openj9/blob/master/buildenv/docker/test/Dockerfile#L57-L68).
+   An example of how to install the prerequisites can be found [here](https://github.com/eclipse/openj9/blob/master/buildenv/docker/test/Dockerfile#L57-L68). Make sure that JAVA_HOME and JAVA_BIN are set (E.g. `export JAVA_HOME=/root/openj9-openjdk-jdk11/build/linux-x86_64-normal-server-release/images/jdk` and `export JAVA_BIN=/root/openj9-openjdk-jdk11/build/linux-x86_64-normal-server-release/images/jdk/bin`). Basically you want to test on the jdk you build, so point the environment variable to your personal build of jdk.
 3. Compile  the tests (only need to compile once):
    ```
    cd $OPENJ9_DIR/openj9/test
    git clone https://github.com/AdoptOpenJDK/TKG.git
    cd TKG
-   export JAVA_VERSION=SE80
+   export TEST_JDK_HOME=<path to JDK directory that you wish to test, it's the same as $JAVA_HOME>
    export JAVA_BIN=/your/sdk/jre/bin
    export SPEC=linux_x86-64_cmprssptrs
    ```
@@ -53,6 +54,11 @@ These are the steps to run the tests on your machine.
    ```
    NOTE: It's important to put spaces before and after `-XX:+UseJITServer`, otherwise
    some tests will not run properly.
+
+   Set the path to native test libraries, otherwise some tests will not run properly
+   ```
+   export NATIVE_TEST_LIBS=/root/buildname/openj9-openjdk-jdk8/build/linux-x86_64-normal-server-release/images/test/openj9 
+   ```
 
    Compile the test
    ```

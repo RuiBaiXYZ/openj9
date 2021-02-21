@@ -171,6 +171,7 @@
    java_lang_String_lengthInternal,
    java_lang_String_indexOf_String,
    java_lang_String_indexOf_String_int,
+   java_lang_String_indexOf_char,
    java_lang_String_indexOf_native,
    java_lang_String_indexOf_fast,
    java_lang_String_isCompressed,
@@ -205,6 +206,7 @@
 
    java_lang_StringUTF16_getChar,
    java_lang_StringUTF16_indexOf,
+   java_lang_StringUTF16_newBytesFor,
    java_lang_StringUTF16_toBytes,
 
    java_lang_StringBuffer_append,
@@ -239,7 +241,16 @@
    java_nio_Bits_copyFromByteArray,
    java_nio_Bits_keepAlive,
    java_nio_Bits_byteOrder,
+   java_nio_Bits_getCharB,
+   java_nio_Bits_getCharL,
+   java_nio_Bits_getShortB,
+   java_nio_Bits_getShortL,
+   java_nio_Bits_getIntB,
+   java_nio_Bits_getIntL,
+   java_nio_Bits_getLongB,
+   java_nio_Bits_getLongL,
 
+   java_nio_HeapByteBuffer__get,
    java_nio_HeapByteBuffer_put,
 
    java_nio_ByteOrder_nativeOrder,
@@ -412,6 +423,10 @@
    sun_misc_Unsafe_fullFence,
 
    sun_misc_Unsafe_ensureClassInitialized,
+
+   jdk_internal_misc_Unsafe_copyMemory0,
+
+   jdk_internal_loader_NativeLibraries_load,
 
    java_lang_reflect_Array_getLength,
    java_util_Arrays_fill,
@@ -1001,8 +1016,12 @@
    java_lang_invoke_MethodHandle_asType_instance,
    java_lang_invoke_MethodHandle_invoke,
    java_lang_invoke_MethodHandle_invokeExact,
+   java_lang_invoke_MethodHandle_invokeBasic,
    java_lang_invoke_MethodHandle_invokeExactTargetAddress,
-   java_lang_invoke_MethodHandle_invokeWithArgumentsHelper,
+   java_lang_invoke_MethodHandle_linkToStatic,
+   java_lang_invoke_MethodHandle_linkToSpecial,
+   java_lang_invoke_MethodHandle_linkToVirtual,
+   java_lang_invoke_MethodHandle_linkToInterface,
    java_lang_invoke_MethodHandles_getStackClass,
    java_lang_invoke_MethodHandle_type,
    java_lang_invoke_MethodHandle_undoCustomizationLogic,

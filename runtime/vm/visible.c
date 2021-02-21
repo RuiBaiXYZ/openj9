@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -100,7 +100,8 @@ checkVisibility(J9VMThread *currentThread, J9Class* sourceClass, J9Class* destCl
 	if (!J9CLASS_IS_EXEMPT_FROM_VALIDATION(sourceClass)) {
 		if ( modifiers & J9AccPublic ) {
 			/* Public */
-			if ((sourceClass != destClass)
+			if (J9_ARE_NO_BITS_SET(lookupOptions, J9_LOOK_NO_MODULE_CHECKS)
+				&& (sourceClass != destClass)
 				&& (J2SE_VERSION(vm) >= J2SE_V11) 
 				&& J9_ARE_ALL_BITS_SET(vm->runtimeFlags, J9_RUNTIME_JAVA_BASE_MODULE_CREATED)
 				&& !J9ROMCLASS_IS_PRIMITIVE_TYPE(destClass->romClass)
@@ -113,7 +114,7 @@ checkVisibility(J9VMThread *currentThread, J9Class* sourceClass, J9Class* destCl
 		} else if (modifiers & J9AccPrivate) {
 			/* Private */
 			if (sourceClass != destClass) {
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 				if (J9_ARE_NO_BITS_SET(lookupOptions, J9_LOOK_NO_NESTMATES)) {
 					/* loadAndVerifyNestHost returns an error code if setting the
 					 * nest host field fails.
@@ -144,7 +145,7 @@ checkVisibility(J9VMThread *currentThread, J9Class* sourceClass, J9Class* destCl
 						result = J9_VISIBILITY_NON_MODULE_ACCESS_ERROR;
 					}
 				} else
-#endif /* defined(J9VM_OPT_VALHALLA_NESTMATES) */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 				{
 					result = J9_VISIBILITY_NON_MODULE_ACCESS_ERROR;
 				}
@@ -172,9 +173,9 @@ checkVisibility(J9VMThread *currentThread, J9Class* sourceClass, J9Class* destCl
 		}
 	}
 
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 _exit:
-#endif /* defined(J9VM_OPT_VALHALLA_NESTMATES) */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 	if (J9_VISIBILITY_NON_MODULE_ACCESS_ERROR == result) {
 		/* "checkVisibility from %p (%.*s) to %p (%.*s) modifiers=%zx failed" */
 		Trc_VM_checkVisibility_Failed(currentThread,
@@ -188,7 +189,7 @@ _exit:
 	return result;
 }
 
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 
 /**
  * Sets the nestmates error based on the errorCode
@@ -283,9 +284,34 @@ loadAndVerifyNestHost(J9VMThread *vmThread, J9Class *clazz, UDATA options)
 		J9UTF8 *nestHostName = J9ROMCLASS_NESTHOSTNAME(romClass);
 		BOOLEAN canRunJavaCode = J9_ARE_NO_BITS_SET(options, J9_LOOK_NO_JAVA);
 		BOOLEAN throwException = canRunJavaCode && J9_ARE_NO_BITS_SET(options, J9_LOOK_NO_THROW);
+		BOOLEAN hiddenNestMate = J9ROMCLASS_IS_OPTIONNESTMATE_SET(romClass);
+		J9Class* curClazz = clazz;
+
+		if (hiddenNestMate) {
+			BOOLEAN isCurClassHiddenNestMate = hiddenNestMate;
+			while ((isCurClassHiddenNestMate) 
+					&& (curClazz != curClazz->hostClass)
+			) {
+				/* current class is the nestmate of its hostClass, so we need to find nesthost of the hostClass. */
+				curClazz = curClazz->hostClass;
+				isCurClassHiddenNestMate = J9ROMCLASS_IS_OPTIONNESTMATE_SET(curClazz->romClass);
+				nestHostName = J9ROMCLASS_NESTHOSTNAME(curClazz->romClass);
+			}
+
+			if (NULL != curClazz->nestHost) {
+				/* 
+				 * hidden class defined with ClassOption.NESTMATE has the same nest host as its hostClass (curClazz). 
+				 * The nest host of curClass is already found, return directly. 
+				 */ 
+				clazz->nestHost = curClazz->nestHost;
+				result = J9_VISIBILITY_ALLOWED;
+				goto done;
+			}
+		}
+
 		/* If no nest host is named, class is own nest host */
 		if (NULL == nestHostName) {
-			nestHost = clazz;
+			nestHost = curClazz;
 		} else {
 			UDATA classLoadingFlags = 0;
 			if (canRunJavaCode) {
@@ -304,18 +330,24 @@ loadAndVerifyNestHost(J9VMThread *vmThread, J9Class *clazz, UDATA options)
 			} else if (clazz->packageID != nestHost->packageID) {
 				result = J9_VISIBILITY_NEST_HOST_DIFFERENT_PACKAGE_ERROR;
 			} else {
-				/* The nest host must have a nestmembers attribute that claims this class. */
-				J9UTF8 *className = J9ROMCLASS_CLASSNAME(romClass);
-				J9SRP *nestMembers = J9ROMCLASS_NESTMEMBERS(nestHost->romClass);
-				U_16 nestMemberCount = nestHost->romClass->nestMemberCount;
-				U_16 i = 0;
-
-				result = J9_VISIBILITY_NEST_MEMBER_NOT_CLAIMED_ERROR;
-				for (i = 0; i < nestMemberCount; i++) {
-					J9UTF8 *nestMemberName = NNSRP_GET(nestMembers[i], J9UTF8*);
-					if (J9UTF8_EQUALS(className, nestMemberName)) {
-						result = J9_VISIBILITY_ALLOWED;
-						break;
+				if (hiddenNestMate) {
+					/* The nest host of hidden class does not have a nestmembers attribute that claims the hidden class. 
+					 * Set result to J9_VISIBILITY_ALLOWED in this case */
+					result = J9_VISIBILITY_ALLOWED;
+				} else {
+					/* The nest host must have a nestmembers attribute that claims this class. */
+					J9UTF8 *className = J9ROMCLASS_CLASSNAME(romClass);
+					J9SRP *nestMembers = J9ROMCLASS_NESTMEMBERS(nestHost->romClass);
+					U_16 nestMemberCount = nestHost->romClass->nestMemberCount;
+					U_16 i = 0;
+	
+					result = J9_VISIBILITY_NEST_MEMBER_NOT_CLAIMED_ERROR;
+					for (i = 0; i < nestMemberCount; i++) {
+						J9UTF8 *nestMemberName = NNSRP_GET(nestMembers[i], J9UTF8*);
+						if (J9UTF8_EQUALS(className, nestMemberName)) {
+							result = J9_VISIBILITY_ALLOWED;
+							break;
+						}
 					}
 				}
 			}
@@ -324,6 +356,22 @@ loadAndVerifyNestHost(J9VMThread *vmThread, J9Class *clazz, UDATA options)
 		/* If a problem occurred in nest host verification then the nest host value is invalid */
 		if (J9_VISIBILITY_ALLOWED == result) {
 			clazz->nestHost = nestHost;
+		} else if ((J2SE_VERSION(vmThread->javaVM) >= J2SE_V15)
+				&& canRunJavaCode
+		) {
+			/**
+			 * JVM spec updated in Java 15:
+			 * If a class has problem finding/validating its nest host, then it is its own nest host (for hidden class, the nest host is its host class).
+			 * Any exception during finding/validating the nest host is not rethrown.
+			 * 
+			 * If canRunJavaCode is FALSE, the flag passed to internalFindClassUTF8() is J9_FINDCLASS_FLAG_EXISTING_ONLY, 
+			 * which tries to find the nest host in loaded classes only. It is possible that nest host is not loaded yet. 
+			 * So set clazz->nestHost only when canRunJavaCode is TRUE.
+			 */
+			clazz->nestHost = curClazz;
+			vmThread->currentException = NULL;
+			vmThread->privateFlags &= ~(UDATA)J9_PRIVATE_FLAGS_REPORT_EXCEPTION_THROW;
+			result = J9_VISIBILITY_ALLOWED;
 		} else if (throwException) {
 			/* Only set an exception is there isn't only already pending (and pop frame is not requested) */
 			if (J9_ARE_NO_BITS_SET(vmThread->publicFlags, J9_PUBLIC_FLAGS_POP_FRAMES_INTERRUPT)
@@ -337,7 +385,7 @@ loadAndVerifyNestHost(J9VMThread *vmThread, J9Class *clazz, UDATA options)
 			vmThread->privateFlags &= ~(UDATA)J9_PRIVATE_FLAGS_REPORT_EXCEPTION_THROW;
 		}
 	}
-
+done:
 	return result;
 }
-#endif /* defined(J9VM_OPT_VALHALLA_NESTMATES) */
+#endif /* JAVA_SPEC_VERSION >= 11 */

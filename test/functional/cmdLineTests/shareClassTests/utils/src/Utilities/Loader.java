@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2005, 2018 IBM Corp. and others
+ * Copyright (c) 2005, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -25,7 +25,7 @@ import java.io.FileInputStream;
 import java.net.URL;
 import java.util.Properties;
 
-import CustomClassloaders.CustomURLClassLoader;
+import CustomCLs.CustomURLClassLoader;
 import Utilities.StringManipulator;
 import Utilities.URLClassPathCreator;
 
@@ -67,7 +67,7 @@ public class Loader {
 		String classPath = props.getProperty("ClassPath");
 		
 		String nctls = props.getProperty("NumberOfClassesToLoad");
-		Integer i = new Integer(nctls);
+		Integer i = Integer.valueOf(nctls);
 		int classesToLoadCount = i.intValue();
 		
 		String[] classesToLoad = new String[classesToLoadCount];

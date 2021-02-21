@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2002, 2019 IBM Corp. and others
+ * Copyright (c) 2002, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -414,30 +414,26 @@ JVM_EnableCompiler(jint arg0, jint arg1)
 	return NULL;
 }
 
-
-
 void JNICALL
 JVM_FillInStackTrace(JNIEnv* env, jobject throwable)
 {
 	J9VMThread* currentThread = (J9VMThread*) env;
 	J9JavaVM* javaVM = currentThread->javaVM;
 	J9InternalVMFunctions* vmfns = javaVM->internalVMFunctions;
-	j9object_t unwrappedThrowable;
+	j9object_t unwrappedThrowable = NULL;
 
 	vmfns->internalEnterVMFromJNI(currentThread);
 	unwrappedThrowable = J9_JNI_UNWRAP_REFERENCE(throwable);
 	if ((0 == (javaVM->runtimeFlags & J9_RUNTIME_OMIT_STACK_TRACES)) &&
-		/* If the enableWritableStackTrace field is resolved, check it. If it's false, do not create the stack trace. */
-		/* TODO should be: (0 == J9VMCONSTANTPOOL_FIELDREF_AT(javaVM, J9VMCONSTANTPOOL_JAVALANGTHROWABLE_ENABLEWRITABLESTACKTRACE)->flags) */
-		((J9_CP_TYPE(J9ROMCLASS_CPSHAPEDESCRIPTION(J9_CLASS_FROM_CP((javaVM)->jclConstantPool)->romClass), J9VMCONSTANTPOOL_JAVALANGTHROWABLE_ENABLEWRITABLESTACKTRACE) == J9CPTYPE_UNUSED) ||
-			J9VMJAVALANGTHROWABLE_ENABLEWRITABLESTACKTRACE(currentThread, unwrappedThrowable)))
+		/* If the disableWritableStackTrace field is true, do not create the stack trace. */
+		!J9VMJAVALANGTHROWABLE_DISABLEWRITABLESTACKTRACE(currentThread, unwrappedThrowable))
 	{
 		UDATA flags = J9_STACKWALK_CACHE_PCS | J9_STACKWALK_WALK_TRANSLATE_PC | J9_STACKWALK_VISIBLE_ONLY | J9_STACKWALK_INCLUDE_NATIVES | J9_STACKWALK_SKIP_INLINES;
 		J9StackWalkState* walkState = currentThread->stackWalkState;
 		j9object_t result = (j9object_t) J9VMJAVALANGTHROWABLE_WALKBACK(currentThread, unwrappedThrowable);
-		UDATA rc;
-		UDATA i;
-		UDATA framesWalked;
+		UDATA rc = 0;
+		UDATA i = 0;
+		UDATA framesWalked = 0;
 
 		/* Do not hide exception frames if fillInStackTrace is called on an exception which already has a stack trace.  In the out of memory case,
 		 * there is a bit indicating that we should explicitly override this behaviour, since we've precached the stack trace array. */
@@ -446,6 +442,14 @@ JVM_FillInStackTrace(JNIEnv* env, jobject throwable)
 			walkState->restartException = unwrappedThrowable;
 		}
 		walkState->skipCount = 1; /* skip the INL frame -- TODO revisit this */
+#if JAVA_SPEC_VERSION >= 15
+		{
+			J9Class *receiverClass = J9OBJECT_CLAZZ(currentThread, unwrappedThrowable);
+			if (J9VMJAVALANGNULLPOINTEREXCEPTION_OR_NULL(javaVM) == receiverClass) {
+				walkState->skipCount = 2;	/* skip the INL & NullPointerException.fillInStackTrace() frames */
+			}
+		}
+#endif /* JAVA_SPEC_VERSION >= 15 */
 		walkState->walkThread = currentThread;
 		walkState->flags = flags;
 
@@ -495,7 +499,6 @@ setThrowableSlots:
 done:
 	vmfns->internalExitVMToJNI(currentThread);
 }
-
 
 /**
  * Find the specified class in given class loader 
@@ -558,7 +561,8 @@ JVM_FindLoadedClass(JNIEnv* env, jobject classLoader, jobject className)
 			NULL,
 			J9_JNI_UNWRAP_REFERENCE(className),
 			vmClassLoader,
-			J9_FINDCLASS_FLAG_EXISTING_ONLY);
+			J9_FINDCLASS_FLAG_EXISTING_ONLY,
+			CLASSNAME_INVALID);
 done:
 	vm->internalVMFunctions->internalExitVMToJNI(currentThread);
 
@@ -1421,7 +1425,7 @@ typedef struct GetStackTraceElementUserData {
 
 /* Return TRUE to keep iterating, FALSE to halt the walk. */
 static UDATA
-getStackTraceElementIterator(J9VMThread * vmThread, void * voidUserData, J9ROMClass * romClass, J9ROMMethod * romMethod, J9UTF8 * fileName, UDATA lineNumber, J9ClassLoader* classLoader)
+getStackTraceElementIterator(J9VMThread * vmThread, void * voidUserData, UDATA bytecodeOffset, J9ROMClass * romClass, J9ROMMethod * romMethod, J9UTF8 * fileName, UDATA lineNumber, J9ClassLoader* classLoader, J9Class* ramClass)
 {
 	GetStackTraceElementUserData * userData = voidUserData;
 
@@ -1770,9 +1774,9 @@ JVM_NewMultiArray(JNIEnv *env, jclass eltClass, jintArray dim)
 	
 			if (NULL != componentTypeClassObject) {
 				J9Class *componentTypeClass = J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, componentTypeClassObject);
-				
-				/* create an array class with one greater arity than desired */
-				UDATA count = dimensions + 1;
+
+				/* create an array class with the desired arity */
+				UDATA count = dimensions;
 				J9Class *componentArrayClass = componentTypeClass;
 				BOOLEAN exceptionIsPending = FALSE;
 	
@@ -2308,12 +2312,27 @@ JVM_SuspendThread(jint arg0, jint arg1)
 }
 
 
-
-jobject JNICALL
-JVM_UnloadLibrary(jint arg0)
+/* NOTE this is required by JDK15+ jdk.internal.loader.NativeLibraries.unload().
+ */
+#if JAVA_SPEC_VERSION >= 15
+void JNICALL JVM_UnloadLibrary(void *handle)
+#else /* JAVA_SPEC_VERSION >= 15 */
+jobject JNICALL JVM_UnloadLibrary(jint arg0)
+#endif /* JAVA_SPEC_VERSION >= 15 */
 {
+#if JAVA_SPEC_VERSION >= 15
+	Trc_SC_UnloadLibrary_Entry(handle);
+#if defined(WIN32)
+	FreeLibrary((HMODULE)handle);
+#elif defined(J9UNIX) || defined(J9ZOS390) /* defined(WIN32) */
+	dlclose(handle);
+#else /* defined(WIN32) */
+#error "Please implement J7vmi.c:JVM_UnloadLibrary(void *handle)"
+#endif /* defined(WIN32) */
+#else /* JAVA_SPEC_VERSION >= 15 */
 	assert(!"JVM_UnloadLibrary() stubbed!");
 	return NULL;
+#endif /* JAVA_SPEC_VERSION >= 15 */
 }
 
 
@@ -2556,9 +2575,15 @@ jvmDefineClassHelper(JNIEnv *env, jobject classLoaderObject,
 	vmFuncs->internalEnterVMFromJNI(currentThread);
 
 	if (NULL != className) {
-		utf8Name = (U_8*)vmFuncs->copyStringToUTF8WithMemAlloc(currentThread, J9_JNI_UNWRAP_REFERENCE(className), J9_STR_NULL_TERMINATE_RESULT | J9_STR_XLAT, "", 0, utf8NameStackBuffer, J9VM_PACKAGE_NAME_BUFFER_LENGTH, &utf8Length);
+		j9object_t classNameObject = J9_JNI_UNWRAP_REFERENCE(className);
+		utf8Name = (U_8*)vmFuncs->copyStringToUTF8WithMemAlloc(currentThread, classNameObject, J9_STR_NULL_TERMINATE_RESULT, "", 0, utf8NameStackBuffer, J9VM_PACKAGE_NAME_BUFFER_LENGTH, &utf8Length);
 		if (NULL == utf8Name) {
 			vmFuncs->setNativeOutOfMemoryError(currentThread, 0, 0);
+			goto done;
+		}
+
+		if (CLASSNAME_INVALID == vmFuncs->verifyQualifiedName(currentThread, utf8Name, utf8Length, CLASSNAME_VALID_NON_ARRARY)) {
+			vmFuncs->setCurrentException(currentThread, J9VMCONSTANTPOOL_JAVALANGNOCLASSDEFFOUNDERROR, (UDATA *)*(j9object_t*)className);
 			goto done;
 		}
 	}
@@ -2572,7 +2597,7 @@ retry:
 	if (vmFuncs->hashClassTableAt(classLoader, utf8Name, utf8Length) != NULL) {
 		/* Bad, we have already defined this class - fail */
 		threadEnv->monitor_exit(vm->classTableMutex);
-		vmFuncs->setCurrentException(currentThread, J9VMCONSTANTPOOL_JAVALANGLINKAGEERROR, (UDATA *)*(j9object_t*)className);
+		vmFuncs->setCurrentExceptionNLSWithArgs(currentThread, J9NLS_JCL_DUPLICATE_CLASS_DEFINITION, J9VMCONSTANTPOOL_JAVALANGLINKAGEERROR, utf8Length, utf8Name);
 		goto done;
 	}
 
@@ -2661,6 +2686,8 @@ JVM_Bind(jint arg0, jint arg1, jint arg2)
 	return NULL;
 }
 
+#if JAVA_SPEC_VERSION < 17
+
 jobject JNICALL
 JVM_DTraceActivate(jint arg0, jint arg1, jint arg2, jint arg3, jint arg4)
 {
@@ -2695,6 +2722,8 @@ JVM_DTraceIsSupported(jint arg0)
 	assert(!"JVM_DTraceIsSupported() stubbed!");
 	return NULL;
 }
+
+#endif /* JAVA_SPEC_VERSION < 17 */
 
 jobject JNICALL
 JVM_DefineClass(jint arg0, jint arg1, jint arg2, jint arg3, jint arg4, jint arg5)

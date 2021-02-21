@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -104,9 +104,6 @@ public:
 
 	bool isOK() const { return OK == _buildResult; }
 	BuildResult getBuildResult() const { return _buildResult; }
-	U_32 getVarHandleMethodTypePaddedSize() { return _constantPoolMap->getVarHandleMethodTypePaddedCount() * sizeof(U_16); }
-
-
 
 private:
 	class AnnotationWriter;
@@ -144,6 +141,7 @@ private:
 	void writeByteCodes(Cursor *cursor, ClassFileOracle::MethodIterator *methodIterator);
 	U_32 computeNativeSignatureSize(U_8 *methodDescriptor);
 	void writeNativeSignature(Cursor *cursor, U_8 *methodDescriptor, U_8 nativeArgCount);
+	void writePermittedSubclasses(Cursor *cursor, bool markAndCountOnly);
 
 	BufferManager *_bufferManager;
 	ClassFileOracle *_classFileOracle;
@@ -158,9 +156,9 @@ private:
 	UDATA _fieldsSRPKey;
 	UDATA _cpDescriptionShapeSRPKey;
 	UDATA _innerClassesSRPKey;
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 	UDATA _nestMembersSRPKey;
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 	UDATA _optionalInfoSRPKey;
 	UDATA _stackMapsSRPKey;
 	UDATA _enclosingMethodSRPKey;
@@ -173,6 +171,7 @@ private:
 	UDATA _staticSplitTableSRPKey;
 	UDATA _specialSplitTableSRPKey;
 	UDATA _recordInfoSRPKey;
+	UDATA _permittedSubclassesInfoSRPKey;
 };
 
 #endif /* ROMCLASSWRITER_HPP_ */

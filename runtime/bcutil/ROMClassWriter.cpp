@@ -296,9 +296,9 @@ ROMClassWriter::ROMClassWriter(BufferManager *bufferManager, ClassFileOracle *cl
 	_fieldsSRPKey(srpKeyProducer->generateKey()),
 	_cpDescriptionShapeSRPKey(srpKeyProducer->generateKey()),
 	_innerClassesSRPKey(srpKeyProducer->generateKey()),
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 	_nestMembersSRPKey(srpKeyProducer->generateKey()),
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 	_optionalInfoSRPKey(srpKeyProducer->generateKey()),
 	_enclosingMethodSRPKey(srpKeyProducer->generateKey()),
 	_sourceDebugExtensionSRPKey(srpKeyProducer->generateKey()),
@@ -309,7 +309,8 @@ ROMClassWriter::ROMClassWriter(BufferManager *bufferManager, ClassFileOracle *cl
 	_callSiteDataSRPKey(srpKeyProducer->generateKey()),
 	_staticSplitTableSRPKey(srpKeyProducer->generateKey()),
 	_specialSplitTableSRPKey(srpKeyProducer->generateKey()),
-	_varHandleMethodTypeLookupTableSRPKey(srpKeyProducer->generateKey())
+	_varHandleMethodTypeLookupTableSRPKey(srpKeyProducer->generateKey()),
+	_permittedSubclassesInfoSRPKey(srpKeyProducer->generateKey())
 {
 	_methodNotes = (MethodNotes *) _bufferManager->alloc(classFileOracle->getMethodsCount() * sizeof(MethodNotes));
 	if (NULL == _methodNotes) {
@@ -383,18 +384,22 @@ ROMClassWriter::writeROMClass(Cursor *cursor,
 		cursor->writeU32(_classFileOracle->getMemberAccessFlags(), Cursor::GENERIC);
 		cursor->writeU32(_classFileOracle->getInnerClassCount(), Cursor::GENERIC);
 		cursor->writeSRP(_innerClassesSRPKey, Cursor::SRP_TO_GENERIC);
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 		cursor->writeSRP(_srpKeyProducer->mapCfrConstantPoolIndexToKey(_classFileOracle->getNestHostNameIndex()), Cursor::SRP_TO_UTF8);
 		cursor->writeU16(_classFileOracle->getNestMembersCount(), Cursor::GENERIC);
 		cursor->writeU16(0, Cursor::GENERIC); /* padding */
 		cursor->writeSRP(_nestMembersSRPKey, Cursor::SRP_TO_GENERIC);
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 		cursor->writeU16(_classFileOracle->getMajorVersion(), Cursor::GENERIC);
 		cursor->writeU16(_classFileOracle->getMinorVersion(), Cursor::GENERIC);
 		cursor->writeU32(optionalFlags, Cursor::OPTIONAL_FLAGS);
 		cursor->writeSRP(_optionalInfoSRPKey, Cursor::SRP_TO_GENERIC);
 		cursor->writeU32(_classFileOracle->getMaxBranchCount(), Cursor::GENERIC);
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+		cursor->writeU32(_constantPoolMap->getInvokeCacheCount(), Cursor::GENERIC);
+#else /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 		cursor->writeU32(_constantPoolMap->getMethodTypeCount(), Cursor::GENERIC);
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 		cursor->writeU32(_constantPoolMap->getVarHandleMethodTypeCount(), Cursor::GENERIC);
 		cursor->writeU32(_classFileOracle->getBootstrapMethodCount(), Cursor::GENERIC);
 		cursor->writeU32(_constantPoolMap->getCallSiteCount(), Cursor::GENERIC);
@@ -418,15 +423,16 @@ ROMClassWriter::writeROMClass(Cursor *cursor,
 	writeFields(cursor, markAndCountOnly);
 	writeInterfaces(cursor, markAndCountOnly);
 	writeInnerClasses(cursor, markAndCountOnly);
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 	writeNestMembers(cursor, markAndCountOnly);
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 	writeNameAndSignatureBlock(cursor);
 	writeMethods(cursor, lineNumberCursor, variableInfoCursor, markAndCountOnly);
 	writeConstantPoolShapeDescriptions(cursor, markAndCountOnly);
 	writeAnnotationInfo(cursor);
 	writeSourceDebugExtension(cursor);
 	writeRecordComponents(cursor, markAndCountOnly);
+	writePermittedSubclasses(cursor, markAndCountOnly);
 	writeOptionalInfo(cursor);
 	writeCallSiteData(cursor, markAndCountOnly);
 	writeVarHandleMethodTypeLookupTable(cursor, markAndCountOnly);
@@ -722,14 +728,14 @@ public:
 		}
 	}
 
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 	void writeNestMembers()
 	{
 		if (!_markAndCountOnly) {
 			_classFileOracle->nestMembersDo(this); /* visitConstantPoolIndex */
 		}
 	}
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 	void writeInterfaces()
 	{
@@ -1095,7 +1101,7 @@ ROMClassWriter::writeInnerClasses(Cursor *cursor, bool markAndCountOnly)
 	Helper(cursor, markAndCountOnly, _classFileOracle, _srpKeyProducer, _srpOffsetTable, _constantPoolMap, size).writeInnerClasses();
 }
 
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 void
 ROMClassWriter::writeNestMembers(Cursor *cursor, bool markAndCountOnly)
 {
@@ -1104,7 +1110,7 @@ ROMClassWriter::writeNestMembers(Cursor *cursor, bool markAndCountOnly)
 	CheckSize _(cursor,size);
 	Helper(cursor, markAndCountOnly, _classFileOracle, _srpKeyProducer, _srpOffsetTable, _constantPoolMap, size).writeNestMembers();
 }
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 void
 ROMClassWriter::writeNameAndSignatureBlock(Cursor *cursor)
@@ -1734,6 +1740,36 @@ ROMClassWriter::writeRecordComponents(Cursor *cursor, bool markAndCountOnly)
 	}
 }
 
+/*
+ * PermittedSubclasses ROM class layout:
+ * 4 bytes for number of classes (actually takes up two, but use 4 for alignment)
+ * for number of classes:
+ *   4 byte SRP to class name
+ */
+void
+ROMClassWriter::writePermittedSubclasses(Cursor *cursor, bool markAndCountOnly)
+{
+	if (_classFileOracle->isSealed()) {
+		cursor->mark(_permittedSubclassesInfoSRPKey);
+
+		U_16 classCount = _classFileOracle->getPermittedSubclassesClassCount();
+		if (markAndCountOnly) {
+			cursor->skip(sizeof(U_32));
+		} else {
+			cursor->writeU32(classCount, Cursor::GENERIC);
+		}
+
+		for (U_16 index = 0; index < classCount; index++) {
+			if (markAndCountOnly) {
+				cursor->skip(sizeof(J9SRP));
+			} else {
+				U_16 classNameCpIndex = _classFileOracle->getPermittedSubclassesClassNameAtIndex(index);
+				cursor->writeSRP(_srpKeyProducer->mapCfrConstantPoolIndexToKey(classNameCpIndex), Cursor::SRP_TO_UTF8);
+			}
+		}
+	}
+}
+
 void
 ROMClassWriter::writeOptionalInfo(Cursor *cursor)
 {
@@ -1769,6 +1805,7 @@ ROMClassWriter::writeOptionalInfo(Cursor *cursor)
 	 * SRP to class annotations
 	 * SRP to class Type Annotations
 	 * SRP to record class component attributes
+	 * SRP to PermittedSubclasses attribute
 	 */
 	cursor->mark(_optionalInfoSRPKey);
 
@@ -1806,6 +1843,9 @@ ROMClassWriter::writeOptionalInfo(Cursor *cursor)
 	}
 	if (_classFileOracle->isRecord()) {
 		cursor->writeSRP(_recordInfoSRPKey, Cursor::SRP_TO_GENERIC);
+	}
+	if (_classFileOracle->isSealed()) {
+		cursor->writeSRP(_permittedSubclassesInfoSRPKey, Cursor::SRP_TO_GENERIC);
 	}
 }
 

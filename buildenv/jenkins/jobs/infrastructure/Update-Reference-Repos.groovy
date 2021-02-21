@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,7 +26,7 @@ if (!SETUP_LABEL) {
 
 LABEL = params.LABEL
 if (!LABEL) {
-    LABEL = 'ci.role.build'
+    LABEL = 'ci.role.build || ci.role.test'
 }
 
 CLEAN_CACHE_DIR = params.CLEAN_CACHE_DIR
@@ -37,16 +37,12 @@ if ((CLEAN_CACHE_DIR == null) || (CLEAN_CACHE_DIR == '')) {
 UPDATE_SETUP_NODES = params.UPDATE_SETUP_NODES
 UPDATE_BUILD_NODES = params.UPDATE_BUILD_NODES
 
-EXTENSIONS_REPOS = [[name: "openj9", url: "https://github.com/eclipse/openj9.git"]]
-
-properties([buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '', numToKeepStr: '10'))])
-
 def jobs = [:]
 
 timeout(time: 6, unit: 'HOURS') {
     timestamps {
         node(SETUP_LABEL) {
-            try{
+            try {
                 def gitConfig = scm.getUserRemoteConfigs().get(0)
                 def remoteConfigParameters = [url: "${gitConfig.getUrl()}"]
 
@@ -69,27 +65,27 @@ timeout(time: 6, unit: 'HOURS') {
                 variableFile.set_user_credentials()
 
                 def buildNodes = jenkins.model.Jenkins.instance.getLabel(LABEL).getNodes()
-                def slaveNodes = []
+                def todoNodes = []
                 def setupNodesNames = []
                 def buildNodesNames = []
 
                 if (UPDATE_SETUP_NODES) {
-                    // update openj9 repo cache on slaves that have SETUP_LABEL
+                    // update openj9 repo cache on nodes that have SETUP_LABEL
                     if (UPDATE_BUILD_NODES) {
                         // remove build nodes from the setup nodes collection
-                        slaveNodes.addAll(jenkins.model.Jenkins.instance.getLabel(SETUP_LABEL).getNodes().minus(buildNodes))
+                        todoNodes.addAll(jenkins.model.Jenkins.instance.getLabel(SETUP_LABEL).getNodes().minus(buildNodes))
                     } else {
-                        slaveNodes.addAll(jenkins.model.Jenkins.instance.getLabel(SETUP_LABEL).getNodes())
+                        todoNodes.addAll(jenkins.model.Jenkins.instance.getLabel(SETUP_LABEL).getNodes())
                     }
 
-                    //add master if slaveNodes does not contain it already
-                    if (slaveNodes.intersect(jenkins.model.Jenkins.instance.getLabel('master').getNodes()).isEmpty()) {
-                        slaveNodes.addAll(jenkins.model.Jenkins.instance.getLabel('master').getNodes())
+                    //add Jenkins Manager node if todoNodes does not contain it already
+                    if (todoNodes.intersect(jenkins.model.Jenkins.instance.getLabel('master').getNodes()).isEmpty()) {
+                        todoNodes.addAll(jenkins.model.Jenkins.instance.getLabel('master').getNodes())
                     }
 
-                    for (sNode in slaveNodes) {
+                    for (sNode in todoNodes) {
                         if (sNode.toComputer().isOffline()) {
-                            // skip offline slave
+                            // skip offline node
                             continue
                         }
 
@@ -100,9 +96,9 @@ timeout(time: 6, unit: 'HOURS') {
                         setupNodesNames.add(sNodeName)
 
                         jobs["${sNodeName}"] = {
-                            node("${sNodeName}"){
+                            node("${sNodeName}") {
                                 stage("${sNodeName} - Update Reference Repo") {
-                                    refresh(sNodeName, "${HOME}/openjdk_cache", EXTENSIONS_REPOS, true)
+                                    refresh(sNodeName, "${HOME}/openjdk_cache", [[name: "openj9", url: VARIABLES.openj9.get('default').get('repoUrl')]], true)
                                 }
                             }
                         }
@@ -110,10 +106,10 @@ timeout(time: 6, unit: 'HOURS') {
                 }
 
                 if (UPDATE_BUILD_NODES) {
-                    // update openjdk and openj9 repos cache on slaves
+                    // update openjdk and openj9 repos cache on nodes
                     for (aNode in buildNodes) {
                         if (aNode.toComputer().isOffline()) {
-                            // skip offline slave
+                            // skip offline node
                             continue
                         }
 
@@ -131,7 +127,12 @@ timeout(time: 6, unit: 'HOURS') {
                         }
 
                         // get Eclipse OpenJ9 extensions repositories from variables file
-                        def repos = get_openjdk_repos(VARIABLES.openjdk, foundLabel)
+                        def repos = []
+                        if (nodeLabels.contains('ci.role.build')) {
+                            repos.addAll(get_openjdk_repos(VARIABLES.openjdk, foundLabel))
+                            repos.add([name: "openj9", url: VARIABLES.openj9.get('default').get('repoUrl')])
+                            repos.add([name: "omr", url: VARIABLES.omr.get('default').get('repoUrl')])
+                        }
 
                         if (nodeLabels.contains('ci.role.test')) {
                             // add AdoptOpenJDK/openjdk-tests repository
@@ -140,12 +141,15 @@ timeout(time: 6, unit: 'HOURS') {
 
                         if (jenkins.model.Jenkins.instance.getLabel(SETUP_LABEL).getNodes().contains(aNode)) {
                             // add OpenJ9 repo
-                            repos.addAll(EXTENSIONS_REPOS)
+                            repos.add([name: "openj9", url: VARIABLES.openj9.get('default').get('repoUrl')])
                             setupNodesNames.add(aNode)
                         }
 
+                        // Remove any dups
+                        repos.unique()
+
                         jobs["${nodeName}"] = {
-                            node("${nodeName}"){
+                            node("${nodeName}") {
                                 stage("${nodeName} - Update Reference Repo") {
                                     refresh(nodeName, "${HOME}/openjdk_cache", repos, foundLabel)
                                 }
@@ -167,8 +171,8 @@ timeout(time: 6, unit: 'HOURS') {
 }
 
 /*
-* Creates and updates the git reference repository cache on the node.
-*/
+ * Creates and updates the git reference repository cache on the node.
+ */
 def refresh(node, cacheDir, repos, isKnownOs) {
     if (CLEAN_CACHE_DIR) {
         sh "rm -fr ${cacheDir}"
@@ -197,35 +201,31 @@ def refresh(node, cacheDir, repos, isKnownOs) {
 }
 
 /*
-* Add a git remote.
-*/
+ * Add a git remote.
+ */
 def config(remoteName, remoteUrl) {
     sh "git config remote.${remoteName}.url ${remoteUrl}"
     sh "git config remote.${remoteName}.fetch +refs/heads/*:refs/remotes/${remoteName}/*"
 }
 
 /*
-* Parses openjdk map from variables file and fetch the URL of the extensions
-* repositories for the supported releases. Returns an array.
-*/
+ * Parses openjdk map from variables file and fetch the URL of the extensions
+ * repositories for the supported releases. Returns an array.
+ */
 def get_openjdk_repos(openJdkMap, useDefault) {
     def repos = []
-    def releases = ['8', '11', '14', 'next']
 
     // iterate over VARIABLES.openjdk map and fetch the repository URL
     openJdkMap.entrySet().each { mapEntry ->
-        if (releases.contains(mapEntry.key.toString())) {
-            if (useDefault) {
-                repos.add([name: "jdk${mapEntry.key}", url: mapEntry.value.get('default').get('repoUrl')])
-            } else {
-               mapEntry.value.entrySet().each { entry ->
-                    if (entry.key != 'default') {
-                        repos.add([name: "jdk${mapEntry.key}", url: entry.value.get('repoUrl')])
-                    }
+        if (useDefault) {
+            repos.add([name: "jdk${mapEntry.key}", url: mapEntry.value.get('default').get('repoUrl')])
+        } else {
+           mapEntry.value.entrySet().each { entry ->
+                if (entry.key != 'default') {
+                    repos.add([name: "jdk${mapEntry.key}", url: entry.value.get('repoUrl')])
                 }
             }
         }
     }
-
     return repos
 }

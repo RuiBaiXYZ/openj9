@@ -40,7 +40,7 @@ timestamps {
                             }
 
                             // Push
-                            withCredentials([usernamePassword(credentialsId: 'b6987280-6402-458f-bdd6-7affc2e360d4', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                            withCredentials([usernamePassword(credentialsId: 'github-bot', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
                                 sh "git push ${HTTP}${USERNAME}:${PASSWORD}@${TARGET_REPO} --all"
                                 sh "git push ${HTTP}${USERNAME}:${PASSWORD}@${TARGET_REPO} --tags"
                             }
@@ -59,17 +59,17 @@ timestamps {
                             def default_sha = [omr_sha: 'Default']
                             def previous = readProperties defaults: default_sha, file: "${ARCHIVE_FILE}"
                             echo "Previous SHA:${previous.omr_sha}\nCurrent SHA:${current_sha}"
-                            if ( previous.omr_sha != current_sha ) {
+                            if (previous.omr_sha != current_sha) {
                                 build job: 'Pipeline-OMR-Acceptance', propagate: false, wait: false
                                 writeFile file: "${ARCHIVE_FILE}", text: "omr_sha=${current_sha}"
                             }
                             archiveArtifacts "${ARCHIVE_FILE}"
-                        } catch(e) {
+                        } catch (e) {
                             cleanWs()
                             throw e
                         }
                     }
-                } catch(e) {
+                } catch (e) {
                     slackSend channel: '#jenkins', color: 'danger', message: "Failed: ${JOB_NAME} #${BUILD_NUMBER} (<${BUILD_URL}|Open>)"
                     throw e
                 }

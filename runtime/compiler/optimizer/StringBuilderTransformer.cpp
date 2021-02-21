@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -338,9 +338,9 @@ TR::Node* TR_StringBuilderTransformer::findStringBuilderChainedAppendArguments(T
 
             if (acallSymbol != NULL)
                {
-               TR::RecognizedMethod recogniedMethod = acallSymbol->getRecognizedMethod();
+               TR::RecognizedMethod recognizedMethod = acallSymbol->getRecognizedMethod();
 
-               switch (recogniedMethod)
+               switch (recognizedMethod)
                   {
                   case TR::java_lang_StringBuilder_append_bool:
                   case TR::java_lang_StringBuilder_append_char:
@@ -360,7 +360,7 @@ TR::Node* TR_StringBuilderTransformer::findStringBuilderChainedAppendArguments(T
                            traceMsg(comp(), "[0x%p] Adding argument of java/lang/StringBuilder.append acall node.\n", acallNode);
                            }
 
-                        appendArguments.add(new (trHeapMemory()) TR_Pair<TR::Node*, TR::RecognizedMethod> (acallNode->getSecondChild(), recogniedMethod));
+                        appendArguments.add(new (trHeapMemory()) TR_Pair<TR::Node*, TR::RecognizedMethod> (acallNode->getSecondChild(), recognizedMethod));
 
                         // The result of this append call is chained to the next so update the current receiver
                         stringBuilderReceiver = acallNode;
@@ -616,8 +616,8 @@ int32_t TR_StringBuilderTransformer::computeHeuristicStringBuilderInitCapacity(L
 
                      if (stringBuildAppendStringCriticalSection.hasVMAccess())
                         {
-                        uintptrj_t stringObjectLocation = (uintptrj_t)symbol->castToStaticSymbol()->getStaticAddress();
-                        uintptrj_t stringObject = comp()->fej9()->getStaticReferenceFieldAtAddress(stringObjectLocation);
+                        uintptr_t stringObjectLocation = (uintptr_t)symbol->castToStaticSymbol()->getStaticAddress();
+                        uintptr_t stringObject = comp()->fej9()->getStaticReferenceFieldAtAddress(stringObjectLocation);
                         capacity += comp()->fe()->getStringUTF8Length(stringObject);
 
                         break;

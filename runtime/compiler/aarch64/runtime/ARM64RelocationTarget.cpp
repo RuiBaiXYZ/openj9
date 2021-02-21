@@ -35,7 +35,7 @@ void
 TR_ARM64RelocationTarget::storeCallTarget(uintptr_t callTarget, uint8_t *reloLocation)
    {
    // reloLocation points at the start of the call offset, so just store the uint8_t * at reloLocation
-   storePointer((uint8_t *)callTarget, reloLocation);;
+   storePointer((uint8_t *)callTarget, reloLocation);
    }
 
 uint32_t
@@ -103,7 +103,7 @@ bool
 TR_ARM64RelocationTarget::useTrampoline(uint8_t *helperAddress, uint8_t *baseLocation)
    {
    return
-      !reloRuntime()->comp()->target().cpu.isTargetWithinUnconditionalBranchImmediateRange((intptrj_t)helperAddress, (intptrj_t)baseLocation) ||
+      !reloRuntime()->comp()->target().cpu.isTargetWithinUnconditionalBranchImmediateRange((intptr_t)helperAddress, (intptr_t)baseLocation) ||
       TR::Options::getCmdLineOptions()->getOption(TR_StressTrampolines);
    }
 

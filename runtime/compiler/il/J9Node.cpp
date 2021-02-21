@@ -298,8 +298,8 @@ J9::Node::processJNICall(TR::TreeTop * callNodeTreeTop, TR::ResolvedMethodSymbol
       }
 #endif
 
-   if (comp->canTransformUnsafeCopyToArrayCopy() &&
-       (methodSymbol->getRecognizedMethod() == TR::sun_misc_Unsafe_copyMemory))
+   if (comp->canTransformUnsafeCopyToArrayCopy()
+         && self()->isUnsafeCopyMemoryIntrinsic())
       {
       return self();
       }
@@ -314,6 +314,10 @@ J9::Node::processJNICall(TR::TreeTop * callNodeTreeTop, TR::ResolvedMethodSymbol
       return self();
       }
 
+   if (methodSymbol->getRecognizedMethod() == TR::jdk_internal_loader_NativeLibraries_load)
+      {
+      return self();
+      }
 
    if (methodSymbol->canReplaceWithHWInstr())
       return self();
@@ -434,7 +438,7 @@ J9::Node::processJNICall(TR::TreeTop * callNodeTreeTop, TR::ResolvedMethodSymbol
 
       TR_ASSERT ((callerCP != -1 || callerSymbol->isNative()), "Cannot have cp index -1 for JNI calls other than JNI thunks.\n");
 
-      TR::Node *addressOfJ9Class = TR::Node::aconst(newNode, (uintptrj_t)resolvedMethod->containingClass());
+      TR::Node *addressOfJ9Class = TR::Node::aconst(newNode, (uintptr_t)resolvedMethod->containingClass());
       addressOfJ9Class->setIsClassPointerConstant(true);
       TR::Node *addressOfJavaLangClassReference;
 
@@ -2209,6 +2213,27 @@ J9::Node::setDontInlinePutOrderedCall()
          _flags.set(dontInlineUnsafePutOrderedCall);
       }
 
+   }
+
+bool
+J9::Node::isUnsafeCopyMemoryIntrinsic()
+   {
+   if (self()->getOpCode().isCall() && self()->getSymbol()->isMethod())
+      {
+      TR::MethodSymbol *symbol = self()->getSymbol()->getMethodSymbol();
+      if (symbol && symbol->isNative())
+         {
+         switch (symbol->getRecognizedMethod())
+            {
+            case TR::sun_misc_Unsafe_copyMemory:
+            case TR::jdk_internal_misc_Unsafe_copyMemory0:
+               return true;
+            default:
+               break;
+            }
+         }
+      }
+   return false;
    }
 
 bool

@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2016, 2020 IBM Corp. and others
+Copyright (c) 2016, 2021 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -32,7 +32,7 @@ Linux x86-64 cmprssptrs OpenJ9 SDK:
     export TEST_JDK_HOME=/my/openj9/jdk
     make compile               // downloads test related material/libs
                                // and compiles test material
-    make _sanity.functional    // generates makefiles and runs tests
+    make _sanity.functional.regular    // generates makefiles and runs tests
 ```
 
 Please read [OpenJ9 Test User Guide](./docs/OpenJ9TestUserGuide.md) for
@@ -56,7 +56,7 @@ By default, `make compile` compiles all tests. This is the safest way
 to ensure all the test code needed has been compiled. However, there is a
 way to shortcut the compilation process to reduce compilation time. If
 `BUILD_LIST` is set, `make compile` will only compile the folder names
-names that match within `BUILD_LIST`.
+that match within `BUILD_LIST`.
 
 ```
     export BUILD_LIST=functional/TestUtilities,functional/Java8andUp
@@ -84,21 +84,31 @@ that describes how to add container-based 3rd party application tests
 automated test builds at the AdoptOpenJDK project.
 
 ## 3) How to disable a test?
-In playlist.xml, to disable a test target, add
+
+- In playlist.xml, to disable a test target, add
 
  ```
-    <disabled>Reason for disabling test, should include issue number</disabled>
+    <disabled>
+        <comment>issue url or issue comment url</comment>
+    </disabled>
  ```
 
 inside the `<test>` element that you want to disable.
 
-- Disable an individual test class
-    - testNG test
+- auto exclusion
+Instead of having to manually create a PR to disable test targets, they can now be automatically disabled via Github workflow (see autoTestPR.yml). In the issue that describes the test failure, add a comment with the following format:
+
+```auto exclude test <testName>```
+
+- more granular exclusion for testNG test
+
 add a line to `TestConfig/resources/excludes/latest_exclude_$(JDK_VERSION).txt`
  file with issue number and specific specs to disable
 ```
     org.openj9.test.java.lang.management.TestOperatingSystemMXBean 123 linux_x86-64
 ```
+
+Please read [Configure environment](./docs/OpenJ9TestUserGuide.md#5-exclude-tests) for details and examples. 
 
 ## 4) How to execute a different group of tests?
 
@@ -109,7 +119,7 @@ Supported levels are `sanity|extended`
 
 Supported groups  are `functional|system|openjdk|external|perf|jck`
 
-Supported groups  are `regular|native`
+Supported types  are `regular|native`
 
 ```
     make _sanity
@@ -119,12 +129,20 @@ Supported groups  are `regular|native`
     make _extended.functional.native
 ```
 
-## 5) How to execute disabled tests?
+## 5) How to execute a list of tests?
+
+A list of Tests can be executed through the `_testList` target followed by parameter `TESTLIST`. User can specify comma separated list of test names in `TESTLIST`. Note:  level, group, type or combinations of above (e.g., functional, sanity, sanity.native) are not supported in the TESTLIST.
+
+```
+make _testList TESTLIST=jit_jitt,jit_recognizedMethod,testSCCMLTests2_1
+```
+
+## 6) How to execute disabled tests?
 
 If a test is disabled using `<disabled>` tag in playlist.xml, it can be executed through specifying the test target or adding `disabled` in front of regular target.
 
 ```    
-    make _testA    // testA has <disabled> tag in playlist.xml  
+    make _disabled.testA    // testA has <disabled> tag in playlist.xml  
     make _disabled.sanity.functional
     make _disabled.extended
 ```
@@ -137,7 +155,7 @@ Disabled tests and reasons can also be printed through adding `echo.disabled` in
     make _echo.disabled.extended
 ```
 
-## 6) How to execute a directory of tests?
+## 7) How to execute a directory of tests?
 
 Only the tests in `BUILD_LIST` will be executed.
 
@@ -147,11 +165,11 @@ Only the tests in `BUILD_LIST` will be executed.
     make _sanity
 ```
 
-## 7) How to run an individual JCK?
+## 8) How to run an individual JCK?
 
 Please read [How-to Run customized JCK test targets](https://github.com/AdoptOpenJDK/openjdk-tests/blob/master/jck/README.md) for details.
 
-## 8) How to run the test with different `JDK_VERSION` and `JDK_IMPL`?
+## 9) How to run the test with different `JDK_VERSION` and `JDK_IMPL`?
 
 User can run tests against different jdk version and/or jdk
 implementation. While the default values of these variables match a
@@ -164,7 +182,7 @@ By default, AUTO_DETECT is turned on, and the test framework will
 auto detect SPEC, JDK_IMPL, and JDK_VERSION. Please read [Configure environment](./docs/OpenJ9TestUserGuide.md#1-configure-environment) for
 details and examples. 
 
-## 9) How to interpret test results?
+## 10) How to interpret test results?
 - test results summary
 
 At the end of each run, test results summary will be printed:
@@ -204,7 +222,7 @@ If a test is skipped, it means that this test cannot be run on this
 platform due to jvm options, platform requirements and/or test
 capabilities.
 
-## 10) How to rerun failed tests?
+## 11) How to rerun failed tests?
 
 `failed.mk` will be generated if there is any failed test target.
 We can rerun failed tests as following:

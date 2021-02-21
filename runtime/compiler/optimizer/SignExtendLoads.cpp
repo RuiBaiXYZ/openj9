@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -115,7 +115,7 @@ void TR_SignExtendLoads::emptyHashTable()
    {
      if(false)traceMsg(comp(), "emptying the hash table\n");
    for(int i=0; i < _sharedNodesHash._numBuckets;++i)
-    _sharedNodesHash._buckets[i] = NULL;;
+    _sharedNodesHash._buckets[i] = NULL;
    }
 
 // -------------------------------------------------------------------------------------------
@@ -388,7 +388,7 @@ bool TR_SignExtendLoads::ConvertSubTreeToLong(TR::Node *parent, TR::Node *node, 
             }
          return true;
 
-        /* In general it's not free to an an l2i to an iconst, unless the constant is small enough
+        /* In general it's not free to l2i to an iconst, unless the constant is small enough
          * which we check in below case
          */
       case TR::iconst:

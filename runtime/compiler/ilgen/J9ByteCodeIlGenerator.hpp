@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -94,6 +94,7 @@ private:
    int32_t      genGoto(int32_t);
    int32_t      genIfOneOperand(TR::ILOpCodes);
    int32_t      genIfTwoOperand(TR::ILOpCodes);
+   int32_t      genIfAcmpEqNe(TR::ILOpCodes);
    int32_t      genIfImpl(TR::ILOpCodes);
 
    /** \brief
@@ -121,8 +122,22 @@ private:
    void         genInvokeVirtual(int32_t);
    void         genInvokeInterface(int32_t);
    void         genInvokeDynamic(int32_t callSiteIndex);
-   TR::Node *    genInvokeHandle(int32_t cpIndex);
-   TR::Node *    genInvokeHandleGeneric(int32_t cpIndex);
+   TR::Node *   genInvokeHandle(int32_t cpIndex);
+   TR::Node *   genInvokeHandleGeneric(int32_t cpIndex);
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+   /**
+    * \brief
+    *    Generates IL to load elements from invokeCacheArray, resulting in load of
+    *    appendix and memberName objects into the stack to be used as
+    *    parameters for adapter method call node. memberName object is only required
+    *    to be loaded when the invokedynamic/invokehandle is unresolved
+    *
+    * \param tableEntrySymRef the symref representing the invokeCacheArray
+    * \param invokeCacheArray the static address of the invokeCacheArray
+    * \param isUnresolved
+    */
+   void         loadInvokeCacheArrayElements(TR::SymbolReference *tableEntrySymRef, uintptr_t * invokeCacheArray, bool isUnresolved);
+#endif
 
    TR::Node *    genHandleTypeCheck(TR::Node *handle, TR::Node *expectedType);
 
@@ -162,7 +177,9 @@ private:
    // GenLoadStore
    //
    void         loadInstance(int32_t);
-   void         loadInstance(TR::SymbolReference *, int32_t);
+   void         loadInstance(TR::SymbolReference *);
+   void         loadFlattenableInstance(int32_t);
+   void         loadFlattenableInstanceWithHelper(int32_t cpIndex);
    void         loadStatic(int32_t);
    void         loadAuto(TR::DataType type, int32_t slot, bool isAdjunct = false);
    TR::Node     *loadSymbol(TR::ILOpCodes, TR::SymbolReference *);
@@ -184,7 +201,9 @@ private:
    void         loadMonitorArg();
 
    void         storeInstance(int32_t);
-   void         storeInstance(TR::SymbolReference *symRef);
+   void         storeInstance(TR::SymbolReference *);
+   void         storeFlattenableInstance(int32_t);
+   void         storeFlattenableInstanceWithHelper(int32_t);
    void         storeStatic(int32_t);
    void         storeAuto(TR::DataType type, int32_t slot, bool isAdjunct = false);
    void         storeArrayElement(TR::DataType dt){ storeArrayElement(dt, comp()->il.opCodeForIndirectArrayStore(dt)); }
@@ -198,7 +217,7 @@ private:
    //
    TR::TreeTop * genTreeTop(TR::Node *);
 
-   TR::Node    * loadConstantValueIfPossible(TR::Node *, uintptrj_t, TR::DataType type = TR::Int32, bool isArrayLength = true);
+   TR::Node    * loadConstantValueIfPossible(TR::Node *, uintptr_t, TR::DataType type = TR::Int32, bool isArrayLength = true);
 
    void         genArrayLength();
    void         genContiguousArrayLength(int32_t width);
@@ -229,7 +248,11 @@ private:
    void         genMonitorExit(bool);
    TR_OpaqueClassBlock *loadValueClass(int32_t classCpIndex);
    void         genDefaultValue(uint16_t classCpIndex);
+   void         genDefaultValue(TR_OpaqueClassBlock *valueTypeClass);
    void         genWithField(uint16_t fieldCpIndex);
+   void         genWithField(TR::SymbolReference *, TR_OpaqueClassBlock *);
+   void         genFlattenableWithField(uint16_t, TR_OpaqueClassBlock *);
+   void         genFlattenableWithFieldWithHelper(uint16_t fieldCpIndex);
    void         genFlush(int32_t nargs);
    void         genFullFence(TR::Node *node);
    void         handlePendingPushSaveSideEffects(TR::Node *, int32_t stackSize = -1);
@@ -237,6 +260,7 @@ private:
    void         handleSideEffect(TR::Node *);
    bool         valueMayBeModified(TR::Node *, TR::Node *);
    TR::Node *    genCompressedRefs(TR::Node *, bool genTT = true, int32_t isLoad = 1);
+   void         abortForUnresolvedValueTypeOp(const char* bytecodeName, const char* refType);
 
    // IlGenerator
    //
@@ -346,9 +370,9 @@ private:
    bool replaceField(TR::Node* node, char* destClass, char* destFieldName, char* destFieldSignature, int ParmIndex);
    bool replaceStatic(TR::Node* node, char* dstClassName, char* staticName, char* type);
 
-   uintptrj_t walkReferenceChain(TR::Node *node, uintptrj_t receiver);
+   uintptr_t walkReferenceChain(TR::Node *node, uintptr_t receiver);
 #if defined(J9VM_OPT_JITSERVER)
-   void packReferenceChainOffsets(TR::Node *node, std::vector<uintptrj_t>& listOfOffsets);
+   void packReferenceChainOffsets(TR::Node *node, std::vector<uintptr_t>& listOfOffsets);
 #endif
 
    bool hasFPU();
@@ -412,4 +436,3 @@ private:
    };
 
 #endif
-

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,14 +20,14 @@
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
-#ifndef TR_J9_CODEGENERATORBASE_INCL
-#define TR_J9_CODEGENERATORBASE_INCL
+#ifndef J9_CODEGENERATOR_INCL
+#define J9_CODEGENERATOR_INCL
 
 /*
  * The following #define and typedef must appear before any #includes in this file
  */
-#ifndef TRJ9_CODEGENERATORBASE_CONNECTOR
-#define TRJ9_CODEGENERATORBASE_CONNECTOR
+#ifndef J9_CODEGENERATOR_CONNECTOR
+#define J9_CODEGENERATOR_CONNECTOR
 
 namespace J9 { class CodeGenerator; }
 namespace J9 { typedef J9::CodeGenerator CodeGeneratorConnector; }
@@ -63,9 +63,14 @@ namespace J9
 
 class OMR_EXTENSIBLE CodeGenerator : public OMR::CodeGeneratorConnector
    {
+
+protected:
+
+   CodeGenerator(TR::Compilation *comp);
+
 public:
 
-   CodeGenerator();
+   void initialize();
 
    TR_J9VMBase *fej9();
 
@@ -79,7 +84,16 @@ public:
 
    void lowerTreeIfNeeded(TR::Node *node, int32_t childNumber, TR::Node *parent, TR::TreeTop *tt);
 
+   void lowerNonhelperCallIfNeeded(TR::Node *node, TR::TreeTop *tt);
+   void fastpathAcmpHelper(TR::Node *node, TR::TreeTop *tt, bool trace);
+
    void lowerDualOperator(TR::Node *parent, int32_t childNumber, TR::TreeTop *treeTop);
+
+private:
+
+   void lowerArrayStoreCHK(TR::Node *node, TR::TreeTop *tt);
+
+public:
 
    bool collectSymRefs(TR::Node *node, TR_BitVector *symRefs, vcount_t secondVisitCount);
 
@@ -204,6 +218,7 @@ public:
    TR::SymbolReference *getFreeVariableSizeSymRef(int byteLength);
    void checkForUnfreedVariableSizeSymRefs();
 
+   bool allowGuardMerging();
    void  registerAssumptions();
 
    void jitAddPicToPatchOnClassUnload(void *classPointer, void *addressToBePatched);
@@ -219,8 +234,8 @@ public:
    // GPU
    //
    static const int32_t GPUAlignment = 128;
-   uintptrj_t objectLengthOffset();
-   uintptrj_t objectHeaderInvariant();
+   uintptr_t objectLengthOffset();
+   uintptr_t objectHeaderInvariant();
 
   enum GPUScopeType
       {
@@ -298,21 +313,52 @@ public:
    TR_BitVector *setLiveMonitors(TR_BitVector *v) {return (_liveMonitors = v);}
 
 public:
+   /*
+    * \brief
+    *    Get the most abstract type the monitor may be operating on.
+    *
+    * \note
+    *    java.lang.Object is only returned when the monitor object is of type java.lang.Object but not any subclasses
+    */
+   TR_OpaqueClassBlock* getMonClass(TR::Node* monNode);
 
-TR_OpaqueClassBlock* getMonClass(TR::Node* monNode);
+   /*
+    * \brief
+    *    Whether a monitor object is of value type
+    *
+    * \return
+    *    TR_yes The monitor object is definitely value type
+    *    TR_no The monitor object is definitely identity type
+    *    TR_maybe It is unknown whether the monitor object is identity type or value type
+    */
+   TR_YesNoMaybe isMonitorValueType(TR::Node* monNode);
+   /*
+    * \brief
+    *    Whether a monitor object is of value based class type or value type.
+    *    This API checks if value based or value type is enabled first.
+    *
+    * \return
+    *    TR_yes The monitor object is definitely value based class type or value type
+    *    TR_no The monitor object is definitely not value based class type or value type
+    *    TR_maybe It is unknown whether the monitor object is value based class type or value type
+    */
+   TR_YesNoMaybe isMonitorValueBasedOrValueType(TR::Node* monNode);
 
 protected:
 
-TR_Array<void *> _monitorMapping;
+typedef TR::typed_allocator<std::pair<const ncount_t , TR_OpaqueClassBlock*>, TR::Region &> MonitorMapAllocator;
+typedef std::map<ncount_t , TR_OpaqueClassBlock *, std::less<ncount_t>, MonitorMapAllocator> MonitorTypeMap;
+
+MonitorTypeMap _monitorMapping; // map global node index to monitor object class
 
 void addMonClass(TR::Node* monNode, TR_OpaqueClassBlock* clazz);
 
 private:
 
    TR_HashTabInt _uncommonedNodes;               // uncommoned nodes keyed by the original nodes
-   
+
    TR::list<TR::Node*> _nodesSpineCheckedList;
-   
+
    TR::list<TR_Pair<TR_ResolvedMethod, TR::Instruction> *> _jniCallSites; // list of instrutions representing direct jni call sites
 
    uint16_t changeParmLoadsToRegLoads(TR::Node*node, TR::Node **regLoads, TR_BitVector *globalRegsWithRegLoad, TR_BitVector &killedParms, vcount_t visitCount); // returns number of RegLoad nodes created
@@ -323,14 +369,14 @@ private:
                                        const void *location)
       {
       // If we have a class pointer to consider, it should look like one.
-      const uintptrj_t j9classEyecatcher = 0x99669966;
+      const uintptr_t j9classEyecatcher = 0x99669966;
 #if defined(J9VM_OPT_JITSERVER)
       if (allegedClassPointer != NULL && !comp->isOutOfProcessCompilation())
 #else
       if (allegedClassPointer != NULL)
 #endif /* defined(J9VM_OPT_JITSERVER) */
          {
-         TR_ASSERT(*(const uintptrj_t*)allegedClassPointer == j9classEyecatcher,
+         TR_ASSERT(*(const uintptr_t*)allegedClassPointer == j9classEyecatcher,
                    "expected a J9Class* for omitted runtime assumption");
          }
 
@@ -391,11 +437,11 @@ public:
    void setSupportsBigDecimalLongLookasideVersioning() { _flags3.set(SupportsBigDecimalLongLookasideVersioning);}
 
    bool constLoadNeedsLiteralFromPool(TR::Node *node) { return false; }
-   
+
    // Java, likely Z
    bool supportsTrapsInTMRegion() { return true; }
 
-   // J9	
+   // J9
    int32_t getInternalPtrMapBit() { return 31;}
 
    // --------------------------------------------------------------------------
@@ -534,12 +580,27 @@ public:
    TR::Node *generatePoisonNode(
       TR::Block *currentBlock,
       TR::SymbolReference *liveAutoSymRef);
-   
+
 
    /**
     * \brief Determines whether VM Internal Natives is supported or not
     */
    bool supportVMInternalNatives();
+
+
+   /**
+    * \brief Determines whether the code generator supports stack allocations
+    */
+   bool supportsStackAllocations() { return false; }
+
+   /**
+    * \brief Initializes the Linkage Info word found before the interpreter entry point.
+    *
+    * \param[in] linkageInfo : pointer to the linkage info word
+    *
+    * \return Linkage Info word
+    */
+   uint32_t initializeLinkageInfo(void *linkageInfoPtr);
 
 private:
 
@@ -551,7 +612,7 @@ private:
       SupportsInlineStringIndexOf                         = 0x00000008, /*! codegen inlining of Java string index of */
       SupportsInlineStringHashCode                        = 0x00000010, /*! codegen inlining of Java string hash code */
       SupportsInlineConcurrentLinkedQueue                 = 0x00000020,
-      SupportsBigDecimalLongLookasideVersioning           = 0x00000040, 
+      SupportsBigDecimalLongLookasideVersioning           = 0x00000040,
       };
 
    flags32_t _j9Flags;

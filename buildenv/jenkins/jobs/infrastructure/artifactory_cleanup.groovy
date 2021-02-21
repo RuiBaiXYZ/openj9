@@ -18,7 +18,7 @@
  * [2] http://openjdk.java.net/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
-*******************************************************************************/
+ *******************************************************************************/
 
 /**
  * This script deletes old artifacts off the Artifactory server
@@ -41,7 +41,8 @@ timestamps {
         checkout scm
         def variableFile = load 'buildenv/jenkins/common/variables-functions.groovy'
         variableFile.parse_variables_file()
-        variableFile.set_artifactory_config()
+        variableFile.set_basic_artifactory_config()
+        println ARTIFACTORY_CONFIG
 
         def artifactory_server = params.ARTIFACTORY_SERVER ? params.ARTIFACTORY_SERVER : env.ARTIFACTORY_SERVER
         def server = Artifactory.server artifactory_server
@@ -58,7 +59,7 @@ timestamps {
                 } else {
                     ret = true
                 }
-                switch(params.JOB_TYPE) {
+                switch (params.JOB_TYPE) {
                     case 'TIME':
                         cleanupTime(ARTIFACTORY_SERVER_URL, ARTIFACTORY_REPO, ARTIFACTORY_DAYS_TO_KEEP_ARTIFACTS, artifactoryCreds)
                     break
@@ -120,6 +121,10 @@ def cleanupBuilds(artifactory_server, artifactory_repo, jobToCheck, artifactory_
             echo 'There are no artifacts to delete'
             amount_deleted = 0
         }
+        if (artifactory_max_num_artifacts == 0) {
+            echo "Deleting Entire Build '${jobToCheck}'"
+            httpRequest authentication: artifactoryCreds, httpMode: 'DELETE', consoleLogResponseBody: true, url: "${artifactory_server}/${env.ARTIFACTORY_REPO}${testSubfolder}/${jobToCheck}"
+        }
         currentBuild.description += "<br>Deleted ${amount_deleted} artifacts"
     }
 }
@@ -127,7 +132,7 @@ def cleanupBuilds(artifactory_server, artifactory_repo, jobToCheck, artifactory_
 def getFolderNumbers(folderURI) {
     def folderNumbers = []
     folderURI.each {
-        folderNumbers.add(it.minus('/') as int )
+        folderNumbers.add(it.minus('/') as int)
     }
     return folderNumbers.sort()
 }

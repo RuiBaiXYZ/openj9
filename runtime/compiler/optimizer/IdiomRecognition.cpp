@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -69,6 +69,7 @@
 #include "optimizer/TransformUtil.hpp"
 #include "optimizer/UseDefInfo.hpp"
 #include "ras/Debug.hpp"
+#include "omrformatconsts.h"
 
 #define OPT_DETAILS "O^O NEWLOOPREDUCER: "
 #define VERBOSE 0
@@ -1032,6 +1033,12 @@ TR_CISCGraph::makePreparedCISCGraphs(TR::Compilation *c)
    else
       graphsInitialized = true;
 
+#if defined(J9VM_OPT_JITSERVER)
+   // Prepared CISC graphs are static, i.e. initialized only once.
+   // Need to use the global allocator here.
+   if (c->isOutOfProcessCompilation())
+      c->fej9()->_compInfoPT->exitPerClientAllocationRegion();
+#endif
    int32_t num = 0;
    bool genTRxx = c->cg()->getSupportsArrayTranslateTRxx();
    bool genSIMD = c->cg()->getSupportsVectorRegisters() && !c->getOption(TR_DisableSIMDArrayTranslate);
@@ -1204,6 +1211,12 @@ TR_CISCGraph::makePreparedCISCGraphs(TR::Compilation *c)
       if (minimumHotnessPrepared > hotness)
          minimumHotnessPrepared = hotness;
       }
+
+#if defined(J9VM_OPT_JITSERVER)
+   // Return to per-client allocation
+   if (c->isOutOfProcessCompilation())
+      c->fej9()->_compInfoPT->enterPerClientAllocationRegion();
+#endif
    }
 
 void
@@ -5207,11 +5220,11 @@ TR_CISCTransformer::extractMatchingRegion()
                   isEmbed = false;
                   if (showMesssagesStdout())
                      {
-                     printf("!!!!!!!!!!!!!! Predecessor of tID %d is different from that of idiom.\n",tID);
+                     printf("!!!!!!!!!!!!!! Predecessor of tID %" OMR_PRIu32 " is different from that of idiom.\n", tID);
                      }
                   if (trace())
                      {
-                     traceMsg(comp(), "Predecessor of tID %d is different from that of idiom.\n",tID);
+                     traceMsg(comp(), "Predecessor of tID %" OMR_PRIu32 " is different from that of idiom.\n", tID);
                      }
                   }
             }
@@ -7616,13 +7629,13 @@ TR_CISCTransformer::computeTopologicalEmbedding(TR_CISCGraph *P, TR_CISCGraph *T
       bool inlined = getBCIndexMinMax(_candidateRegion, &minIndex, &maxIndex, &minLN, &maxLN, true);
       if (minIndex <= maxIndex)
          {
-         sprintf(tmpbuf, ", bcindex %d - %d linenumber %d - %d%s.", minIndex, maxIndex, minLN, maxLN, inlined ? " (inlined)" : "");
+         sprintf(tmpbuf, ", bcindex %" OMR_PRIu32 " - %" OMR_PRIu32 " linenumber %" OMR_PRIu32 " - %" OMR_PRIu32 "%s.", minIndex, maxIndex, minLN, maxLN, inlined ? " (inlined)" : "");
          bcinfo = tmpbuf;
          }
 #endif
 #if SHOW_STATISTICS
       if (showMesssagesStdout())
-         printf("!! Hash=0x%llx %s %s\n", getHashValue(_candidateRegion), P->getTitle(), T->getTitle());
+         printf("!! Hash=0x%" OMR_PRIx64 " %s %s\n", getHashValue(_candidateRegion), P->getTitle(), T->getTitle());
 #endif
 
       if (trace()) traceMsg(comp(), "***** Transformed *****, %s, %s, %s, loop:%d%s\n",
@@ -7837,7 +7850,7 @@ TR_CISCTransformer::insertBitsKeepAliveCalls(TR::Block * block)
          {
          TR::TreeTop * prev = info->_prevTreeTop;
          TR::Block * keepAliveBlock = info->_block;
-         traceMsg(comp(), "\t\tInserting KeepAlive call clone node: %p from block %d [%p] node: %p into block :%d %p\n",callNode, keepAliveBlock->getNumber(), keepAliveBlock, tt->getNode(), block->getNumber(), block);
+         traceMsg(comp(), "\t\tInserting KeepAlive call clone node: %p from block %d [%p] node: %p into block: %d %p\n", callNode, keepAliveBlock->getNumber(), keepAliveBlock, tt->getNode(), block->getNumber(), block);
          }
       }
    }
@@ -7861,4 +7874,3 @@ TR_CISCTransformer::restoreBitsKeepAliveCalls()
       prev->insertAfter(tt);
       }
    }
-

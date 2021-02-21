@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -25,24 +25,32 @@
 #include "control/CompilationRuntime.hpp" // for CompilationInfo
 #include "control/MethodToBeCompiled.hpp" // for TR_MethodToBeCompiled
 #include "control/JITServerHelpers.hpp"
+#include "env/ut_j9jit.h"
 #include "net/ServerStream.hpp" // for JITServer::ServerStream
 #include "runtime/RuntimeAssumptions.hpp" // for TR_AddressSet
+#include "env/JITServerPersistentCHTable.hpp"
+#include "env/VerboseLog.hpp"
+#include "runtime/SymbolValidationManager.hpp"
 
 
-ClientSessionData::ClientSessionData(uint64_t clientUID, uint32_t seqNo) : 
-   _clientUID(clientUID), _expectedSeqNo(seqNo), _maxReceivedSeqNo(seqNo), _OOSequenceEntryList(NULL),
-   _chTableClassMap(decltype(_chTableClassMap)::allocator_type(TR::Compiler->persistentAllocator())),
-   _romClassMap(decltype(_romClassMap)::allocator_type(TR::Compiler->persistentAllocator())),
-   _J9MethodMap(decltype(_J9MethodMap)::allocator_type(TR::Compiler->persistentAllocator())),
-   _classByNameMap(decltype(_classByNameMap)::allocator_type(TR::Compiler->persistentAllocator())),
-   _classChainDataMap(decltype(_classChainDataMap)::allocator_type(TR::Compiler->persistentAllocator())),
-   _constantPoolToClassMap(decltype(_constantPoolToClassMap)::allocator_type(TR::Compiler->persistentAllocator())),
+ClientSessionData::ClientSessionData(uint64_t clientUID, uint32_t seqNo, TR_PersistentMemory *persistentMemory, bool usesPerClientMemory) : 
+   _clientUID(clientUID), _maxReceivedSeqNo(seqNo), _lastProcessedCriticalSeqNo(seqNo),
+   _persistentMemory(persistentMemory),
+   _usesPerClientMemory(usesPerClientMemory),
+   _OOSequenceEntryList(NULL), _chTable(NULL),
+   _romClassMap(decltype(_romClassMap)::allocator_type(persistentMemory->_persistentAllocator.get())),
+   _J9MethodMap(decltype(_J9MethodMap)::allocator_type(persistentMemory->_persistentAllocator.get())),
+   _classBySignatureMap(decltype(_classBySignatureMap)::allocator_type(persistentMemory->_persistentAllocator.get())),
+   _classChainDataMap(decltype(_classChainDataMap)::allocator_type(persistentMemory->_persistentAllocator.get())),
+   _constantPoolToClassMap(decltype(_constantPoolToClassMap)::allocator_type(persistentMemory->_persistentAllocator.get())),
    _unloadedClassAddresses(NULL),
    _requestUnloadedClasses(true),
-   _staticFinalDataMap(decltype(_staticFinalDataMap)::allocator_type(TR::Compiler->persistentAllocator())),
+   _staticFinalDataMap(decltype(_staticFinalDataMap)::allocator_type(persistentMemory->_persistentAllocator.get())),
    _rtResolve(false),
-   _registeredJ2IThunksMap(decltype(_registeredJ2IThunksMap)::allocator_type(TR::Compiler->persistentAllocator())),
-   _registeredInvokeExactJ2IThunksSet(decltype(_registeredInvokeExactJ2IThunksSet)::allocator_type(TR::Compiler->persistentAllocator()))
+   _registeredJ2IThunksMap(decltype(_registeredJ2IThunksMap)::allocator_type(persistentMemory->_persistentAllocator.get())),
+   _registeredInvokeExactJ2IThunksSet(decltype(_registeredInvokeExactJ2IThunksSet)::allocator_type(persistentMemory->_persistentAllocator.get())),
+   _wellKnownClasses(),
+   _isInStartupPhase(false)
    {
    updateTimeOfLastAccess();
    _javaLangClassPtr = NULL;
@@ -57,28 +65,43 @@ ClientSessionData::ClientSessionData(uint64_t clientUID, uint32_t seqNo) :
    _staticMapMonitor = TR::Monitor::create("JIT-JITServerStaticMapMonitor");
    _markedForDeletion = false;
    _thunkSetMonitor = TR::Monitor::create("JIT-JITServerThunkSetMonitor");
+
+   _bClassUnloadingAttempt = false;
+   _classUnloadRWMutex = NULL;
+   if (omrthread_rwmutex_init(&_classUnloadRWMutex, 0, "JITServer class unload RWMutex"))
+      {
+      TR_ASSERT_FATAL(false, "Failed to initialize JITServer class unload RWMutex");
+      }
+
+   TR::SymbolValidationManager::populateSystemClassesNotWorthRemembering(this);
+
+   _wellKnownClassesMonitor = TR::Monitor::create("JIT-JITServerWellKnownClassesMonitor");
    }
 
 ClientSessionData::~ClientSessionData()
    {
+   // Note that persistent members of client session need to be
+   // deallocate explicitly with a per-client allocator.
+   // This is because in some places from where the session is destroyed,
+   // per-client allocation region cannot be entered.
    clearCaches();
    _romMapMonitor->destroy();
    _classMapMonitor->destroy();
    _classChainDataMapMonitor->destroy();
    _sequencingMonitor->destroy();
    _constantPoolMapMonitor->destroy();
-   if (_unloadedClassAddresses)
-      {
-      _unloadedClassAddresses->destroy();
-      jitPersistentFree(_unloadedClassAddresses);
-      }
    _staticMapMonitor->destroy();
    if (_vmInfo)
       {
       destroyJ9SharedClassCacheDescriptorList();
-      jitPersistentFree(_vmInfo);
+      _persistentMemory->freePersistentMemory(_vmInfo);
       }
    _thunkSetMonitor->destroy();
+
+   omrthread_rwmutex_destroy(_classUnloadRWMutex);
+   _classUnloadRWMutex = NULL;
+
+   _wellKnownClassesMonitor->destroy();
    }
 
 void
@@ -88,41 +111,44 @@ ClientSessionData::updateTimeOfLastAccess()
    _timeOfLastAccess = j9time_current_time_millis();
    }
 
+// This method is called within a critical section such that no two threads can enter it concurrently
 void
-ClientSessionData::processUnloadedClasses(JITServer::ServerStream *stream, const std::vector<TR_OpaqueClassBlock*> &classes)
+ClientSessionData::initializeUnloadedClassAddrRanges(const std::vector<TR_AddressRange> &unloadedClassRanges, int32_t maxRanges)
    {
+   OMR::CriticalSection getUnloadedClasses(getROMMapMonitor());
+
+   if (!_unloadedClassAddresses)
+      _unloadedClassAddresses = new (PERSISTENT_NEW) TR_AddressSet(_persistentMemory, maxRanges);
+   _unloadedClassAddresses->setRanges(unloadedClassRanges);
+   }
+
+void
+ClientSessionData::processUnloadedClasses(const std::vector<TR_OpaqueClassBlock*> &classes, bool updateUnloadedClasses)
+   {
+   const size_t numOfUnloadedClasses = classes.size();
+   auto compInfoPT = TR::compInfoPT;
+   int32_t compThreadID = compInfoPT->getCompThreadId();
+
    if (TR::Options::getVerboseOption(TR_VerboseJITServer))
-      TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "Server will process a list of %u unloaded classes for clientUID %llu", (unsigned)classes.size(), (unsigned long long)_clientUID);
+      TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "compThreadID=%d will process a list of %zu unloaded classes for clientUID %llu",
+         compThreadID, numOfUnloadedClasses, (unsigned long long)_clientUID);
+
+   Trc_JITServerUnloadClasses(TR::compInfoPT->getCompilationThread(),
+         compThreadID, this, (unsigned long long)_clientUID, (unsigned long long)numOfUnloadedClasses);
+
+   if (numOfUnloadedClasses > 0)
+      writeAcquireClassUnloadRWMutex(); //TODO: use RAII style to avoid problems with exceptions
+
    //Vector to hold the list of the unloaded classes and the corresponding data needed for purging the Caches
    std::vector<ClassUnloadedData> unloadedClasses;
-   unloadedClasses.reserve(classes.size());
-   bool updateUnloadedClasses = true;
-   if (_requestUnloadedClasses)
-      {
-      stream->write(JITServer::MessageType::getUnloadedClassRanges, JITServer::Void());
-
-      auto response = stream->read<std::vector<TR_AddressRange>, int32_t>();
-      auto unloadedClassRanges = std::get<0>(response);
-      auto maxRanges = std::get<1>(response);
-
-         {
-         OMR::CriticalSection getUnloadedClasses(getROMMapMonitor());
-
-         if (!_unloadedClassAddresses)
-            _unloadedClassAddresses = new (PERSISTENT_NEW) TR_AddressSet(trPersistentMemory, maxRanges);
-         _unloadedClassAddresses->setRanges(unloadedClassRanges);
-         _requestUnloadedClasses = false;
-         }
-
-      updateUnloadedClasses = false;
-      }
+   unloadedClasses.reserve(numOfUnloadedClasses);
       {
       OMR::CriticalSection processUnloadedClasses(getROMMapMonitor());
 
       for (auto clazz : classes)
          {
          if (updateUnloadedClasses)
-            _unloadedClassAddresses->add((uintptrj_t)clazz);
+            _unloadedClassAddresses->add((uintptr_t)clazz);
 
          auto it = _romClassMap.find((J9Class*)clazz);
          if (it == _romClassMap.end())
@@ -138,11 +164,38 @@ ClientSessionData::processUnloadedClasses(JITServer::ServerStream *stream, const
          J9ROMClass *romClass = it->second._romClass;
 
          J9UTF8 *clazzName = NNSRP_GET(romClass->className, J9UTF8 *);
-         std::string className((const char *)clazzName->data, (int32_t)clazzName->length);
+         char *className = (char *) clazzName->data;
+         int32_t sigLen = (int32_t) clazzName->length;
+         sigLen = (className[0] == '[' ? sigLen : sigLen + 2);
+
+         // copy of classNameToSignature method which can't be used
+         // here because compilation object hasn't been initialized yet
+
+         std::string sigStr(sigLen, 0);
+         if (className[0] == '[')
+            {
+            memcpy(&sigStr[0], className, sigLen);
+            }
+         else
+            {
+            sigStr[0] = 'L';
+            memcpy(&sigStr[1], className, sigLen - 2);
+            sigStr[sigLen-1]=';';
+            }
+
          J9ClassLoader * cl = (J9ClassLoader *)(it->second._classLoader);
-         ClassLoaderStringPair key = { cl, className };
+         ClassLoaderStringPair key = { cl, sigStr };
          //Class is cached, so retain the data to be used for purging the caches.
          unloadedClasses.push_back({ clazz, key, cp, true });
+
+         // For _classBySignatureMap entries that were cached by referencing class loader
+         // we need to delete them using the correct class loader
+         auto &classLoadersMap = it->second._referencingClassLoaders;
+         for (auto it = classLoadersMap.begin(); it != classLoadersMap.end(); ++it)
+            {
+            ClassLoaderStringPair key = { *it, sigStr };
+            unloadedClasses.push_back({ clazz, key, cp, true });
+            }
 
          J9Method *methods = it->second._methodsOfClass;
          // delete all the cached J9Methods belonging to this unloaded class
@@ -162,13 +215,13 @@ ClientSessionData::processUnloadedClasses(JITServer::ServerStream *stream, const
                         jitPersistentFree(entryPtr);
                      }
                   ipDataHT->~IPTable_t();
-                  jitPersistentFree(ipDataHT);
+                  _persistentMemory->freePersistentMemory(ipDataHT);
                   iter->second._IPData = NULL;
                   }
                _J9MethodMap.erase(j9method);
                }
             }
-         it->second.freeClassInfo();
+         it->second.freeClassInfo(_persistentMemory);
          _romClassMap.erase(it);
          }
       }
@@ -184,7 +237,7 @@ ClientSessionData::processUnloadedClasses(JITServer::ServerStream *stream, const
    // purge Class by name cache
    {
    OMR::CriticalSection classMapCS(getClassMapMonitor());
-   purgeCache(&unloadedClasses, getClassByNameMap(), &ClassUnloadedData::_pair);
+   purgeCache(&unloadedClasses, getClassBySignatureMap(), &ClassUnloadedData::_pair);
    }
 
    // purge Constant pool to class cache
@@ -192,6 +245,35 @@ ClientSessionData::processUnloadedClasses(JITServer::ServerStream *stream, const
    OMR::CriticalSection constantPoolToClassMap(getConstantPoolMonitor());
    purgeCache(&unloadedClasses, getConstantPoolToClassMap(), &ClassUnloadedData::_cp);
    }
+
+   if (numOfUnloadedClasses > 0)
+      writeReleaseClassUnloadRWMutex();
+   }
+
+void
+ClientSessionData::processIllegalFinalFieldModificationList(const std::vector<TR_OpaqueClassBlock*> &classes)
+   {
+   const size_t numOfClasses = classes.size();
+   int32_t compThreadID = TR::compInfoPT->getCompThreadId();
+
+   if (TR::Options::getVerboseOption(TR_VerboseJITServer))
+      TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer,
+         "compThreadID=%d will process a list of %zu classes with illegal final field modification for clientUID %llu",
+            compThreadID, numOfClasses, (unsigned long long)_clientUID);
+      {
+      OMR::CriticalSection processClassesWithIllegalModification(getROMMapMonitor());
+      for (auto clazz : classes)
+         {
+         auto it = _romClassMap.find((J9Class*)clazz);
+         if (it != _romClassMap.end())
+            {
+            it->second._classFlags |= J9ClassHasIllegalFinalFieldModifications;
+            if (TR::Options::getVerboseOption(TR_VerboseJITServer))
+               TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer,
+                  "compThreadID=%d found clazz %p in the cache and updated bit J9ClassHasIllegalFinalFieldModifications to 1\n", compThreadID, clazz);
+            }
+         }
+      }
    }
 
 TR_IPBytecodeHashTableEntry*
@@ -228,7 +310,7 @@ ClientSessionData::getCachedIProfilerInfo(TR_OpaqueMethodBlock *method, uint32_t
    }
 
 bool
-ClientSessionData::cacheIProfilerInfo(TR_OpaqueMethodBlock *method, uint32_t byteCodeIndex, TR_IPBytecodeHashTableEntry *entry)
+ClientSessionData::cacheIProfilerInfo(TR_OpaqueMethodBlock *method, uint32_t byteCodeIndex, TR_IPBytecodeHashTableEntry *entry, bool isCompiled)
    {
    OMR::CriticalSection getRemoteROMClass(getROMMapMonitor());
    // check whether info about j9method exists
@@ -240,7 +322,6 @@ ClientSessionData::cacheIProfilerInfo(TR_OpaqueMethodBlock *method, uint32_t byt
       if (!iProfilerMap)
          {
          // Check and update if method is compiled when collecting profiling data
-         bool isCompiled = TR::CompilationInfo::isCompiled((J9Method*)method);
          if (isCompiled)
             it->second._isCompiledWhenProfiling = true;
 
@@ -302,7 +383,7 @@ ClientSessionData::ClassInfo::ClassInfo() :
    _totalInstanceSize(0),
    _constantPool(NULL),
    _classFlags(0),
-   _remoteROMStringsCache(decltype(_remoteROMStringsCache)::allocator_type(TR::Compiler->persistentAllocator())),
+   _classChainOffsetOfIdentifyingLoaderForClazz(0),
    _fieldOrStaticNameCache(decltype(_fieldOrStaticNameCache)::allocator_type(TR::Compiler->persistentAllocator())),
    _classOfStaticCache(decltype(_classOfStaticCache)::allocator_type(TR::Compiler->persistentAllocator())),
    _constantClassPoolCache(decltype(_constantClassPoolCache)::allocator_type(TR::Compiler->persistentAllocator())),
@@ -312,19 +393,20 @@ ClientSessionData::ClassInfo::ClassInfo() :
    _staticAttributesCacheAOT(decltype(_fieldAttributesCacheAOT)::allocator_type(TR::Compiler->persistentAllocator())),
    _jitFieldsCache(decltype(_jitFieldsCache)::allocator_type(TR::Compiler->persistentAllocator())),
    _fieldOrStaticDeclaringClassCache(decltype(_fieldOrStaticDeclaringClassCache)::allocator_type(TR::Compiler->persistentAllocator())),
-   _fieldOrStaticDefiningClassCache(decltype(_fieldOrStaticDefiningClassCache)::allocator_type(TR::Compiler->persistentAllocator())),	
-   _J9MethodNameCache(decltype(_J9MethodNameCache)::allocator_type(TR::Compiler->persistentAllocator()))
+   _fieldOrStaticDefiningClassCache(decltype(_fieldOrStaticDefiningClassCache)::allocator_type(TR::Compiler->persistentAllocator())),
+   _J9MethodNameCache(decltype(_J9MethodNameCache)::allocator_type(TR::Compiler->persistentAllocator())),
+   _referencingClassLoaders(decltype(_referencingClassLoaders)::allocator_type(TR::Compiler->persistentAllocator()))
    {
    }
 
 void
-ClientSessionData::ClassInfo::freeClassInfo()
+ClientSessionData::ClassInfo::freeClassInfo(TR_PersistentMemory *persistentMemory)
    {
-   TR_Memory::jitPersistentFree(_romClass);
+   persistentMemory->freePersistentMemory(_romClass);
 
    // free cached _interfaces
    _interfaces->~PersistentVector<TR_OpaqueClassBlock *>();
-   jitPersistentFree(_interfaces);
+   persistentMemory->freePersistentMemory(_interfaces);
    }
 
 ClientSessionData::VMInfo *
@@ -333,24 +415,27 @@ ClientSessionData::getOrCacheVMInfo(JITServer::ServerStream *stream)
    if (!_vmInfo)
       {
       stream->write(JITServer::MessageType::VM_getVMInfo, JITServer::Void());
-      auto recv = stream->read<VMInfo, std::vector<uintptr_t>, std::vector<uintptr_t> >();
+      auto recv = stream->read<VMInfo, std::vector<CacheDescriptor> >();
       _vmInfo = new (PERSISTENT_NEW) VMInfo(std::get<0>(recv));
-      _vmInfo->_j9SharedClassCacheDescriptorList = reconstructJ9SharedClassCacheDescriptorList(std::get<1>(recv), std::get<2>(recv));
+      _vmInfo->_j9SharedClassCacheDescriptorList = reconstructJ9SharedClassCacheDescriptorList(std::get<1>(recv));
       }
    return _vmInfo;
    }
 
 J9SharedClassCacheDescriptor *
-ClientSessionData::reconstructJ9SharedClassCacheDescriptorList(const std::vector<uintptr_t> &listOfCacheStartAddress, const std::vector<uintptr_t> &listOfCacheSizeBytes)
+ClientSessionData::reconstructJ9SharedClassCacheDescriptorList(const std::vector<ClientSessionData::CacheDescriptor> &listOfCacheDescriptors)
    {
    J9SharedClassCacheDescriptor * cur = NULL;
    J9SharedClassCacheDescriptor * prev = NULL;
    J9SharedClassCacheDescriptor * head = NULL;
-   for (size_t i = 0; i < listOfCacheStartAddress.size(); i++)
+   for (size_t i = 0; i < listOfCacheDescriptors.size(); i++)
       {
+      auto cacheDesc = listOfCacheDescriptors[i];
       cur = new (PERSISTENT_NEW) J9SharedClassCacheDescriptor();
-      cur->cacheStartAddress = (J9SharedCacheHeader*)(listOfCacheStartAddress[i]);
-      cur->cacheSizeBytes = listOfCacheSizeBytes[i];
+      cur->cacheStartAddress = (J9SharedCacheHeader *)cacheDesc.cacheStartAddress;
+      cur->cacheSizeBytes = cacheDesc.cacheSizeBytes;
+      cur->romclassStartAddress = (void *)cacheDesc.romClassStartAddress;
+      cur->metadataStartAddress = (void *)cacheDesc.metadataStartAddress;
       if (prev)
          {
          prev->next = cur;
@@ -376,11 +461,11 @@ ClientSessionData::destroyJ9SharedClassCacheDescriptorList()
       return;
    J9SharedClassCacheDescriptor * cur = _vmInfo->_j9SharedClassCacheDescriptorList;
    J9SharedClassCacheDescriptor * next = NULL;
-   _vmInfo->_j9SharedClassCacheDescriptorList->previous->next = NULL; // break the circular links by setting tail's next pointer to be NULL 
+   _vmInfo->_j9SharedClassCacheDescriptorList->previous->next = NULL; // break the circular links by setting tail's next pointer to be NULL
    while (cur)
       {
       next = cur->next;
-      jitPersistentFree(cur);
+      _persistentMemory->freePersistentMemory(cur);
       cur = next;
       }
    _vmInfo->_j9SharedClassCacheDescriptorList = NULL;
@@ -392,9 +477,18 @@ ClientSessionData::clearCaches()
    {
       {
       OMR::CriticalSection clearCache(getClassMapMonitor());
-      _classByNameMap.clear();
+      _classBySignatureMap.clear();
       }
    OMR::CriticalSection getRemoteROMClass(getROMMapMonitor());
+
+   if (_unloadedClassAddresses)
+      {
+      _unloadedClassAddresses->destroy(_persistentMemory);
+      _persistentMemory->freePersistentMemory(_unloadedClassAddresses);
+      _unloadedClassAddresses = NULL;
+      }
+  _requestUnloadedClasses = true;
+
    // Free memory for all hashtables with IProfiler info
    for (auto& it : _J9MethodMap)
       {
@@ -406,10 +500,10 @@ ClientSessionData::clearCaches()
             {
             auto entryPtr = entryIt.second;
             if (entryPtr)
-               jitPersistentFree(entryPtr);
+               _persistentMemory->freePersistentMemory(entryPtr);
             }
          ipDataHT->~IPTable_t();
-         jitPersistentFree(ipDataHT);
+         _persistentMemory->freePersistentMemory(ipDataHT);
          it.second._IPData = NULL;
          }
       }
@@ -417,30 +511,41 @@ ClientSessionData::clearCaches()
    _J9MethodMap.clear();
    // Free memory for j9class info
    for (auto& it : _romClassMap)
-      it.second.freeClassInfo();
+      it.second.freeClassInfo(_persistentMemory);
 
    _romClassMap.clear();
 
    _classChainDataMap.clear();
 
-   // Free CHTable 
-   for (auto& it : _chTableClassMap)
-      {
-      TR_PersistentClassInfo *classInfo = it.second;
-      classInfo->removeSubClasses();
-      jitPersistentFree(classInfo);
-      }
-   _chTableClassMap.clear();
-   _requestUnloadedClasses = true;
    _registeredJ2IThunksMap.clear();
    _registeredInvokeExactJ2IThunksSet.clear();
+   _bClassUnloadingAttempt = false;
+
+   if (_chTable)
+      {
+      // Free CH table
+      _chTable->~JITServerPersistentCHTable();
+      _persistentMemory->freePersistentMemory(_chTable);
+      _chTable = NULL;
+      }
+
+   _wellKnownClasses.clear();
    }
 
 void
 ClientSessionData::destroy(ClientSessionData *clientSession)
    {
+   TR_PersistentMemory *persistentMemory = clientSession->persistentMemory();
+   bool usesPerClientMemory = clientSession->usesPerClientMemory();
    clientSession->~ClientSessionData();
-   TR_PersistentMemory::jitPersistentFree(clientSession);
+   persistentMemory->freePersistentMemory(clientSession);
+
+   if (usesPerClientMemory)
+      {
+      persistentMemory->_persistentAllocator.get().~PersistentAllocator();
+      TR::Compiler->rawAllocator.deallocate(&persistentMemory->_persistentAllocator.get());
+      TR::Compiler->rawAllocator.deallocate(persistentMemory);
+      }
    }
 
 // notifyAndDetachFirstWaitingThread needs to be executed with sequencingMonitor in hand
@@ -458,69 +563,31 @@ ClientSessionData::notifyAndDetachFirstWaitingThread()
    return entry;
    }
 
-char *
-ClientSessionData::ClassInfo::getRemoteROMString(int32_t &len, void *basePtr, std::initializer_list<size_t> offsets)
+TR_PersistentCHTable *
+ClientSessionData::getCHTable()
    {
-   auto offsetFirst = *offsets.begin();
-   auto offsetSecond = (offsets.size() == 2) ? *(offsets.begin() + 1) : 0;
-
-   TR_ASSERT(offsetFirst < (1 << 16) && offsetSecond < (1 << 16), "Offsets are larger than 16 bits");
-   TR_ASSERT(offsets.size() <= 2, "Number of offsets is greater than 2"); 
-
-   // create a key for hashing into a table of strings
-   TR_RemoteROMStringKey key;
-   uint32_t offsetKey = (offsetFirst << 16) + offsetSecond;
-   key._basePtr = basePtr;
-   key._offsets = offsetKey;
-   
-   std::string *cachedStr = NULL;
-   bool isCached = false;
-   auto gotStr = _remoteROMStringsCache.find(key);
-   if (gotStr != _remoteROMStringsCache.end())
+   if (!_chTable)
       {
-      cachedStr = &(gotStr->second);
-      isCached = true;
+      _chTable = new (PERSISTENT_NEW) JITServerPersistentCHTable(_persistentMemory);
       }
-
-   // only make a query if a string hasn't been cached
-   if (!isCached)
-      {
-      size_t offsetFromROMClass = (uint8_t*) basePtr - (uint8_t*) _romClass;
-      std::string offsetsStr((char*) offsets.begin(), offsets.size() * sizeof(size_t));
-      
-      JITServer::ServerStream *stream = TR::CompilationInfo::getStream();      
-      stream->write(JITServer::MessageType::ClassInfo_getRemoteROMString, _remoteRomClass, offsetFromROMClass, offsetsStr);
-      cachedStr = &(_remoteROMStringsCache.insert({key, std::get<0>(stream->read<std::string>())}).first->second);
-      }
-
-   len = cachedStr->length();
-   return &(cachedStr->at(0));
+   return _chTable;
    }
 
 // Takes a pointer to some data which is placed statically relative to the rom class,
 // as well as a list of offsets to J9SRP fields. The first offset is applied before the first
 // SRP is followed.
-//
-// If at any point while following the chain of SRP pointers we land outside the ROM class,
-// then we fall back to getRemoteROMString which follows the same process on the client.
-//
-// This is a workaround because some data referenced in the ROM constant pool is located outside of
-// it, but we cannot easily determine if the reference is outside or not (or even if it is a reference!)
-// because the data is untyped.
 char *
 ClientSessionData::ClassInfo::getROMString(int32_t &len, void *basePtr, std::initializer_list<size_t> offsets)
    {
-   uint8_t *ptr = (uint8_t*) basePtr;
+   uint8_t *ptr = (uint8_t *)basePtr;
    for (size_t offset : offsets)
       {
       ptr += offset;
-      if (!JITServerHelpers::isAddressInROMClass(ptr, _romClass))
-         return getRemoteROMString(len, basePtr, offsets);
-      ptr = ptr + *(J9SRP*)ptr;
+      TR_ASSERT_FATAL(JITServerHelpers::isAddressInROMClass(ptr, _romClass), "Address outside of ROMClass");
+      ptr = ptr + *(J9SRP *)ptr;
       }
-   if (!JITServerHelpers::isAddressInROMClass(ptr, _romClass))
-      return getRemoteROMString(len, basePtr, offsets);
-   char *data = utf8Data((J9UTF8*) ptr, len);
+   TR_ASSERT_FATAL(JITServerHelpers::isAddressInROMClass(ptr, _romClass), "Address outside of ROMClass");
+   char *data = utf8Data((J9UTF8 *)ptr, len);
    return data;
    }
 
@@ -555,6 +622,66 @@ void ClientSessionData::purgeCache(std::vector<ClassUnloadedData> *unloadedClass
       }
    }
 
+void
+ClientSessionData::readAcquireClassUnloadRWMutex()
+   {
+   omrthread_rwmutex_enter_read(_classUnloadRWMutex);
+   }
+
+void
+ClientSessionData::readReleaseClassUnloadRWMutex()
+   {
+   omrthread_rwmutex_exit_read(_classUnloadRWMutex);
+   }
+
+void
+ClientSessionData::writeAcquireClassUnloadRWMutex()
+   {
+    _bClassUnloadingAttempt = true;
+   omrthread_rwmutex_enter_write(_classUnloadRWMutex);
+   }
+
+void
+ClientSessionData::writeReleaseClassUnloadRWMutex()
+   {
+   _bClassUnloadingAttempt = false;
+   omrthread_rwmutex_exit_write(_classUnloadRWMutex);
+   }
+
+const void *
+ClientSessionData::getCachedWellKnownClassChainOffsets(unsigned int includedClasses, size_t numClasses,
+                                                       const uintptr_t *classChainOffsets)
+   {
+   TR_ASSERT(numClasses <= WELL_KNOWN_CLASS_COUNT, "Too many well-known classes");
+
+   OMR::CriticalSection wellKnownClasses(_wellKnownClassesMonitor);
+   if (_wellKnownClasses._includedClasses == includedClasses &&
+       memcmp(_wellKnownClasses._classChainOffsets, classChainOffsets,
+              numClasses * sizeof(classChainOffsets[0])) == 0)
+      {
+      TR_ASSERT(_wellKnownClasses._wellKnownClassChainOffsets, "Cached well-known class chain offsets pointer is NULL");
+      return _wellKnownClasses._wellKnownClassChainOffsets;
+      }
+   return NULL;
+   }
+
+void
+ClientSessionData::cacheWellKnownClassChainOffsets(unsigned int includedClasses, size_t numClasses,
+                                                   const uintptr_t *classChainOffsets,
+                                                   const void *wellKnownClassChainOffsets)
+   {
+   TR_ASSERT(wellKnownClassChainOffsets, "Well-known class chain offsets pointer is NULL");
+   TR_ASSERT(numClasses <= WELL_KNOWN_CLASS_COUNT, "Too many well-known classes");
+
+   OMR::CriticalSection wellKnownClasses(_wellKnownClassesMonitor);
+   _wellKnownClasses._includedClasses = includedClasses;
+   memcpy(_wellKnownClasses._classChainOffsets, classChainOffsets,
+          numClasses * sizeof(classChainOffsets[0]));
+   // Zero out the tail of the array
+   memset(_wellKnownClasses._classChainOffsets + numClasses, 0,
+          (WELL_KNOWN_CLASS_COUNT - numClasses) * sizeof(classChainOffsets[0]));
+   _wellKnownClasses._wellKnownClassChainOffsets = wellKnownClassChainOffsets;
+   }
 
 ClientSessionHT*
 ClientSessionHT::allocate()
@@ -563,12 +690,14 @@ ClientSessionHT::allocate()
    }
 
 ClientSessionHT::ClientSessionHT() : _clientSessionMap(decltype(_clientSessionMap)::allocator_type(TR::Compiler->persistentAllocator())),
-                                     TIME_BETWEEN_PURGES(1000*60*30), // JITServer TODO: this must come from options
-                                     OLD_AGE(1000*60*1000) // 1000 minutes
+                                     TIME_BETWEEN_PURGES(TR::Options::_timeBetweenPurges),
+                                     OLD_AGE(TR::Options::_oldAge), // 1000 minutes
+                                     OLD_AGE_UNDER_LOW_MEMORY(TR::Options::_oldAgeUnderLowMemory), // 5 minutes
+                                     _compInfo(TR::CompilationController::getCompilationInfo())
    {
    PORT_ACCESS_FROM_PORT(TR::Compiler->portLib);
    _timeOfLastPurge = j9time_current_time_millis();
-   _clientSessionMap.reserve(250); // allow room for at least 250 clients 
+   _clientSessionMap.reserve(250); // allow room for at least 250 clients
    }
 
 // The destructor is currently never called because the server does not exit cleanly
@@ -586,17 +715,37 @@ ClientSessionHT::~ClientSessionHT()
 // If the clientUID does not already exist in the HT, insert a new blank entry.
 // Must have compilation monitor in hand when calling this function.
 // Side effects: _inUse is incremented on the ClientSessionData
-//               _expectedSeqNo is populated if a new ClientSessionData is created
+//               _lastProcessedCriticalSeqNo is populated if a new ClientSessionData is created
 //                timeOflastAccess is updated with curent time.
 ClientSessionData *
-ClientSessionHT::findOrCreateClientSession(uint64_t clientUID, uint32_t seqNo, bool *newSessionWasCreated)
+ClientSessionHT::findOrCreateClientSession(uint64_t clientUID, uint32_t seqNo, bool *newSessionWasCreated, J9JITConfig *jitConfig)
    {
    *newSessionWasCreated = false;
    ClientSessionData *clientData = findClientSession(clientUID);
    if (!clientData)
       {
+      TR_PersistentMemory *sessionMemory = NULL;
+      bool usesPerClientMemory = true;
+      static const char* disablePerClientPersistentAllocation = feGetEnv("TR_DisablePerClientPersistentAllocation");
+      if (!disablePerClientPersistentAllocation)
+         {
+         // allocate new persistent allocator and memory and store them inside a client session
+         TR::PersistentAllocator *newAllocator = new (TR::Compiler->rawAllocator) TR::PersistentAllocator(TR::PersistentAllocatorKit( 1 << 20, *TR::Compiler->javaVM));
+
+         sessionMemory = new (TR::Compiler->rawAllocator) TR_PersistentMemory(
+            jitConfig,
+            *newAllocator
+            );
+         }
+      else
+         {
+         // passed env variable to disable per-client allocation, always use the global allocator
+         usesPerClientMemory = false;
+         sessionMemory = TR::Compiler->persistentMemory();
+         }
+
       // alocate a new ClientSessionData object and create a clientUID mapping
-      clientData = new (PERSISTENT_NEW) ClientSessionData(clientUID, seqNo);
+      clientData = new (sessionMemory) ClientSessionData(clientUID, seqNo, sessionMemory, usesPerClientMemory);
       if (clientData)
          {
          _clientSessionMap[clientUID] = clientData;
@@ -631,6 +780,7 @@ ClientSessionHT::deleteClientSession(uint64_t clientUID, bool forDeletion)
       if ((clientData->getInUse() == 0) && clientData->isMarkedForDeletion())
          {
          ClientSessionData::destroy(clientData); // delete the client data
+
          _clientSessionMap.erase(clientDataIt); // delete the mapping from the hashtable
          return true;
          }
@@ -669,18 +819,30 @@ ClientSessionHT::purgeOldDataIfNeeded()
    {
    PORT_ACCESS_FROM_PORT(TR::Compiler->portLib);
    int64_t crtTime = j9time_current_time_millis();
+   bool incomplete;
+   int64_t oldAge = OLD_AGE;
+
    if (crtTime - _timeOfLastPurge > TIME_BETWEEN_PURGES)
       {
+      uint64_t freePhysicalMemory = _compInfo->computeAndCacheFreePhysicalMemory(incomplete); //check if memory is free
+      if (freePhysicalMemory != OMRPORT_MEMINFO_NOT_AVAILABLE && !incomplete)
+         {
+         if (freePhysicalMemory < TR::Options::getSafeReservePhysicalMemoryValue())
+            {
+            oldAge = OLD_AGE_UNDER_LOW_MEMORY; //memory is low
+            }
+         }
       // Time for a purge operation.
       // Scan the entire table and delete old elements that are not in use
       for (auto iter = _clientSessionMap.begin(); iter != _clientSessionMap.end(); ++iter)
          {
          TR_ASSERT(iter->second->getInUse() >= 0, "_inUse=%d must be positive\n", iter->second->getInUse());
          if (iter->second->getInUse() == 0 &&
-             crtTime - iter->second->getTimeOflastAccess() > OLD_AGE)
+            crtTime - iter->second->getTimeOflastAccess() > oldAge)
             {
             if (TR::Options::getVerboseOption(TR_VerboseJITServer))
-               TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "Server will purge session data for clientUID %llu", (unsigned long long)iter->first);
+               TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "Server will purge session data for clientUID %llu of age %lld", 
+               (unsigned long long)iter->first, (long long)oldAge);
             ClientSessionData::destroy(iter->second); // delete the client data
             _clientSessionMap.erase(iter); // delete the mapping from the hashtable
             }
@@ -694,7 +856,7 @@ ClientSessionHT::purgeOldDataIfNeeded()
 // to print these stats,
 // set the env var `TR_PrintJITServerCacheStats=1`
 // run the server with `-Xdump:jit:events=user`
-// then `kill -3` it when you want to print them 
+// then `kill -3` it when you want to print them
 void
 ClientSessionHT::printStats()
    {

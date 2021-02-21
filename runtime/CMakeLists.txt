@@ -37,6 +37,9 @@ set(CMAKE_MODULE_PATH "${j9vm_SOURCE_DIR}/cmake/modules" "${J9VM_OMR_DIR}/cmake/
 # pull in definitions of what options we support
 include(cmake/options.cmake)
 
+# ensure that we apply omr configuration early so any overrides we might set apply properly
+include(cmake/omr_config.cmake)
+
 ###
 ### End basic housekeeping
 ###
@@ -54,11 +57,8 @@ endif()
 # Pull in definitions for omr_add_hookgen and omr_add_tracegen
 # these will be in omr/cmake/modules
 include(OmrHookgen)
-if(J9VM_IS_NON_STAGING)
-	set(OMR_TRACE_ROOT "${CMAKE_CURRENT_BINARY_DIR}")
-else()
-	set(OMR_TRACE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
-endif()
+set(OMR_TRACE_ROOT "${CMAKE_CURRENT_BINARY_DIR}")
+include(cmake/J9vmTargetSupport.cmake)
 include(OmrTracegen)
 include(OmrDDRSupport)
 include(cmake/build_tags.cmake)
@@ -91,25 +91,14 @@ set(OMR_INSTALL_BIN_DIR "${j9vm_SOURCE_DIR}" CACHE PATH "")
 set(OMR_INSTALL_LIB_DIR "${j9vm_SOURCE_DIR}" CACHE PATH "")
 set(OMR_INSTALL_ARCHIVE_DIR "${j9vm_SOURCE_DIR}/lib" CACHE PATH "")
 
-# if this is a non-staging build, we want to put binaries in current source dir
-if(J9VM_IS_NON_STAGING)
-	set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
-	set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
-	# we also want to set the RPATH properly
-	set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
-endif()
-
-# Generic configuration for omr
-include(cmake/omr_config.cmake)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+# we also want to set the RPATH properly
+set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
 
 if(OPENJ9_BUILD)
 	add_definitions(-DOPENJ9_BUILD)
 endif()
-
-# clean up the variables we used
-set(versionStr)
-set(checkCondition)
-set(conditionalVersionString)
 
 ###
 ### Handle Generated files
@@ -119,7 +108,6 @@ configure_file(include/j9cfg.h.in j9cfg.h)
 configure_file(include/j9lib.h.in j9lib.h)
 configure_file(include/j9version.h.in j9version.h)
 configure_file(makelib/copyright.c.in copyright.c)
-
 
 # Definition of add_hookgen pulled in from omr/cmake/modules/OmrHookgen.cmake
 # Here we handle all the .hdf files which don't have a more logical home.
@@ -143,28 +131,22 @@ add_custom_target(j9vm_hookgen
 )
 
 # Generate NLS headers
-if(J9VM_IS_NON_STAGING)
-	add_custom_command(
-		OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/java.properties"
-		DEPENDS j9nls
-		COMMAND "${Java_JAVA_EXECUTABLE}" -cp "$<TARGET_PROPERTY:j9nls,JAR_FILE>" com.ibm.oti.NLSTool.J9NLS -source "${CMAKE_CURRENT_SOURCE_DIR}"
-		VERBATIM
-	)
-	add_custom_target(j9vm_nlsgen
-		DEPENDS
-			"${CMAKE_CURRENT_BINARY_DIR}/java.properties"
-	)
-else()
-	# if we aren't generating nls headers, just create a dummy target
-	add_custom_target(j9vm_nlsgen)
-endif()
+file(GLOB_RECURSE nls_files "${CMAKE_CURRENT_SOURCE_DIR}/nls/*.nls")
+add_custom_command(
+	OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/nls.stamp"
+	DEPENDS j9nls ${nls_files}
+	COMMAND "${Java_JAVA_EXECUTABLE}" -cp "$<TARGET_PROPERTY:j9nls,JAR_FILE>" com.ibm.oti.NLSTool.J9NLS -source "${CMAKE_CURRENT_SOURCE_DIR}"
+	COMMAND "${CMAKE_COMMAND}" -E touch "${CMAKE_CURRENT_BINARY_DIR}/nls.stamp"
+	COMMENT "Generating NLS files"
+	VERBATIM
+)
+add_custom_target(j9vm_nlsgen
+	DEPENDS
+		"${CMAKE_CURRENT_BINARY_DIR}/nls.stamp"
+)
 
-if(J9VM_IS_NON_STAGING)
-	set(J9VM_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
-	file(MAKE_DIRECTORY "${J9VM_INCLUDE_DIR}")
-else()
-	set(J9VM_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
-endif()
+set(J9VM_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
+file(MAKE_DIRECTORY "${J9VM_INCLUDE_DIR}")
 
 # On z/OS, some generated files must be converted to EBCDIC for consistency.
 # This macro is intended to be used as a replacement for add_custom_command
@@ -243,11 +225,9 @@ add_custom_target(j9vm_m4gen
 		"${J9VM_INCLUDE_DIR}/jvmti.h"
 )
 
-if(J9VM_IS_NON_STAGING)
-	add_custom_target(copy_default_options ALL
-		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/options.default" "${CMAKE_CURRENT_BINARY_DIR}/options.default"
-	)
-endif()
+add_custom_target(copy_default_options ALL
+	COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/options.default" "${CMAKE_CURRENT_BINARY_DIR}/options.default"
+)
 
 ###
 ### Helper interface libraries
@@ -255,12 +235,13 @@ endif()
 
 # j9vm_interface is used to hold properties we want to apply to everyone.
 # e.g. adding oti/ to the include path etc.
-add_library(j9vm_interface INTERFACE)
+j9vm_add_library(j9vm_interface INTERFACE)
 target_include_directories(j9vm_interface
 	INTERFACE
 		${CMAKE_CURRENT_SOURCE_DIR}/oti
 		${CMAKE_CURRENT_SOURCE_DIR}/include
 		${J9VM_OMR_DIR}/include_core
+		${J9VM_OMR_DIR}/gc/include
 		${CMAKE_CURRENT_BINARY_DIR}/include
 		${CMAKE_CURRENT_BINARY_DIR}/omr
 		${CMAKE_CURRENT_BINARY_DIR}
@@ -274,11 +255,12 @@ target_sources(j9vm_interface
 		$<$<OR:${is_shlib},${is_executable}>:${CMAKE_CURRENT_BINARY_DIR}/copyright.c>
 )
 
-if(J9VM_IS_NON_STAGING)
-	target_include_directories(j9vm_interface INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/nls)
-else()
-	target_include_directories(j9vm_interface INTERFACE nls)
+# If on z/OS link against omr_ascii, this is what gives us convlit(ISO8859-1) and links j9atoe
+if(OMR_OS_ZOS)
+	target_link_libraries(j9vm_interface INTERFACE omr_ascii)
 endif()
+
+target_include_directories(j9vm_interface INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/nls)
 
 add_dependencies(j9vm_interface
 	j9vm_hookgen
@@ -288,7 +270,7 @@ add_dependencies(j9vm_interface
 )
 
 # j9vm_gc_includes is used to track the include directories that are consumed by the various gc components
-add_library(j9vm_gc_includes INTERFACE)
+j9vm_add_library(j9vm_gc_includes INTERFACE)
 target_include_directories(j9vm_gc_includes
 	INTERFACE
 		# Pull in the public include paths exposed by the omrgc library
@@ -302,7 +284,7 @@ target_include_directories(j9vm_gc_includes
 )
 
 # Stub library to simplify programs which use makelib/cmain.c to provide a signal protected main
-add_library(j9vm_main_wrapper INTERFACE)
+j9vm_add_library(j9vm_main_wrapper INTERFACE)
 target_sources(j9vm_main_wrapper INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/makelib/cmain.c)
 target_link_libraries(j9vm_main_wrapper
 	INTERFACE
@@ -317,12 +299,14 @@ target_link_libraries(j9vm_main_wrapper
 # set up glue library target names
 # See https://github.com/eclipse/omr/blob/master/doc/BuildingWithCMake.md
 set(OMR_GC_GLUE_TARGET "j9vm_gc_glue" CACHE INTERNAL "")
+set(OMR_GC_GLUE_FULL_TARGET "j9vm_gc_glue_full" CACHE INTERNAL "")
 set(OMR_RAS_GLUE_TARGET "j9vm_ras_glue" CACHE INTERNAL "")
 set(OMR_CORE_GLUE_TARGET "j9vm_core_glue" CACHE INTERNAL "")
 set(OMR_UTIL_GLUE_TARGET "j9vm_util_glue" CACHE INTERNAL "")
 
 # setup OMR library overrides
 set(OMR_GC_LIB "j9gc" CACHE INTERNAL "")
+set(OMR_GC_FULL_LIB "j9gc_full" CACHE INTERNAL "")
 set(OMR_HOOK_LIB "j9hookable" CACHE INTERNAL "")
 set(OMR_PORT_LIB "j9prt" CACHE INTERNAL "")
 set(OMR_THREAD_LIB "j9thr" CACHE INTERNAL "")
@@ -330,18 +314,25 @@ set(OMR_TRACE_LIB "j9trc" CACHE INTERNAL "")
 
 set(OMR_DDR_SET "j9ddr" CACHE INTERNAL "")
 
-add_subdirectory(gc_glue_java)
+# Declare the GC glue interface libraries that omr might reference,
+# including the 'full' version. We'll only add sources to the 'full'
+# version in gc_glue_java, below, when appropriate.
+j9vm_add_library(${OMR_GC_GLUE_TARGET} INTERFACE)
+j9vm_add_library(${OMR_GC_GLUE_FULL_TARGET} INTERFACE)
+
 # hack to add our binary dir to omr include path
 # needed to grab the headers created by trace/hookgen
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 add_subdirectory("${J9VM_OMR_DIR}" omr)
+
+add_subdirectory(gc_glue_java)
 
 # Configure our DDR set
 if(OMR_DDR)
 	make_ddr_set(j9ddr)
 	ddr_set_add_targets(j9ddr omrddr)
 	set_target_properties(j9ddr PROPERTIES
-		BLACKLIST "${CMAKE_CURRENT_SOURCE_DIR}/ddr/blacklist"
+		EXCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/ddr/excludes"
 		OVERRIDES_FILE "${CMAKE_CURRENT_SOURCE_DIR}/ddr/overrides"
 		BLOB "${CMAKE_CURRENT_BINARY_DIR}/j9ddr.dat"
 		SUPERSET "${CMAKE_BINARY_DIR}/superset.dat"
@@ -379,19 +370,10 @@ endif()
 add_dependencies(omrutil_obj j9vm_nlsgen run_cptool)
 
 ###
-### Share library version suffixing
+### Shared library version suffixing
 ###
-# Note: this has to happen after we add_subdirectory omr
-
-# The string we append to the name of shared libs
-# set(versionStr "${J9VM_VERSION_MAJOR}${J9VM_VERSION_MINOR}")
-set(versionStr "29")
-
-# Save the old shared library suffix val (eg. '.so' or '.dll', so we can use it later if needed)
-set(J9VM_OLD_SHARED_SUFFIX ${CMAKE_SHARED_LIBRARY_SUFFIX})
-set(J9VM_SHARED_LIBRARY_SUFFIX ${versionStr}${CMAKE_SHARED_LIBRARY_SUFFIX})
-# Prepend the version string so eg. '29.so' gets tacked onto the end of library names if they are built into shared libs
-set(CMAKE_SHARED_LIBRARY_SUFFIX "${J9VM_SHARED_LIBRARY_SUFFIX}")
+# The string we append to the name of select shared libraries.
+set(J9VM_VERSION_SUFFIX "29")
 
 ###
 ### Begin the definitions of our modules
@@ -442,11 +424,6 @@ if(J9VM_MODULE_GC_BASE)
 endif()
 if(J9VM_MODULE_GC_CHECK)
 	add_subdirectory(gc_check)
-endif()
-if(J9VM_MODULE_DDR)
-	# TODO: Does this need to be implemented? Or are we only going to bother to support
-	# new style ddrgen with cmake?
-	# add_subdirectory(gc_ddr)
 endif()
 if(J9VM_MODULE_GC_MODRON_STANDARD)
 	add_subdirectory(gc_modron_standard)
@@ -585,9 +562,13 @@ if(J9VM_MODULE_ZLIB)
 	add_subdirectory(zlib)
 endif()
 
-# NOTE this is not conditional in the UMA module.xml
 add_subdirectory(tests)
 
 if (J9VM_OPT_JITSERVER)
 	add_subdirectory(jitserver_launcher)
+endif()
+
+# This needs to stay at the end of this file to allow the vendor code to modify any of our targets
+if(J9VM_VENDOR_DIR)
+	add_subdirectory("${J9VM_VENDOR_DIR}/runtime" vendor)
 endif()

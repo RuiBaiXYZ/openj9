@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -291,12 +291,6 @@ i2jTransition: ;
 	walkState->arg0EA = (UDATA *) walkState->i2jState->a0;
 	returnSP = walkState->i2jState->returnSP;
 	walkState->previousFrameFlags = 0;
-	if (((UDATA) returnSP) & J9_STACK_FLAGS_ARGS_ALIGNED) {
-#ifdef J9VM_INTERP_STACKWALK_TRACING
-		swPrintf(walkState, 2, "I2J args were copied for alignment\n");
-#endif
-		walkState->previousFrameFlags = J9_STACK_FLAGS_JIT_ARGS_ALIGNED;
-	}
 	walkState->walkSP = (UDATA *) UNTAG2(returnSP, UDATA *);
 #ifdef J9VM_INTERP_STACKWALK_TRACING
 	swPrintf(walkState, 2, "I2J values: PC = %p, A0 = %p, walkSP = %p, literals = %p, JIT PC = %p, pcAddress = %p, decomp = %p\n", walkState->pc,
@@ -1775,6 +1769,9 @@ walkLiveMonitorSlots(J9StackWalkState *walkState, J9JITStackAtlas *gcStackAtlas,
 	j9object_t *objAddress;
 	U_16 i;
 	U_8 bit;
+	J9VMThread *currentThread = walkState->currentThread;
+	J9VMThread *targetThread = walkState->walkThread;
+	J9InternalVMFunctions const * const vmFuncs = currentThread->javaVM->internalVMFunctions;
 
 	for (i = 0; i < numberOfMapBits; ++i) {
 		bit = liveMonitorMap[i >> 3] & monitorMask[i >> 3] & (1 << (i & 7));
@@ -1792,7 +1789,7 @@ walkLiveMonitorSlots(J9StackWalkState *walkState, J9JITStackAtlas *gcStackAtlas,
 			if (NULL != objAddress) {
 				j9object_t obj = *objAddress;
 
-				if (NULL != obj) {
+				if ((NULL != obj) && !vmFuncs->objectIsBeingWaitedOn(currentThread, targetThread, obj)) {
 					info->object = obj;
 					info->count = 1;
 					info->depth = (UDATA)walkState->userData4;
@@ -1812,6 +1809,9 @@ countLiveMonitorSlots(J9StackWalkState *walkState, J9JITStackAtlas *gcStackAtlas
 	IDATA monitorCount = (IDATA)walkState->userData2;
 	U_16 i;
 	U_8 bit;
+	J9VMThread *currentThread = walkState->currentThread;
+	J9VMThread *targetThread = walkState->walkThread;
+	J9InternalVMFunctions const * const vmFuncs = currentThread->javaVM->internalVMFunctions;
 
 	for (i = 0; i < numberOfMapBits; ++i) {
 		bit = liveMonitorMap[i >> 3] & monitorMask[i >> 3];
@@ -1822,8 +1822,12 @@ countLiveMonitorSlots(J9StackWalkState *walkState, J9JITStackAtlas *gcStackAtlas
 			/* CMVC 188386 : if the object is stack allocates and the object is discontiguous on stack,
 			 * the jit stores a null in the slot. Skip this slot.
 			 */
-			if ((NULL != objAddress) && (NULL != *objAddress)) {
-				monitorCount += 1;
+			if (NULL != objAddress) {
+				j9object_t obj = *objAddress;
+
+				if ((NULL != obj) && !vmFuncs->objectIsBeingWaitedOn(currentThread, targetThread, obj)) {
+					monitorCount += 1;
+				}
 			}
 		}
 	}

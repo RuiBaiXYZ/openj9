@@ -127,7 +127,7 @@ j9ThunkInvokeExactHelperFromTerseSignature(UDATA signatureLength, char *signatur
          helper = TR_icallVMprJavaSendInvokeExact1;
          break;
       }
-   TR::SymbolReference *symRef = reloRuntime->comp()->getSymRefTab()->findOrCreateRuntimeHelper(helper, false, false, false);
+   TR::SymbolReference *symRef = reloRuntime->comp()->getSymRefTab()->findOrCreateRuntimeHelper(helper);
 
    return symRef->getMethodAddress();
    }
@@ -263,10 +263,4 @@ TR_X86RelocationTarget::patchNonVolatileFieldMemoryFence(J9ROMFieldShape* resolv
          *((U_8*)(instructionAddress + barrierOffset + sizeof(UDATA))) &= LORNOPPatchTrailingByte;
          }
       }
-   }
-
-void
-TR_X86RelocationTarget::patchMTIsolatedOffset(uint32_t offset, uint8_t *reloLocation)
-   {
-   storeUnsigned32b(offset, reloLocation);
    }

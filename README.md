@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2017, 2019 IBM Corp. and others
+Copyright (c) 2017, 2021 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -33,9 +33,7 @@ Welcome to the Eclipse OpenJ9 repository
 We're not sure which route you might have taken on your way here, but we're really pleased to see you! If you came directly from our website, you've probably already learned a lot about Eclipse OpenJ9 and how it fits in to the OpenJDK ecosystem. If you came via some other route, here are a few key links to get you started:
 
 - [Eclipse OpenJ9 website](http://www.eclipse.org/openj9) - Learn about this high performance, enterprise-grade Java Virtual Machine (JVM) and why we think you want to get involved in its development.
-- [AdoptOpenJDK website](https://adoptopenjdk.net/releases.html?variant=openjdk9-openj9) - Grab pre-built OpenJDK binaries that embed OpenJ9 and try it out.
-- [Build instructions](https://www.eclipse.org/openj9/oj9_build.html) - Here's how you can build an OpenJDK with OpenJ9 yourself.
-- [FAQ](https://www.eclipse.org/openj9/oj9_faq.html)
+- Build instructions for [JDK8](https://github.com/eclipse/openj9/blob/master/doc/build-instructions/Build_Instructions_V8.md), [JDK11](https://github.com/eclipse/openj9/blob/master/doc/build-instructions/Build_Instructions_V11.md), and [More](https://github.com/eclipse/openj9/blob/master/doc/build-instructions) - Here's how you can build an OpenJDK with OpenJ9 yourself.
 
 If you're looking for ways to help out at the project (thanks!), we have:
 - [Beginner issues](https://github.com/eclipse/openj9/issues?q=is%3Aopen+is%3Aissue+label%3Abeginner)
@@ -61,11 +59,11 @@ License 2.0 or Eclipse Public License 2.0 with a secondary compatibility license
 GPLv2 license) that is designed to allow OpenJDK to be built with the OpenJ9 JVM.  Please see our
 [LICENSE file](https://github.com/eclipse/openj9/blob/master/LICENSE) for more details.
 
-Eclipse OpenJ9 is a source code project that can be built alongside Java class libraries.  Cross platform
-nightly and release binaries and docker containers for OpenJDK with OpenJ9, targeting several JDK levels
-(like JDK8, JDK10, etc.) are built by the [AdoptOpenJDK organization](https://github.com/adoptopenjdk)
-and can be downloaded from the [AdoptOpenJDK download site](https://adoptopenjdk.net/?variant=openjdk8-openj9)
-or on [DockerHub](https://hub.docker.com/search/?isAutomated=0&isOfficial=0&page=1&pullCount=0&q=openj9&starCount=0).
+Eclipse OpenJ9 is a source code project that can be built alongside Java class libraries. See the
+[build instructions](https://github.com/eclipse/openj9/blob/master/doc/build-instructions). Eclipse
+Foundation projects are not permitted to distribute, market or promote JDK binaries unless they have
+passed a Java SE Technology Compatibility Kit licensed from Oracle, to which the OpenJ9 project does
+not currently have access. See the [Eclipse Adoptium Project Charter](https://projects.eclipse.org/projects/adoptium/charter).
 
 What is the goal of the project?
 ================================
@@ -95,10 +93,16 @@ What repos are part of the project?
 - https://github.com/eclipse/openj9-systemtest : OpenJ9-specific system tests
 - https://github.com/eclipse/openj9-website : OpenJ9 website repo
 - https://github.com/eclipse/openj9-docs : OpenJ9 documentation repo
+- https://github.com/eclipse/build-openj9 : OpenJ9 GitHub actions repo
+- https://github.com/eclipse/openj9-utils : OpenJ9 utility programs / tools repo, a place to develop community around the tools
 
 
 Where can I learn more?
 =======================
+
+- [Moving to OpenJ9](https://blog.openj9.org/2019/02/26/moving-to-openjdk-with-eclipse-openj9/)
+- [User documentation](https://www.eclipse.org/openj9/docs/)
+- Many more resources are available on the [OpenJ9 blog](https://blog.openj9.org/)
 
 Videos and Presentations
 ------------------------
@@ -108,7 +112,12 @@ Videos and Presentations
 - [JavaOne 2017: Open sourcing the IBM J9 Java Virtual Machine](https://www.slideshare.net/MarkStoodley/javaone-2017-mark-stoodley-open-sourcing-ibm-j9-jvm)
 - [JavaOne 2017: Eclipse OpenJ9 Under the hood of the next open source JVM](https://www.slideshare.net/DanHeidinga/javaone-2017-eclipse-openj9-under-the-hood-of-the-jvm)
 - [JavaOne 2017: Ask the OpenJ9 Architects](https://www.youtube.com/watch?v=qb5ennM_pgc)
+- [Eclipse OpenJ9 verbose JIT logs](https://mstoodle.github.io/EclipseOpenJ9JitVerboseLogs/)
+- [JavaOne 2017: How to build a debuggable runtime](https://www.slideshare.net/TobiAjila1/how-to-build-a-debuggle-runtime)
+- [Reducing Garbage Collection pause times with Concurrent Scavenge and the Guarded Storage Facility](https://developer.ibm.com/javasdk/2017/09/18/reducing-garbage-collection-pause-times-concurrent-scavenge-guarded-storage-facility/)
+- [How Concurrent Scavenge using the Guarded Storage Facility Works](https://developer.ibm.com/javasdk/2017/09/25/concurrent-scavenge-using-guarded-storage-facility-works/)
+- [Are you still paying for unused memory when your Java app is idle?](https://developer.ibm.com/javasdk/2017/09/25/still-paying-unused-memory-java-app-idle/)
+- [Under the hood of the Testarossa JIT Compiler](https://www.slideshare.net/MarkStoodley/under-the-hood-of-the-testarossa-jit-compiler)
+- [Class sharing In Eclipse OpenJ9](https://developer.ibm.com/components/java-platform/tutorials/j-class-sharing-openj9)
 
-Also check out the [Resources](https://www.eclipse.org/openj9/oj9_resources.html) page on our website.
-
-Copyright (c) 2017, 2018 IBM Corp. and others
+Copyright (c) 2017, 2020 IBM Corp. and others

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2019, 2020 IBM Corp. and others
+# Copyright (c) 2019, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -83,7 +83,6 @@ jvm_add_exports(jvm
 	_JVM_GetClassLoader@8
 	_JVM_GetClassSignature@8
 	_JVM_GetEnclosingMethodInfo@8
-	_JVM_GetInterfaceVersion@0
 	_JVM_GetLastErrorString@8
 	_JVM_GetManagement@4
 	_JVM_GetPortLibrary@0
@@ -212,11 +211,6 @@ jvm_add_exports(jvm
 	_JVM_GetSockOpt@20
 	_JVM_ExtendBootClassPath@8
 	_JVM_Bind@12
-	_JVM_DTraceActivate@20
-	_JVM_DTraceDispose@12
-	_JVM_DTraceGetVersion@4
-	_JVM_DTraceIsProbeEnabled@8
-	_JVM_DTraceIsSupported@4
 	_JVM_DefineClass@24
 	_JVM_DefineClassWithSourceCond@32
 	_JVM_EnqueueOperation@20
@@ -289,9 +283,11 @@ jvm_add_exports(jvm
 	_JVM_GetFieldTypeAnnotations@8
 	_JVM_GetMethodParameters@8
 	_JVM_GetMethodTypeAnnotations@8
+	JVM_IsUseContainerSupport
 	_JVM_IsVMGeneratedMethodIx@12
 	JVM_GetTemporaryDirectory
 	_JVM_CopySwapMemory@44
+	JVM_BeforeHalt
 )
 
 if(JAVA_SPEC_VERSION LESS 11)
@@ -335,7 +331,6 @@ else()
 		_JVM_GetNanoTimeAdjustment@16
 
 		# Additions for Java 11 (General)
-		JVM_BeforeHalt
 		JVM_GetNestHost
 		JVM_GetNestMembers
 		JVM_AreNestMates
@@ -348,6 +343,43 @@ if(NOT JAVA_SPEC_VERSION LESS 14)
 	jvm_add_exports(jvm
 		# Additions for Java 14 (General)
 		JVM_GetExtendedNPEMessage
+	)
+endif()
+
+if(NOT JAVA_SPEC_VERSION LESS 15)
+	jvm_add_exports(jvm
+		# Additions for Java 15 (General)
+		JVM_RegisterLambdaProxyClassForArchiving
+		JVM_LookupLambdaProxyClassFromArchive
+		JVM_IsCDSDumpingEnabled
+	)
+endif()
+
+if(JAVA_SPEC_VERSION EQUAL 15)
+	jvm_add_exports(jvm
+		# Java 15 only
+		JVM_GetRandomSeedForCDSDump
+		JVM_IsCDSSharingEnabled
+	)
+elseif(NOT JAVA_SPEC_VERSION LESS 16)
+	jvm_add_exports(jvm
+		# Additions for Java 16 (General)
+		JVM_DefineArchivedModules
+		JVM_GetRandomSeedForDumping
+		JVM_IsSharingEnabled
+		JVM_LogLambdaFormInvoker
+		JVM_IsDumpingClassList
+	)
+endif()
+
+if(JAVA_SPEC_VERSION LESS 17)
+	jvm_add_exports(jvm
+		_JVM_DTraceActivate@20
+		_JVM_DTraceDispose@12
+		_JVM_DTraceGetVersion@4
+		_JVM_DTraceIsProbeEnabled@8
+		_JVM_DTraceIsSupported@4
+		_JVM_GetInterfaceVersion@0
 	)
 endif()
 

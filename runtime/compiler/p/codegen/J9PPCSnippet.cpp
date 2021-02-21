@@ -113,7 +113,7 @@ uint8_t *TR::PPCReadMonitorSnippet::emitSnippetBody()
 
    _recurCheckLabel->setCodeLocation(buffer);
 
-   if (cg()->comp()->target().is64Bit())
+   if (comp->target().is64Bit())
       {
       opcode.setOpCodeValue(TR::InstOpCode::rldicr);
       buffer = opcode.copyBinaryToBuffer(buffer);
@@ -164,11 +164,11 @@ uint8_t *TR::PPCReadMonitorSnippet::emitSnippetBody()
    *(int32_t *)buffer |= (getRestartLabel()->getCodeLocation()-buffer) & 0x03FFFFFC;
    buffer += PPC_INSTRUCTION_LENGTH;
 
-   intptrj_t helperAddress = (intptrj_t)getMonitorEnterHelper()->getSymbol()->castToMethodSymbol()->getMethodAddress();
-   if (cg()->directCallRequiresTrampoline(helperAddress, (intptrj_t)buffer))
+   intptr_t helperAddress = (intptr_t)getMonitorEnterHelper()->getSymbol()->castToMethodSymbol()->getMethodAddress();
+   if (cg()->directCallRequiresTrampoline(helperAddress, (intptr_t)buffer))
       {
       helperAddress = TR::CodeCacheManager::instance()->findHelperTrampoline(getMonitorEnterHelper()->getReferenceNumber(), (void *)buffer);
-      TR_ASSERT_FATAL(cg()->comp()->target().cpu.isTargetWithinIFormBranchRange(helperAddress, (intptrj_t)buffer), "Helper address is out of range");
+      TR_ASSERT_FATAL(comp->target().cpu.isTargetWithinIFormBranchRange(helperAddress, (intptr_t)buffer), "Helper address is out of range");
       }
 
    opcode.setOpCodeValue(TR::InstOpCode::bl);
@@ -180,7 +180,7 @@ uint8_t *TR::PPCReadMonitorSnippet::emitSnippetBody()
                                 __FILE__, __LINE__, getNode());
       }
 
-   *(int32_t *)buffer |= (helperAddress - (intptrj_t)buffer) & 0x03FFFFFC;
+   *(int32_t *)buffer |= (helperAddress - (intptr_t)buffer) & 0x03FFFFFC;
    buffer += PPC_INSTRUCTION_LENGTH;
 
    gcMap().registerStackMap(buffer, cg());
@@ -211,6 +211,7 @@ uint8_t *TR::PPCReadMonitorSnippet::emitSnippetBody()
 void
 TR::PPCReadMonitorSnippet::print(TR::FILE *pOutFile, TR_Debug *debug)
    {
+   TR::Compilation *comp = cg()->comp();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg()->fe());
    uint8_t *cursor = getRecurCheckLabel()->getCodeLocation();
 
@@ -226,14 +227,14 @@ TR::PPCReadMonitorSnippet::print(TR::FILE *pOutFile, TR_Debug *debug)
    TR::RealRegister *loadBaseReg  = machine->getRealRegister(deps->getPostConditions()->getRegisterDependency(4)->getRealRegister());
 
    debug->printPrefix(pOutFile, NULL, cursor, 4);
-   if (cg()->comp()->target().is64Bit())
+   if (comp->target().is64Bit())
       trfprintf(pOutFile, "rldicr \t%s, %s, 0, " INT64_PRINTF_FORMAT_HEX "\t; Get owner thread value", debug->getName(monitorReg), debug->getName(monitorReg), (int64_t) LOCK_THREAD_PTR_MASK);
    else
       trfprintf(pOutFile, "rlwinm \t%s, %s, 0, 0x%x\t; Get owner thread value", debug->getName(monitorReg), debug->getName(monitorReg), LOCK_THREAD_PTR_MASK);
    cursor+= 4;
 
    debug->printPrefix(pOutFile, NULL, cursor, 4);
-   if (cg()->comp()->target().is64Bit())
+   if (comp->target().is64Bit())
       trfprintf(pOutFile, "cmp8 \t%s, %s, %s\t; Compare VMThread to owner thread", debug->getName(condReg), debug->getName(metaReg), debug->getName(monitorReg));
    else
       trfprintf(pOutFile, "cmp4 \t%s, %s, %s\t; Compare VMThread to owner thread", debug->getName(condReg), debug->getName(metaReg), debug->getName(monitorReg));
@@ -242,7 +243,7 @@ TR::PPCReadMonitorSnippet::print(TR::FILE *pOutFile, TR_Debug *debug)
    debug->printPrefix(pOutFile, NULL, cursor, 4);
    int32_t distance = *((int32_t *) cursor) & 0x0000fffc;
    distance = (distance << 16) >> 16;   // sign extend
-   trfprintf(pOutFile, "bne %s, " POINTER_PRINTF_FORMAT "\t; Use Helpers", debug->getName(condReg), (intptrj_t)cursor + distance);
+   trfprintf(pOutFile, "bne %s, " POINTER_PRINTF_FORMAT "\t; Use Helpers", debug->getName(condReg), (intptr_t)cursor + distance);
    cursor+= 4;
 
    debug->printPrefix(pOutFile, NULL, cursor, 4);
@@ -252,14 +253,14 @@ TR::PPCReadMonitorSnippet::print(TR::FILE *pOutFile, TR_Debug *debug)
    debug->printPrefix(pOutFile, NULL, cursor, 4);
    distance = *((int32_t *) cursor) & 0x03fffffc;
    distance = (distance << 6) >> 6;   // sign extend
-   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t; ", (intptrj_t)cursor + distance);
+   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t; ", (intptr_t)cursor + distance);
    debug->print(pOutFile, getRestartLabel());
    cursor+= 4;
 
    debug->printPrefix(pOutFile, NULL, cursor, 4);
    distance = *((int32_t *) cursor) & 0x03fffffc;
    distance = (distance << 6) >> 6;   // sign extend
-   trfprintf(pOutFile, "bl \t" POINTER_PRINTF_FORMAT "\t\t; %s", (intptrj_t)cursor + distance, debug->getName(getMonitorEnterHelper()));
+   trfprintf(pOutFile, "bl \t" POINTER_PRINTF_FORMAT "\t\t; %s", (intptr_t)cursor + distance, debug->getName(getMonitorEnterHelper()));
    if (debug->isBranchToTrampoline(getMonitorEnterHelper(), cursor, distance))
       trfprintf(pOutFile, " Through trampoline");
    cursor+= 4;
@@ -282,161 +283,6 @@ int32_t TR::PPCReadMonitorSnippet::setEstimatedCodeLocation(int32_t estimatedSni
    _recurCheckLabel->setEstimatedCodeLocation(estimatedSnippetStart);
    getSnippetLabel()->setEstimatedCodeLocation(estimatedSnippetStart+28);
    return(estimatedSnippetStart);
-   }
-
-TR::PPCHeapAllocSnippet::PPCHeapAllocSnippet(
-   TR::CodeGenerator   *codeGen,
-   TR::Node            *node,
-   TR::LabelSymbol      *callLabel,
-   TR::SymbolReference *destination,
-   TR::LabelSymbol      *restartLabel,
-   bool               insertType)
-   : _restartLabel(restartLabel), _destination(destination), _insertType(insertType),
-     TR::Snippet(codeGen, node, callLabel, destination->canCauseGC())
-   {
-   if (destination->canCauseGC())
-      {
-      // Helper call, preserves all registers
-      //
-      gcMap().setGCRegisterMask(0xFFFFFFFF);
-      }
-   }
-
-uint8_t *TR::PPCHeapAllocSnippet::emitSnippetBody()
-   {
-
-   TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg()->fe());
-
-   // heap allocation snippet:
-   //    callLabel:
-   //      [li r3, array type]
-   //      bl  jitNewXXXX
-   //      mr  resReg, gr3
-   //      b   restartLabel
-
-   TR::RegisterDependencyConditions *deps = getRestartLabel()->getInstruction()->getDependencyConditions();
-
-   uint8_t  *buffer = cg()->getBinaryBufferCursor();
-
-   getSnippetLabel()->setCodeLocation(buffer);
-
-   TR::InstOpCode opcode;
-
-   TR::RealRegister *callRetReg  = cg()->machine()->getRealRegister(TR::RealRegister::gr3);
-   TR::RealRegister *resultReg  = cg()->machine()->getRealRegister(deps->getPostConditions()->getRegisterDependency(6)->getRealRegister());   // Refer to VMnewEvaluator
-
-   if (getInsertType())
-      {
-      TR::RealRegister *objectReg  = cg()->machine()->
-         getRealRegister(deps->getPostConditions()->getRegisterDependency(0)->
-         getRealRegister());   // Refer to VMnewEvaluator
-
-      opcode.setOpCodeValue(TR::InstOpCode::li);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      objectReg->setRegisterFieldRS((uint32_t *)buffer);
-      *(int32_t *)buffer |= getNode()->getSecondChild()->getInt();
-      buffer += PPC_INSTRUCTION_LENGTH;
-      }
-
-   intptrj_t helperAddress = (intptrj_t)getDestination()->getSymbol()->castToMethodSymbol()->getMethodAddress();
-   if (cg()->directCallRequiresTrampoline(helperAddress, (intptrj_t)buffer))
-      {
-      helperAddress = TR::CodeCacheManager::instance()->findHelperTrampoline(getDestination()->getReferenceNumber(), (void *)buffer);
-      TR_ASSERT_FATAL(cg()->comp()->target().cpu.isTargetWithinIFormBranchRange(helperAddress, (intptrj_t)buffer), "Helper address is out of range");
-      }
-
-   opcode.setOpCodeValue(TR::InstOpCode::bl);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   *(int32_t *)buffer |= (helperAddress - (intptrj_t)buffer) & 0x03FFFFFC;
-   if (cg()->comp()->compileRelocatableCode())
-      {
-      cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(buffer, (uint8_t*) getDestination(), TR_HelperAddress, cg()),
-                             __FILE__,
-                             __LINE__,
-                             getNode());
-      }
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   if (gcMap().getStackMap() != NULL)
-      gcMap().getStackMap()->resetRegistersBits(cg()->registerBitMask(resultReg->getRegisterNumber()));
-   gcMap().registerStackMap(buffer, cg());
-
-   // AltFormatx
-   opcode.setOpCodeValue(TR::InstOpCode::mr);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   callRetReg->setRegisterFieldRS((uint32_t *)buffer);
-   resultReg->setRegisterFieldRA((uint32_t *)buffer);
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   opcode.setOpCodeValue(TR::InstOpCode::b);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   *(int32_t *)buffer |= (getRestartLabel()->getCodeLocation() - buffer) & 0x03FFFFFC;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   return(buffer);
-   }
-
-
-void
-TR::PPCHeapAllocSnippet::print(TR::FILE *pOutFile, TR_Debug *debug)
-   {
-   TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg()->fe());
-   uint8_t *cursor;
-   int32_t  distance;
-
-   TR::RegisterDependencyConditions *conditions = getRestartLabel()->getInstruction()->getDependencyConditions();
-
-   TR::Machine *machine = cg()->machine();
-
-   cursor = getSnippetLabel()->getCodeLocation();
-
-   debug->printSnippetLabel(pOutFile, getSnippetLabel(), cursor, "Heap Allocation Snippet");
-
-   TR::RealRegister *resultReg  = machine->getRealRegister(conditions->getPostConditions()->getRegisterDependency(6)->getRealRegister());
-   TR::RealRegister *callRetReg = machine->getRealRegister(TR::RealRegister::gr3);
-
-   char    *info = "";
-   if (debug->isBranchToTrampoline(getDestination(), cursor, distance))
-      info = " Through trampoline";
-
-   if (getInsertType())
-      {
-      TR::RealRegister *arrayTypeReg  = machine->getRealRegister(conditions->getPostConditions()->getRegisterDependency(0)->getRealRegister());
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "li \t%s, 0x%x", debug->getName(arrayTypeReg), getNode()->getSecondChild()->getInt());
-      cursor += 4;
-      }
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   distance = *((int32_t *) cursor) & 0x03fffffc;
-   distance = (distance << 6) >> 6;   // sign extend
-   trfprintf(pOutFile, "bl \t" POINTER_PRINTF_FORMAT "\t\t;%s", (intptrj_t)cursor + distance, info);
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "mr \t%s, %s", debug->getName(resultReg), debug->getName(callRetReg));
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   distance = *((int32_t *) cursor) & 0x03fffffc;
-   distance = (distance << 6) >> 6;   // sign extend
-   TR_ASSERT( (intptrj_t)cursor + distance == (intptrj_t)getRestartLabel()->getCodeLocation(), "heap snippet: bad branch to restart label");
-   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t; Back to restart %s", (intptrj_t)cursor + distance, debug->getName(getRestartLabel()));
-   }
-
-
-uint32_t TR::PPCHeapAllocSnippet::getLength(int32_t estimatedCodeStart)
-   {
-   uint32_t len;
-   if (getInsertType())
-      {
-      len = PPC_INSTRUCTION_LENGTH*4;
-      }
-   else
-      {
-      len = PPC_INSTRUCTION_LENGTH*3;
-      }
-   return len;
    }
 
 TR::PPCAllocPrefetchSnippet::PPCAllocPrefetchSnippet(
@@ -516,6 +362,17 @@ uint32_t TR::getCCPreLoadedCodeSize()
 #define CCEYECATCHER(a, b, c, d) (((a) << 24) | ((b) << 16) | ((c) << 8) | ((d) << 0))
 #endif
 
+static void performCCPreLoadedBinaryEncoding(uint8_t *buffer, TR::CodeGenerator *cg)
+   {
+   cg->setBinaryBufferStart(buffer);
+   cg->setBinaryBufferCursor(buffer);
+   for (TR::Instruction *i = cg->getFirstInstruction(); i != NULL; i = i->getNext())
+      {
+      i->estimateBinaryLength(cg->getBinaryBufferCursor() - cg->getBinaryBufferStart());
+      cg->setBinaryBufferCursor(i->generateBinaryEncoding());
+      }
+   }
+
 static uint8_t* initializeCCPreLoadedPrefetch(uint8_t *buffer, void **CCPreLoadedCodeTable, TR::CodeGenerator *cg)
    {
    TR::Compilation *comp = cg->comp();
@@ -556,23 +413,25 @@ static uint8_t* initializeCCPreLoadedPrefetch(uint8_t *buffer, void **CCPreLoade
       const uint32_t skipLines = TR::Options::_TLHPrefetchStaggeredLineCount > 0  ? TR::Options::_TLHPrefetchStaggeredLineCount : 4;
       helperSize = (linesToPrefetch + 1) / 2 * 4;
 
-      TR_ASSERT( skipLines * ppcCacheLineSize <= UPPER_IMMED, "Cache line size too big for immediate");
+      TR_ASSERT_FATAL( (skipLines + 1) * ppcCacheLineSize <= UPPER_IMMED, "tlhPrefetchStaggeredLineCount (%u) is too high. Will cause imm field to overflow.", skipLines);
+      TR_ASSERT_FATAL( restartAfterLines * ppcCacheLineSize <= UPPER_IMMED, "tlhPrefetchBoundaryLineCount (%u) is too high. Will cause imm field to overflow.", restartAfterLines);
+
       cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r10, r8, skipLines * ppcCacheLineSize, cursor);
       cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r11, r8, (skipLines + 1) * ppcCacheLineSize, cursor);
-      cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtst, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r10, 4, cg), cursor);
-      cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtst, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r11, 4, cg), cursor);
+      cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtst, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r10, 4), cursor);
+      cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtst, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r11, 4), cursor);
 
       for (uint32_t i = 2; i < linesToPrefetch; i += 2)
          {
          cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r10, r10, ppcCacheLineSize * 2, cursor);
          cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r11, r11, ppcCacheLineSize * 2, cursor);
-         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtst, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r10, 4, cg), cursor);
-         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtst, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r11, 4, cg), cursor);
+         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtst, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r10, 4), cursor);
+         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtst, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r11, 4), cursor);
          }
 
       cursor = generateTrg1ImmInstruction(cg, TR::InstOpCode::li, n, r11, restartAfterLines * ppcCacheLineSize, cursor);
       cursor = generateMemSrc1Instruction(cg,TR::InstOpCode::Op_st, n,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(J9VMThread, tlhPrefetchFTA), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                          TR::MemoryReference::createWithDisplacement(cg, metaReg, offsetof(J9VMThread, tlhPrefetchFTA), TR::Compiler->om.sizeofReferenceAddress()),
                                           r11, cursor);
       }
    else
@@ -586,36 +445,40 @@ static uint8_t* initializeCCPreLoadedPrefetch(uint8_t *buffer, void **CCPreLoade
       const uint32_t skipLines = TR::Options::_TLHPrefetchStaggeredLineCount > 0  ? TR::Options::_TLHPrefetchStaggeredLineCount : 4;
       helperSize = 4 + (linesToLdPrefetch + 1) / 2 * 4 + 1 + (l3SkipLines ? 2 : 0) + (linesToStPrefetch + 1) / 2 * 4;
 
+      TR_ASSERT_FATAL( (skipLines + 1) * ppcCacheLineSize <= UPPER_IMMED, "tlhPrefetchStaggeredLineCount (%u) is too high. Will cause imm field to overflow.", skipLines);
+      TR_ASSERT_FATAL( restartAfterLines * ppcCacheLineSize <= UPPER_IMMED, "tlhPrefetchBoundaryLineCount (%u) is too high. Will cause imm field to overflow.", restartAfterLines);
+
       cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r10,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(J9VMThread, debugEventData3), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                          TR::MemoryReference::createWithDisplacement(cg, metaReg, offsetof(J9VMThread, debugEventData3), TR::Compiler->om.sizeofReferenceAddress()),
                                           cursor);
       cursor = generateTrg1Src1ImmInstruction(cg,TR::InstOpCode::Op_cmpli, n, cr0, r10, 0, cursor);
       cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::xori, n, r10, r10, 1, cursor);
       cursor = generateTrg1ImmInstruction(cg, TR::InstOpCode::li, n, r11, restartAfterLines * ppcCacheLineSize, cursor);
       cursor = generateMemSrc1Instruction(cg,TR::InstOpCode::Op_st, n,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(J9VMThread, tlhPrefetchFTA), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                          TR::MemoryReference::createWithDisplacement(cg, metaReg, offsetof(J9VMThread, tlhPrefetchFTA), TR::Compiler->om.sizeofReferenceAddress()),
                                           r11, cursor);
       cursor = generateMemSrc1Instruction(cg,TR::InstOpCode::Op_st, n,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(J9VMThread, debugEventData3), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                          TR::MemoryReference::createWithDisplacement(cg, metaReg, offsetof(J9VMThread, debugEventData3), TR::Compiler->om.sizeofReferenceAddress()),
                                           r10, cursor);
 
       cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r10, r8, skipLines * ppcCacheLineSize, cursor);
       cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r11, r8, (skipLines + 1) * ppcCacheLineSize, cursor);
-      cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtt, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r10, 4, cg), cursor);
-      cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtt, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r11, 4, cg), cursor);
+      cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtt, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r10, 4), cursor);
+      cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtt, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r11, 4), cursor);
 
       for (uint32_t i = 2; i < linesToLdPrefetch; i += 2)
          {
          cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r10, r10, ppcCacheLineSize * 2, cursor);
          cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r11, r11, ppcCacheLineSize * 2, cursor);
-         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtt, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r10, 4, cg), cursor);
-         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtt, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r11, 4, cg), cursor);
+         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtt, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r10, 4), cursor);
+         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtt, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r11, 4), cursor);
          }
 
       cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::beqlr, n, NULL, cr0, cursor);
 
       if (l3SkipLines > 0)
          {
+         TR_ASSERT_FATAL( ppcCacheLineSize * l3SkipLines <= UPPER_IMMED, "TR_l3SkipLines (%u) is too high. Will cause imm field to overflow.", l3SkipLines);
          cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r10, r10, ppcCacheLineSize * l3SkipLines, cursor);
          cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r11, r11, ppcCacheLineSize * l3SkipLines, cursor);
          }
@@ -624,18 +487,14 @@ static uint8_t* initializeCCPreLoadedPrefetch(uint8_t *buffer, void **CCPreLoade
          {
          cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r10, r10, ppcCacheLineSize * 2, cursor);
          cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r11, r11, ppcCacheLineSize * 2, cursor);
-         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtstt, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r10, 4, cg), cursor);
-         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtstt, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r11, 4, cg), cursor);
+         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtstt, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r10, 4), cursor);
+         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtstt, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r11, 4), cursor);
          }
       }
 
    cursor = generateInstruction(cg, TR::InstOpCode::blr, n, cursor);
 
-   cg->setBinaryBufferStart(buffer);
-   cg->setBinaryBufferCursor(buffer);
-
-   for (TR::Instruction *i = eyecatcher; i != NULL; i = i->getNext())
-      cg->setBinaryBufferCursor(i->generateBinaryEncoding());
+   performCCPreLoadedBinaryEncoding(buffer, cg);
 
    helperSize += 3;
    TR_ASSERT(cg->getBinaryBufferCursor() - entryLabel->getCodeLocation() == helperSize * PPC_INSTRUCTION_LENGTH,
@@ -686,23 +545,25 @@ static uint8_t* initializeCCPreLoadedNonZeroPrefetch(uint8_t *buffer, void **CCP
       const uint32_t skipLines = TR::Options::_TLHPrefetchStaggeredLineCount > 0  ? TR::Options::_TLHPrefetchStaggeredLineCount : 4;
       helperSize = (linesToPrefetch + 1) / 2 * 4;
 
-      TR_ASSERT( skipLines * ppcCacheLineSize <= UPPER_IMMED,"Cache line size too big for immediate");
+      TR_ASSERT_FATAL( (skipLines + 1) * ppcCacheLineSize <= UPPER_IMMED, "tlhPrefetchStaggeredLineCount (%u) is too high. Will cause imm field to overflow.", skipLines);
+      TR_ASSERT_FATAL( restartAfterLines * ppcCacheLineSize <= UPPER_IMMED, "tlhPrefetchBoundaryLineCount (%u) is too high. Will cause imm field to overflow.", restartAfterLines);
+
       cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r10, r8, skipLines * ppcCacheLineSize, cursor);
       cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r11, r8, (skipLines + 1) * ppcCacheLineSize, cursor);
-      cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtst, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r10, 4, cg), cursor);
-      cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtst, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r11, 4, cg), cursor);
+      cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtst, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r10, 4), cursor);
+      cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtst, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r11, 4), cursor);
 
       for (uint32_t i = 2; i < linesToPrefetch; i += 2)
          {
          cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r10, r10, ppcCacheLineSize * 2, cursor);
          cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r11, r11, ppcCacheLineSize * 2, cursor);
-         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtst, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r10, 4, cg), cursor);
-         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtst, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r11, 4, cg), cursor);
+         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtst, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r10, 4), cursor);
+         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtst, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r11, 4), cursor);
          }
 
       cursor = generateTrg1ImmInstruction(cg, TR::InstOpCode::li, n, r11, restartAfterLines * ppcCacheLineSize, cursor);
       cursor = generateMemSrc1Instruction(cg,TR::InstOpCode::Op_st, n,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(J9VMThread, nonZeroTlhPrefetchFTA), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                          TR::MemoryReference::createWithDisplacement(cg, metaReg, offsetof(J9VMThread, nonZeroTlhPrefetchFTA), TR::Compiler->om.sizeofReferenceAddress()),
                                           r11, cursor);
       }
    else
@@ -716,36 +577,40 @@ static uint8_t* initializeCCPreLoadedNonZeroPrefetch(uint8_t *buffer, void **CCP
       const uint32_t skipLines = TR::Options::_TLHPrefetchStaggeredLineCount > 0  ? TR::Options::_TLHPrefetchStaggeredLineCount : 4;
       helperSize = 4 + (linesToLdPrefetch + 1) / 2 * 4 + 1 + (l3SkipLines ? 2 : 0) + (linesToStPrefetch + 1) / 2 * 4;
 
+      TR_ASSERT_FATAL( (skipLines + 1) * ppcCacheLineSize <= UPPER_IMMED, "tlhPrefetchStaggeredLineCount (%u) is too high. Will cause imm field to overflow.", skipLines);
+      TR_ASSERT_FATAL( restartAfterLines * ppcCacheLineSize <= UPPER_IMMED, "tlhPrefetchBoundaryLineCount (%u) is too high. Will cause imm field to overflow.", restartAfterLines);
+
       cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r10,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(J9VMThread, debugEventData3), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                          TR::MemoryReference::createWithDisplacement(cg, metaReg, offsetof(J9VMThread, debugEventData3), TR::Compiler->om.sizeofReferenceAddress()),
                                           cursor);
       cursor = generateTrg1Src1ImmInstruction(cg,TR::InstOpCode::Op_cmpli, n, cr0, r10, 0, cursor);
       cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::xori, n, r10, r10, 1, cursor);
       cursor = generateTrg1ImmInstruction(cg, TR::InstOpCode::li, n, r11, restartAfterLines * ppcCacheLineSize, cursor);
       cursor = generateMemSrc1Instruction(cg,TR::InstOpCode::Op_st, n,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(J9VMThread, nonZeroTlhPrefetchFTA), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                          TR::MemoryReference::createWithDisplacement(cg, metaReg, offsetof(J9VMThread, nonZeroTlhPrefetchFTA), TR::Compiler->om.sizeofReferenceAddress()),
                                           r11, cursor);
       cursor = generateMemSrc1Instruction(cg,TR::InstOpCode::Op_st, n,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(J9VMThread, debugEventData3), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                          TR::MemoryReference::createWithDisplacement(cg, metaReg, offsetof(J9VMThread, debugEventData3), TR::Compiler->om.sizeofReferenceAddress()),
                                           r10, cursor);
 
       cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r10, r8, skipLines * ppcCacheLineSize, cursor);
       cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r11, r8, (skipLines + 1) * ppcCacheLineSize, cursor);
-      cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtt, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r10, 4, cg), cursor);
-      cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtt, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r11, 4, cg), cursor);
+      cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtt, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r10, 4), cursor);
+      cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtt, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r11, 4), cursor);
 
       for (uint32_t i = 2; i < linesToLdPrefetch; i += 2)
          {
          cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r10, r10, ppcCacheLineSize * 2, cursor);
          cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r11, r11, ppcCacheLineSize * 2, cursor);
-         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtt, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r10, 4, cg), cursor);
-         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtt, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r11, 4, cg), cursor);
+         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtt, n, TR::MemoryReference::createWithIndexReg(cg ,NULL, r10, 4), cursor);
+         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtt, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r11, 4), cursor);
          }
 
       cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::beqlr, n, NULL, cr0, cursor);
 
       if (l3SkipLines > 0)
          {
+         TR_ASSERT_FATAL( ppcCacheLineSize * l3SkipLines <= UPPER_IMMED, "TR_l3SkipLines (%u) is too high. Will cause imm field to overflow.", l3SkipLines);
          cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r10, r10, ppcCacheLineSize * l3SkipLines, cursor);
          cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r11, r11, ppcCacheLineSize * l3SkipLines, cursor);
          }
@@ -754,18 +619,14 @@ static uint8_t* initializeCCPreLoadedNonZeroPrefetch(uint8_t *buffer, void **CCP
          {
          cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r10, r10, ppcCacheLineSize * 2, cursor);
          cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r11, r11, ppcCacheLineSize * 2, cursor);
-         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtstt, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r10, 4, cg), cursor);
-         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtstt, n, new (cg->trHeapMemory()) TR::MemoryReference(NULL, r11, 4, cg), cursor);
+         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtstt, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r10, 4), cursor);
+         cursor = generateMemInstruction(cg, TR::InstOpCode::dcbtstt, n, TR::MemoryReference::createWithIndexReg(cg, NULL, r11, 4), cursor);
          }
       }
 
    cursor = generateInstruction(cg, TR::InstOpCode::blr, n, cursor);
 
-   cg->setBinaryBufferStart(buffer);
-   cg->setBinaryBufferCursor(buffer);
-
-   for (TR::Instruction *i = eyecatcher; i != NULL; i = i->getNext())
-      cg->setBinaryBufferCursor(i->generateBinaryEncoding());
+   performCCPreLoadedBinaryEncoding(buffer, cg);
 
    helperSize += 3;
    TR_ASSERT(cg->getBinaryBufferCursor() - entryLabel->getCodeLocation() == helperSize * PPC_INSTRUCTION_LENGTH,
@@ -779,6 +640,7 @@ static uint8_t* initializeCCPreLoadedNonZeroPrefetch(uint8_t *buffer, void **CCP
 static TR::Instruction* genZeroInit(TR::CodeGenerator *cg, TR::Node *n, TR::Register *objStartReg, TR::Register *objEndReg, TR::Register *needsZeroInitCondReg,
                                    TR::Register *iterReg, TR::Register *zeroReg, TR::Register *condReg, uint32_t initOffset, TR::Instruction *cursor)
    {
+   TR_ASSERT_FATAL_WITH_NODE(n, initOffset <= UPPER_IMMED, "initOffset (%u) is too big to fit in a signed immediate field.", initOffset);
    // Generates 24 instructions (+6 if DEBUG)
 #if defined(DEBUG)
    // Fill the object with junk to make sure zero-init is working
@@ -791,7 +653,7 @@ static TR::Instruction* genZeroInit(TR::CodeGenerator *cg, TR::Node *n, TR::Regi
       cursor = generateLabelInstruction(cg, TR::InstOpCode::label, n, loopStartLabel, cursor);
       // XXX: This can be improved to use std on 64-bit, but we have to adjust for the size not being 8-byte aligned
       cursor = generateMemSrc1Instruction(cg, TR::InstOpCode::stw, n,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(iterReg, 0, 4, cg),
+                                          TR::MemoryReference::createWithDisplacement(cg, iterReg, 0, 4),
                                           zeroReg, cursor);
       cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, iterReg, iterReg, 4, cursor);
       cursor = generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmpl, n, condReg, iterReg, objEndReg, cursor);
@@ -817,7 +679,7 @@ static TR::Instruction* genZeroInit(TR::CodeGenerator *cg, TR::Node *n, TR::Regi
    cursor = generateLabelInstruction(cg, TR::InstOpCode::label, n, unrolledLoopStartLabel, cursor);
    for (int i = 0; i < 32; i += 4)
       cursor = generateMemSrc1Instruction(cg, TR::InstOpCode::stw, n,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(iterReg, i, 4, cg),
+                                          TR::MemoryReference::createWithDisplacement(cg, iterReg, i, 4),
                                           zeroReg, cursor);
    cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, iterReg, iterReg, 32, cursor);
    cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::bdnz, n, unrolledLoopStartLabel, /* Not used */ condReg, cursor);
@@ -828,7 +690,7 @@ static TR::Instruction* genZeroInit(TR::CodeGenerator *cg, TR::Node *n, TR::Regi
    // Residue loop
    cursor = generateLabelInstruction(cg, TR::InstOpCode::label, n, residueLoopStartLabel, cursor);
    cursor = generateMemSrc1Instruction(cg, TR::InstOpCode::stw, n,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(iterReg, 0, 4, cg),
+                                       TR::MemoryReference::createWithDisplacement(cg, iterReg, 0, 4),
                                        zeroReg, cursor);
    cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, iterReg, iterReg, 4, cursor);
    cursor = generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmpl, n, condReg, iterReg, objEndReg, cursor);
@@ -865,11 +727,9 @@ static uint8_t* initializeCCPreLoadedWriteBarrier(uint8_t *buffer, void **CCPreL
    helperTrampolineLabel->setCodeLocation((uint8_t *)TR::CodeCacheManager::instance()->findHelperTrampoline(TR_writeBarrierStoreGenerational, buffer));
    TR::Instruction *entry = generateLabelInstruction(cg, TR::InstOpCode::label, n, entryLabel);
    TR::Instruction *cursor = entry;
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-   const TR::InstOpCode::Mnemonic Op_lclass = TR::InstOpCode::lwz;
-#else
-   const TR::InstOpCode::Mnemonic Op_lclass =TR::InstOpCode::Op_load;
-#endif
+   TR::InstOpCode::Mnemonic Op_lclass = TR::InstOpCode::Op_load;
+   if (TR::Compiler->om.compressObjectReferences())
+      Op_lclass = TR::InstOpCode::lwz;
    const TR::InstOpCode::Mnemonic rememberedClassMaskOp = J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST > UPPER_IMMED ||
                                                J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST < LOWER_IMMED ? TR::InstOpCode::andis_r : TR::InstOpCode::andi_r;
    const uint32_t      rememberedClassMask = rememberedClassMaskOp == TR::InstOpCode::andis_r ?
@@ -884,31 +744,32 @@ static uint8_t* initializeCCPreLoadedWriteBarrier(uint8_t *buffer, void **CCPreL
    TR::Register *cr0 = cg->machine()->getRealRegister(TR::RealRegister::cr0);
    TR::Register *cr1 = cg->machine()->getRealRegister(TR::RealRegister::cr1);
 
-   TR_ASSERT((J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST <= UPPER_IMMED && J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST >= LOWER_IMMED) ||
+   TR_ASSERT_FATAL((J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST <= UPPER_IMMED && J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST >= LOWER_IMMED) ||
            (J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST & 0xffff) == 0, "Expecting J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST to fit in immediate field");
+   TR_ASSERT_FATAL( rememberedClassMask <= 0xFFFF, "Expecting rememberedClassMask (%u) to fit in an unsigned immediate field.", rememberedClassMask);
 
    const bool constHeapBase = !comp->getOptions()->isVariableHeapBaseForBarrierRange0();
    const bool constHeapSize = !comp->getOptions()->isVariableHeapSizeForBarrierRange0();
-   intptrj_t heapBase;
-   intptrj_t heapSize;
+   intptr_t heapBase;
+   intptr_t heapSize;
 
-   if (cg->comp()->target().is32Bit() && !comp->compileRelocatableCode() && constHeapBase)
+   if (comp->target().is32Bit() && !comp->compileRelocatableCode() && constHeapBase)
       {
       heapBase = comp->getOptions()->getHeapBaseForBarrierRange0();
       cursor = loadAddressConstant(cg, false, n, heapBase, r5, cursor);
       }
    else
       cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r5,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, heapBaseForBarrierRange0), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                          TR::MemoryReference::createWithDisplacement(cg, metaReg, offsetof(struct J9VMThread, heapBaseForBarrierRange0), TR::Compiler->om.sizeofReferenceAddress()),
                                           cursor);
-   if (cg->comp()->target().is32Bit() && !comp->compileRelocatableCode() && constHeapSize)
+   if (comp->target().is32Bit() && !comp->compileRelocatableCode() && constHeapSize)
       {
       heapSize = comp->getOptions()->getHeapSizeForBarrierRange0();
       cursor = loadAddressConstant(cg, false, n, heapSize, r6, cursor);
       }
    else
       cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r6,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, heapSizeForBarrierRange0), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                          TR::MemoryReference::createWithDisplacement(cg, metaReg, offsetof(struct J9VMThread, heapSizeForBarrierRange0), TR::Compiler->om.sizeofReferenceAddress()),
                                           cursor);
    cursor = generateTrg1Src2Instruction(cg, TR::InstOpCode::subf, n, r11, r5, r3, cursor);
    cursor = generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmpl, n, cr0, r11, r6, cursor);
@@ -917,21 +778,17 @@ static uint8_t* initializeCCPreLoadedWriteBarrier(uint8_t *buffer, void **CCPreL
    cursor = generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmpl, n, cr0, r11, r6, cursor);
    cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::bltlr, n, NULL, cr0, cursor);
    cursor = generateTrg1MemInstruction(cg,Op_lclass, n, r11,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(r3, TR::Compiler->om.offsetOfObjectVftField(), TR::Compiler->om.sizeofReferenceField(), cg),
+                                       TR::MemoryReference::createWithDisplacement(cg, r3, TR::Compiler->om.offsetOfObjectVftField(), TR::Compiler->om.sizeofReferenceField()),
                                        cursor);
    cursor = generateTrg1Src1ImmInstruction(cg, rememberedClassMaskOp, n, r11, r11, cr0, rememberedClassMask, cursor);
    cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::bnelr, n, NULL, cr0, cursor);
    cursor = generateLabelInstruction(cg, TR::InstOpCode::b, n, helperTrampolineLabel, cursor);
 
-   cg->setBinaryBufferStart(buffer);
-   cg->setBinaryBufferCursor(buffer);
-
-   for (TR::Instruction *i = eyecatcher; i != NULL; i = i->getNext())
-      cg->setBinaryBufferCursor(i->generateBinaryEncoding());
+   performCCPreLoadedBinaryEncoding(buffer, cg);
 
    const uint32_t helperSize = 12 +
-      (cg->comp()->target().is32Bit() && !comp->compileRelocatableCode() && constHeapBase && heapBase > UPPER_IMMED && heapBase < LOWER_IMMED ? 1 : 0) +
-      (cg->comp()->target().is32Bit() && !comp->compileRelocatableCode() && constHeapSize && heapSize > UPPER_IMMED && heapSize < LOWER_IMMED ? 1 : 0);
+      (comp->target().is32Bit() && !comp->compileRelocatableCode() && constHeapBase && heapBase > UPPER_IMMED && heapBase < LOWER_IMMED ? 1 : 0) +
+      (comp->target().is32Bit() && !comp->compileRelocatableCode() && constHeapSize && heapSize > UPPER_IMMED && heapSize < LOWER_IMMED ? 1 : 0);
    TR_ASSERT(cg->getBinaryBufferCursor() - entryLabel->getCodeLocation() == helperSize * PPC_INSTRUCTION_LENGTH,
            "Per-codecache write barrier, unexpected size");
 
@@ -967,11 +824,9 @@ static uint8_t* initializeCCPreLoadedWriteBarrierAndCardMark(uint8_t *buffer, vo
    helperTrampolineLabel->setCodeLocation((uint8_t *)TR::CodeCacheManager::instance()->findHelperTrampoline(TR_writeBarrierStoreGenerationalAndConcurrentMark, buffer));
    TR::Instruction *entry = generateLabelInstruction(cg, TR::InstOpCode::label, n, entryLabel);
    TR::Instruction *cursor = entry;
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-   const TR::InstOpCode::Mnemonic Op_lclass = TR::InstOpCode::lwz;
-#else
-   const TR::InstOpCode::Mnemonic Op_lclass =TR::InstOpCode::Op_load;
-#endif
+   TR::InstOpCode::Mnemonic Op_lclass = TR::InstOpCode::Op_load;
+   if (TR::Compiler->om.compressObjectReferences())
+      Op_lclass = TR::InstOpCode::lwz;
    const TR::InstOpCode::Mnemonic cmActiveMaskOp = J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE > UPPER_IMMED ||
                                         J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE < LOWER_IMMED ? TR::InstOpCode::andis_r : TR::InstOpCode::andi_r;
    const uint32_t      cmActiveMask = cmActiveMaskOp == TR::InstOpCode::andis_r ?
@@ -980,7 +835,7 @@ static uint8_t* initializeCCPreLoadedWriteBarrierAndCardMark(uint8_t *buffer, vo
                                                J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST < LOWER_IMMED ? TR::InstOpCode::andis_r : TR::InstOpCode::andi_r;
    const uint32_t      rememberedClassMask = rememberedClassMaskOp == TR::InstOpCode::andis_r ?
                                              J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST >> 16 : J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST;
-   const uintptr_t     cardTableShift = cg->comp()->target().is64Bit() ?
+   const uintptr_t     cardTableShift = comp->target().is64Bit() ?
                                         trailingZeroes((uint64_t)comp->getOptions()->getGcCardSize()) :
                                         trailingZeroes((uint32_t)comp->getOptions()->getGcCardSize());
 
@@ -993,33 +848,35 @@ static uint8_t* initializeCCPreLoadedWriteBarrierAndCardMark(uint8_t *buffer, vo
    TR::Register *cr0 = cg->machine()->getRealRegister(TR::RealRegister::cr0);
    TR::Register *cr1 = cg->machine()->getRealRegister(TR::RealRegister::cr1);
 
-   TR_ASSERT((J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE <= UPPER_IMMED && J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE >= LOWER_IMMED) ||
+   TR_ASSERT_FATAL((J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE <= UPPER_IMMED && J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE >= LOWER_IMMED) ||
            (J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE & 0xffff) == 0, "Expecting J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE to fit in immediate field");
-   TR_ASSERT((J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST <= UPPER_IMMED && J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST >= LOWER_IMMED) ||
+   TR_ASSERT_FATAL((J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST <= UPPER_IMMED && J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST >= LOWER_IMMED) ||
            (J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST & 0xffff) == 0, "Expecting J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST to fit in immediate field");
+   TR_ASSERT_FATAL( cmActiveMask <= 0xFFFF, "Expecting cmActiveMask (%u) to fit in an unsigned immediate field.", cmActiveMask);
+   TR_ASSERT_FATAL( rememberedClassMask <= 0xFFFF, "Expecting rememberedClassMask (%u) to fit in an unsigned immediate field.", rememberedClassMask);
 
    const bool constHeapBase = !comp->getOptions()->isVariableHeapBaseForBarrierRange0();
    const bool constHeapSize = !comp->getOptions()->isVariableHeapSizeForBarrierRange0();
-   intptrj_t heapBase;
-   intptrj_t heapSize;
+   intptr_t heapBase;
+   intptr_t heapSize;
 
-   if (cg->comp()->target().is32Bit() && !comp->compileRelocatableCode() && constHeapBase)
+   if (comp->target().is32Bit() && !comp->compileRelocatableCode() && constHeapBase)
       {
       heapBase = comp->getOptions()->getHeapBaseForBarrierRange0();
       cursor = loadAddressConstant(cg, false, n, heapBase, r5, cursor);
       }
    else
       cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r5,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, heapBaseForBarrierRange0), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                          TR::MemoryReference::createWithDisplacement(cg, metaReg, offsetof(struct J9VMThread, heapBaseForBarrierRange0), TR::Compiler->om.sizeofReferenceAddress()),
                                           cursor);
-   if (cg->comp()->target().is32Bit() && !comp->compileRelocatableCode() && constHeapSize)
+   if (comp->target().is32Bit() && !comp->compileRelocatableCode() && constHeapSize)
       {
       heapSize = comp->getOptions()->getHeapSizeForBarrierRange0();
       cursor = loadAddressConstant(cg, false, n, heapSize, r6, cursor);
       }
    else
       cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r6,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, heapSizeForBarrierRange0), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                          TR::MemoryReference::createWithDisplacement(cg, metaReg, offsetof(struct J9VMThread, heapSizeForBarrierRange0), TR::Compiler->om.sizeofReferenceAddress()),
                                           cursor);
    cursor = generateTrg1Src2Instruction(cg, TR::InstOpCode::subf, n, r11, r5, r3, cursor);
    cursor = generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmpl, n, cr0, r11, r6, cursor);
@@ -1027,39 +884,35 @@ static uint8_t* initializeCCPreLoadedWriteBarrierAndCardMark(uint8_t *buffer, vo
    cursor = generateTrg1Src2Instruction(cg, TR::InstOpCode::subf, n, r5, r5, r4, cursor);
    cursor = generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmpl, n, cr1, r5, r6, cursor);
    cursor = generateTrg1MemInstruction(cg, TR::InstOpCode::lwz, n, r6,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(metaReg,  offsetof(struct J9VMThread, privateFlags), 4, cg),
+                                       TR::MemoryReference::createWithDisplacement(cg, metaReg,  offsetof(struct J9VMThread, privateFlags), 4),
                                        cursor);
    cursor = generateTrg1Src1ImmInstruction(cg, cmActiveMaskOp, n, r6, r6, cr0, cmActiveMask, cursor);
    cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::beq, n, doneCardMarkLabel, cr0, cursor);
    cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r6,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(metaReg,  offsetof(struct J9VMThread, activeCardTableBase), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                       TR::MemoryReference::createWithDisplacement(cg, metaReg,  offsetof(struct J9VMThread, activeCardTableBase), TR::Compiler->om.sizeofReferenceAddress()),
                                        cursor);
-   if (cg->comp()->target().is64Bit())
+   if (comp->target().is64Bit())
       cursor = generateShiftRightLogicalImmediateLong(cg, n, r11, r11, cardTableShift, cursor);
    else
       cursor = generateShiftRightLogicalImmediate(cg, n, r11, r11, cardTableShift, cursor);
    cursor = generateTrg1ImmInstruction(cg, TR::InstOpCode::li, n, r5, 1, cursor);
    cursor = generateMemSrc1Instruction(cg, TR::InstOpCode::stbx, n,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(r6, r11, 1, cg),
+                                       TR::MemoryReference::createWithIndexReg(cg, r6, r11, 1),
                                        r5, cursor);
    cursor = generateLabelInstruction(cg, TR::InstOpCode::label, n, doneCardMarkLabel, cursor);
    cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::bltlr, n, NULL, cr1, cursor);
    cursor = generateTrg1MemInstruction(cg,Op_lclass, n, r11,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(r3, TR::Compiler->om.offsetOfObjectVftField(), TR::Compiler->om.sizeofReferenceField(), cg),
+                                       TR::MemoryReference::createWithDisplacement(cg, r3, TR::Compiler->om.offsetOfObjectVftField(), TR::Compiler->om.sizeofReferenceField()),
                                        cursor);
    cursor = generateTrg1Src1ImmInstruction(cg, rememberedClassMaskOp, n, r11, r11, cr0, rememberedClassMask, cursor);
    cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::bnelr, n, NULL, cr0, cursor);
    cursor = generateLabelInstruction(cg, TR::InstOpCode::b, n, helperTrampolineLabel, cursor);
 
-   cg->setBinaryBufferStart(buffer);
-   cg->setBinaryBufferCursor(buffer);
-
-   for (TR::Instruction *i = eyecatcher; i != NULL; i = i->getNext())
-      cg->setBinaryBufferCursor(i->generateBinaryEncoding());
+   performCCPreLoadedBinaryEncoding(buffer, cg);
 
    const uint32_t helperSize = 19 +
-      (cg->comp()->target().is32Bit() && !comp->compileRelocatableCode() && constHeapBase && heapBase > UPPER_IMMED && heapBase < LOWER_IMMED ? 1 : 0) +
-      (cg->comp()->target().is32Bit() && !comp->compileRelocatableCode() && constHeapSize && heapSize > UPPER_IMMED && heapSize < LOWER_IMMED ? 1 : 0);
+      (comp->target().is32Bit() && !comp->compileRelocatableCode() && constHeapBase && heapBase > UPPER_IMMED && heapBase < LOWER_IMMED ? 1 : 0) +
+      (comp->target().is32Bit() && !comp->compileRelocatableCode() && constHeapSize && heapSize > UPPER_IMMED && heapSize < LOWER_IMMED ? 1 : 0);
    TR_ASSERT(cg->getBinaryBufferCursor() - entryLabel->getCodeLocation() == helperSize * PPC_INSTRUCTION_LENGTH,
            "Per-codecache write barrier with card mark, unexpected size");
 
@@ -1094,7 +947,7 @@ static uint8_t* initializeCCPreLoadedCardMark(uint8_t *buffer, void **CCPreLoade
                                         J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE < LOWER_IMMED ? TR::InstOpCode::andis_r : TR::InstOpCode::andi_r;
    const uint32_t      cmActiveMask = cmActiveMaskOp == TR::InstOpCode::andis_r ?
                                       J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE >> 16 : J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE;
-   const uintptr_t     cardTableShift = cg->comp()->target().is64Bit() ?
+   const uintptr_t     cardTableShift = comp->target().is64Bit() ?
                                         trailingZeroes((uint64_t)comp->getOptions()->getGcCardSize()) :
                                         trailingZeroes((uint32_t)comp->getOptions()->getGcCardSize());
 
@@ -1105,14 +958,15 @@ static uint8_t* initializeCCPreLoadedCardMark(uint8_t *buffer, void **CCPreLoade
    TR::Register *r11 = cg->machine()->getRealRegister(TR::RealRegister::gr11);
    TR::Register *cr0 = cg->machine()->getRealRegister(TR::RealRegister::cr0);
 
-   TR_ASSERT((J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE <= UPPER_IMMED && J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE >= LOWER_IMMED) ||
+   TR_ASSERT_FATAL((J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE <= UPPER_IMMED && J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE >= LOWER_IMMED) ||
                        (J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE & 0xffff) == 0, "Expecting J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE to fit in immediate field");
+   TR_ASSERT_FATAL( cmActiveMask <= 0xFFFF, "Expecting cmActiveMask (%u) to fit in an unsigned immediate field.", cmActiveMask);
 
    cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r5,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, heapBaseForBarrierRange0), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                       TR::MemoryReference::createWithDisplacement(cg, metaReg, offsetof(struct J9VMThread, heapBaseForBarrierRange0), TR::Compiler->om.sizeofReferenceAddress()),
                                        cursor);
    cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r4,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, heapSizeForBarrierRange0), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                       TR::MemoryReference::createWithDisplacement(cg, metaReg, offsetof(struct J9VMThread, heapSizeForBarrierRange0), TR::Compiler->om.sizeofReferenceAddress()),
                                        cursor);
    cursor = generateTrg1Src2Instruction(cg, TR::InstOpCode::subf, n, r5, r5, r3, cursor);
    cursor = generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmpl, n, cr0, r5, r4, cursor);
@@ -1121,29 +975,25 @@ static uint8_t* initializeCCPreLoadedCardMark(uint8_t *buffer, void **CCPreLoade
    if (TR::Compiler->om.writeBarrierType() != gc_modron_wrtbar_cardmark_incremental)
       {
       cursor = generateTrg1MemInstruction(cg, TR::InstOpCode::lwz, n, r4,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg,  offsetof(struct J9VMThread, privateFlags), 4, cg),
+                                          TR::MemoryReference::createWithDisplacement(cg, metaReg,  offsetof(struct J9VMThread, privateFlags), 4),
                                           cursor);
       cursor = generateTrg1Src1ImmInstruction(cg, cmActiveMaskOp, n, r4, r4, cr0, cmActiveMask, cursor);
       cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::beqlr, n, NULL, cr0, cursor);
       }
    cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r4,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(metaReg,  offsetof(struct J9VMThread, activeCardTableBase), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                       TR::MemoryReference::createWithDisplacement(cg, metaReg,  offsetof(struct J9VMThread, activeCardTableBase), TR::Compiler->om.sizeofReferenceAddress()),
                                        cursor);
-   if (cg->comp()->target().is64Bit())
+   if (comp->target().is64Bit())
       cursor = generateShiftRightLogicalImmediateLong(cg, n, r5, r5, cardTableShift, cursor);
    else
       cursor = generateShiftRightLogicalImmediate(cg, n, r5, r5, cardTableShift, cursor);
    cursor = generateTrg1ImmInstruction(cg, TR::InstOpCode::li, n, r11, 1, cursor);
    cursor = generateMemSrc1Instruction(cg, TR::InstOpCode::stbx, n,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(r4, r5, 1, cg),
+                                       TR::MemoryReference::createWithIndexReg(cg, r4, r5, 1),
                                        r11, cursor);
    cursor = generateInstruction(cg, TR::InstOpCode::blr, n, cursor);
 
-   cg->setBinaryBufferStart(buffer);
-   cg->setBinaryBufferCursor(buffer);
-
-   for (TR::Instruction *i = eyecatcher; i != NULL; i = i->getNext())
-      cg->setBinaryBufferCursor(i->generateBinaryEncoding());
+   performCCPreLoadedBinaryEncoding(buffer, cg);
 
    const uint32_t helperSize = TR::Compiler->om.writeBarrierType() != gc_modron_wrtbar_cardmark_incremental ? 13 : 10;
    TR_ASSERT(cg->getBinaryBufferCursor() - entryLabel->getCodeLocation() == helperSize * PPC_INSTRUCTION_LENGTH,
@@ -1182,11 +1032,9 @@ static uint8_t* initializeCCPreLoadedArrayStoreCHK(uint8_t *buffer, void **CCPre
    helperTrampolineLabel->setCodeLocation((uint8_t *)TR::CodeCacheManager::instance()->findHelperTrampoline(TR_typeCheckArrayStore, buffer));
    TR::Instruction *entry = generateLabelInstruction(cg, TR::InstOpCode::label, n, entryLabel);
    TR::Instruction *cursor = entry;
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-   const TR::InstOpCode::Mnemonic Op_lclass = TR::InstOpCode::lwz;
-#else
-   const TR::InstOpCode::Mnemonic Op_lclass =TR::InstOpCode::Op_load;
-#endif
+   TR::InstOpCode::Mnemonic Op_lclass = TR::InstOpCode::Op_load;
+   if (TR::Compiler->om.compressObjectReferences())
+      Op_lclass = TR::InstOpCode::lwz;
 
    TR::Register *r3 = cg->machine()->getRealRegister(TR::RealRegister::gr3);
    TR::Register *r4 = cg->machine()->getRealRegister(TR::RealRegister::gr4);
@@ -1197,21 +1045,21 @@ static uint8_t* initializeCCPreLoadedArrayStoreCHK(uint8_t *buffer, void **CCPre
    TR::Register *cr0 = cg->machine()->getRealRegister(TR::RealRegister::cr0);
 
    cursor = generateTrg1MemInstruction(cg,Op_lclass, n, r5,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(r3, TR::Compiler->om.offsetOfObjectVftField(), TR::Compiler->om.sizeofReferenceField(), cg),
+                                       TR::MemoryReference::createWithDisplacement(cg, r3, TR::Compiler->om.offsetOfObjectVftField(), TR::Compiler->om.sizeofReferenceField()),
                                        cursor);
    cursor = generateTrg1MemInstruction(cg,Op_lclass, n, r6,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(r4, TR::Compiler->om.offsetOfObjectVftField(), TR::Compiler->om.sizeofReferenceField(), cg),
+                                       TR::MemoryReference::createWithDisplacement(cg, r4, TR::Compiler->om.offsetOfObjectVftField(), TR::Compiler->om.sizeofReferenceField()),
                                        cursor);
    cursor = TR::TreeEvaluator::generateVFTMaskInstruction(cg, n, r5, cursor);
    cursor = TR::TreeEvaluator::generateVFTMaskInstruction(cg, n, r6, cursor);
    cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r5,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(r5, offsetof(J9ArrayClass, componentType), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                       TR::MemoryReference::createWithDisplacement(cg, r5, offsetof(J9ArrayClass, componentType), TR::Compiler->om.sizeofReferenceAddress()),
                                        cursor);
 
    cursor = generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmpl, n, cr0, r5, r6, cursor);
    cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::beqlr, n, NULL, cr0, cursor);
    cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r7,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(r6, offsetof(J9Class, castClassCache), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                       TR::MemoryReference::createWithDisplacement(cg, r6, offsetof(J9Class, castClassCache), TR::Compiler->om.sizeofReferenceAddress()),
                                        cursor);
    cursor = generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmpl, n, cr0, r5, r7, cursor);
    cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::beqlr, n, NULL, cr0, cursor);
@@ -1219,29 +1067,29 @@ static uint8_t* initializeCCPreLoadedArrayStoreCHK(uint8_t *buffer, void **CCPre
    cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::beqlr, n, NULL, cr0, cursor);
 
    cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r7,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(r5, offsetof(J9Class, romClass), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                       TR::MemoryReference::createWithDisplacement(cg, r5, offsetof(J9Class, romClass), TR::Compiler->om.sizeofReferenceAddress()),
                                        cursor);
    cursor = generateTrg1MemInstruction(cg, TR::InstOpCode::lwz, n, r7,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(r7, offsetof(J9ROMClass, modifiers), 4, cg),
+                                       TR::MemoryReference::createWithDisplacement(cg, r7, offsetof(J9ROMClass, modifiers), 4),
                                        cursor);
    cursor = generateShiftRightLogicalImmediate(cg, n, r7, r7, 1, cursor);
-   TR_ASSERT(!(((J9AccClassArray | J9AccInterface) >> 1) & ~0xffff),
+   TR_ASSERT_FATAL(!(((J9AccClassArray | J9AccInterface) >> 1) & ~0xffff),
            "Expecting shifted ROM class modifiers to fit in immediate");
    cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::andi_r, n, r7, r7, cr0, (J9AccClassArray | J9AccInterface) >> 1, cursor);
    cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::bne, n, skipSuperclassTestLabel, cr0, cursor);
 
    cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r7,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(r6, offsetof(J9Class, classDepthAndFlags), TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                       TR::MemoryReference::createWithDisplacement(cg, r6, offsetof(J9Class, classDepthAndFlags), TR::Compiler->om.sizeofReferenceAddress()),
                                        cursor);
-   TR_ASSERT(!(J9AccClassDepthMask & ~0xffff),
+   TR_ASSERT_FATAL(!(J9AccClassDepthMask & ~0xffff),
            "Expecting class depth mask to fit in immediate");
    cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::andi_r, n, r7, r7, cr0, J9AccClassDepthMask, cursor);
    cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::beq, n, skipSuperclassTestLabel, cr0, cursor);
    cursor = generateTrg1MemInstruction(cg,Op_lclass, n, r7,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(r6, offsetof(J9Class, superclasses), TR::Compiler->om.sizeofReferenceField(), cg),
+                                       TR::MemoryReference::createWithDisplacement(cg, r6, offsetof(J9Class, superclasses), TR::Compiler->om.sizeofReferenceField()),
                                        cursor);
    cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r7,
-                                       new (cg->trHeapMemory()) TR::MemoryReference(r7, 0, TR::Compiler->om.sizeofReferenceAddress(), cg),
+                                       TR::MemoryReference::createWithDisplacement(cg, r7, 0, TR::Compiler->om.sizeofReferenceAddress()),
                                        cursor);
    cursor = generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmpl, n, cr0, r5, r7, cursor);
    cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::beqlr, n, NULL, cr0, cursor);
@@ -1249,11 +1097,7 @@ static uint8_t* initializeCCPreLoadedArrayStoreCHK(uint8_t *buffer, void **CCPre
    cursor = generateLabelInstruction(cg, TR::InstOpCode::label, n, skipSuperclassTestLabel, cursor);
    cursor = generateLabelInstruction(cg, TR::InstOpCode::b, n, helperTrampolineLabel, cursor);
 
-   cg->setBinaryBufferStart(buffer);
-   cg->setBinaryBufferCursor(buffer);
-
-   for (TR::Instruction *i = eyecatcher; i != NULL; i = i->getNext())
-      cg->setBinaryBufferCursor(i->generateBinaryEncoding());
+   performCCPreLoadedBinaryEncoding(buffer, cg);
 
    const uint32_t helperSize = 25;
    TR_ASSERT(cg->getBinaryBufferCursor() - entryLabel->getCodeLocation() == helperSize * PPC_INSTRUCTION_LENGTH,
@@ -1268,12 +1112,12 @@ void TR::createCCPreLoadedCode(uint8_t *CCPreLoadedCodeBase, uint8_t *CCPreLoade
    {
    /* If you modify this make sure you update CCPreLoadedCodeSize above as well */
 
-   if (TR::Options::getCmdLineOptions()->realTimeGC())
-      return;
-
    // We temporarily clobber the first and append instructions so we can use high level codegen to generate pre-loaded code
    // So save the original values here and restore them when done
    TR::Compilation *comp = cg->comp();
+   if (comp->getOptions()->realTimeGC())
+      return;
+
    TR::Instruction *curFirst = cg->getFirstInstruction();
    TR::Instruction *curAppend = cg->getAppendInstruction();
    uint8_t *curBinaryBufferStart = cg->getBinaryBufferStart();
@@ -1328,13 +1172,13 @@ uint8_t *TR::PPCAllocPrefetchSnippet::emitSnippetBody()
    getSnippetLabel()->setCodeLocation(buffer);
    TR::InstOpCode opcode;
 
-   if (TR::Options::getCmdLineOptions()->realTimeGC())
+   if (comp->getOptions()->realTimeGC())
       return NULL;
 
-   TR_ASSERT((uintptrj_t)((cg()->getCodeCache())->getCCPreLoadedCodeAddress(TR_AllocPrefetch, cg())) != 0xDEADBEEF,
+   TR_ASSERT((uintptr_t)((cg()->getCodeCache())->getCCPreLoadedCodeAddress(TR_AllocPrefetch, cg())) != 0xDEADBEEF,
          "Invalid addr for code cache helper");
-   intptrj_t distance = (intptrj_t)(cg()->getCodeCache())->getCCPreLoadedCodeAddress(TR_AllocPrefetch, cg())
-                           - (intptrj_t)buffer;
+   intptr_t distance = (intptr_t)(cg()->getCodeCache())->getCCPreLoadedCodeAddress(TR_AllocPrefetch, cg())
+                           - (intptr_t)buffer;
    opcode.setOpCodeValue(TR::InstOpCode::b);
    buffer = opcode.copyBinaryToBuffer(buffer);
    *(int32_t *)buffer |= distance & 0x03FFFFFC;
@@ -1354,13 +1198,13 @@ TR::PPCAllocPrefetchSnippet::print(TR::FILE *pOutFile, TR_Debug * debug)
    debug->printPrefix(pOutFile, NULL, cursor, 4);
    distance = *((int32_t *) cursor) & 0x03fffffc;
    distance = (distance << 6) >> 6;   // sign extend
-   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t", (intptrj_t)cursor + distance);
+   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t", (intptr_t)cursor + distance);
    }
 
 uint32_t TR::PPCAllocPrefetchSnippet::getLength(int32_t estimatedCodeStart)
    {
 
-   if (TR::Options::getCmdLineOptions()->realTimeGC())
+   if (cg()->comp()->getOptions()->realTimeGC())
       return 0;
 
    return PPC_INSTRUCTION_LENGTH;
@@ -1381,13 +1225,13 @@ uint8_t *TR::PPCNonZeroAllocPrefetchSnippet::emitSnippetBody()
    getSnippetLabel()->setCodeLocation(buffer);
    TR::InstOpCode opcode;
 
-   if (TR::Options::getCmdLineOptions()->realTimeGC())
+   if (comp->getOptions()->realTimeGC())
       return NULL;
 
-   TR_ASSERT((uintptrj_t)((cg()->getCodeCache())->getCCPreLoadedCodeAddress(TR_NonZeroAllocPrefetch, cg())) != 0xDEADBEEF,
+   TR_ASSERT((uintptr_t)((cg()->getCodeCache())->getCCPreLoadedCodeAddress(TR_NonZeroAllocPrefetch, cg())) != 0xDEADBEEF,
          "Invalid addr for code cache helper");
-   intptrj_t distance = (intptrj_t)(cg()->getCodeCache())->getCCPreLoadedCodeAddress(TR_NonZeroAllocPrefetch, cg())
-                           - (intptrj_t)buffer;
+   intptr_t distance = (intptr_t)(cg()->getCodeCache())->getCCPreLoadedCodeAddress(TR_NonZeroAllocPrefetch, cg())
+                           - (intptr_t)buffer;
    opcode.setOpCodeValue(TR::InstOpCode::b);
    buffer = opcode.copyBinaryToBuffer(buffer);
    *(int32_t *)buffer |= distance & 0x03FFFFFC;
@@ -1407,13 +1251,13 @@ TR::PPCNonZeroAllocPrefetchSnippet::print(TR::FILE *pOutFile, TR_Debug * debug)
    debug->printPrefix(pOutFile, NULL, cursor, 4);
    distance = *((int32_t *) cursor) & 0x03fffffc;
    distance = (distance << 6) >> 6;   // sign extend
-   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t", (intptrj_t)cursor + distance);
+   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t", (intptr_t)cursor + distance);
    }
 
 uint32_t TR::PPCNonZeroAllocPrefetchSnippet::getLength(int32_t estimatedCodeStart)
    {
 
-   if (TR::Options::getCmdLineOptions()->realTimeGC())
+   if (cg()->comp()->getOptions()->realTimeGC())
       return 0;
 
    return PPC_INSTRUCTION_LENGTH;

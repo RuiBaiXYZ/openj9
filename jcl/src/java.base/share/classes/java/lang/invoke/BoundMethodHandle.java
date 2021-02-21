@@ -1,7 +1,6 @@
-/*[INCLUDE-IF Sidecar18-SE-OpenJ9]*/
-
+/*[INCLUDE-IF Sidecar18-SE-OpenJ9 & !OPENJDK_METHODHANDLES]*/
 /*******************************************************************************
- * Copyright (c) 2017, 2017 IBM Corp. and others
+ * Copyright (c) 2017, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -21,13 +20,11 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
-
 package java.lang.invoke;
 
 /*
  * Stub class to compile RI j.l.i.MethodHandleImpl
  */
-
 abstract class BoundMethodHandle extends MethodHandle {
 
 	BoundMethodHandle(MethodType mt, LambdaForm lf) {
@@ -62,6 +59,16 @@ abstract class BoundMethodHandle extends MethodHandle {
 		throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
 	}
 
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+	final int fieldCount() {
+		throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
+	}
+
+	final Object arg(int i) {
+		throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
+	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
+
 	class SpeciesData {
 		MethodHandle constructor() {
 			throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
@@ -70,12 +77,12 @@ abstract class BoundMethodHandle extends MethodHandle {
 		LambdaForm.NamedFunction getterFunction(int num) {
 			throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
 		}
-		
-		/*[IF Java10]*/
+
+		/*[IF JAVA_SPEC_VERSION >= 10]*/
 		MethodHandle factory() {
 			throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
 		}
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 10 */
 	}
 	
 	abstract BoundMethodHandle copyWithExtendL(MethodType mt, LambdaForm lf, Object obj);

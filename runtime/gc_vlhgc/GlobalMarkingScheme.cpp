@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -42,7 +42,6 @@
 #include "ClassModel.hpp"
 #include "CycleState.hpp"
 #include "Debug.hpp"
-#include "Dispatcher.hpp"
 #include "EnvironmentVLHGC.hpp"
 #if defined(J9VM_GC_FINALIZATION)
 #include "FinalizableObjectBuffer.hpp"
@@ -69,6 +68,7 @@
 #include "ObjectAccessBarrier.hpp"
 #include "ObjectModel.hpp"
 #include "PacketSlotIterator.hpp"
+#include "ParallelDispatcher.hpp"
 #include "ParallelTask.hpp"
 #include "PointerArrayIterator.hpp"
 #include "ReferenceObjectList.hpp"
@@ -87,7 +87,7 @@
 #include "WorkStack.hpp"
 
 void
-MM_ParallelGlobalMarkTask::masterSetup(MM_EnvironmentBase *env)
+MM_ParallelGlobalMarkTask::mainSetup(MM_EnvironmentBase *env)
 {
 	bool dynamicClassUnloadingEnabled = false;
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
@@ -97,7 +97,7 @@ MM_ParallelGlobalMarkTask::masterSetup(MM_EnvironmentBase *env)
 }
 
 void
-MM_ParallelGlobalMarkTask::masterCleanup(MM_EnvironmentBase *envBase)
+MM_ParallelGlobalMarkTask::mainCleanup(MM_EnvironmentBase *envBase)
 {
 	MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(envBase);
 
@@ -149,7 +149,7 @@ void
 MM_ParallelGlobalMarkTask::setup(MM_EnvironmentBase *envBase)
 {
 	MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(envBase);
-	if (!env->isMasterThread()) {
+	if (!env->isMainThread()) {
 		Assert_MM_true(NULL == env->_cycleState);
 		env->_cycleState = _cycleState;
 	} else {
@@ -171,7 +171,7 @@ MM_ParallelGlobalMarkTask::cleanup(MM_EnvironmentBase *envBase)
 	
 	static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._markStats.merge(&env->_markVLHGCStats);
 	static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._workPacketStats.merge(&env->_workPacketStats);
-	if(!env->isMasterThread()) {
+	if(!env->isMainThread()) {
 		env->_cycleState = NULL;
 	}
 
@@ -180,7 +180,7 @@ MM_ParallelGlobalMarkTask::cleanup(MM_EnvironmentBase *envBase)
 	/* record the thread-specific parallelism stats in the trace buffer. This partially duplicates info in -Xtgc:parallel */ 
 	Trc_MM_ParallelGlobalMarkTask_parallelStats(
 			env->getLanguageVMThread(),
-			(U_32)env->getSlaveID(),
+			(U_32)env->getWorkerID(),
 			(U_32)j9time_hires_delta(0, env->_workPacketStats._workStallTime, J9PORT_TIME_DELTA_IN_MILLISECONDS),
 			(U_32)j9time_hires_delta(0, env->_workPacketStats._completeStallTime, J9PORT_TIME_DELTA_IN_MILLISECONDS),
 			(U_32)j9time_hires_delta(0, env->_markVLHGCStats._syncStallTime, J9PORT_TIME_DELTA_IN_MILLISECONDS),
@@ -220,12 +220,12 @@ MM_ParallelGlobalMarkTask::synchronizeGCThreads(MM_EnvironmentBase *envBase, con
 }
 
 bool
-MM_ParallelGlobalMarkTask::synchronizeGCThreadsAndReleaseMaster(MM_EnvironmentBase *envBase, const char *id)
+MM_ParallelGlobalMarkTask::synchronizeGCThreadsAndReleaseMain(MM_EnvironmentBase *envBase, const char *id)
 {
 	MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(envBase);
 	PORT_ACCESS_FROM_ENVIRONMENT(env);
 	U_64 startTime = j9time_hires_clock();
-	bool result = MM_ParallelTask::synchronizeGCThreadsAndReleaseMaster(env, id);
+	bool result = MM_ParallelTask::synchronizeGCThreadsAndReleaseMain(env, id);
 	U_64 endTime = j9time_hires_clock();
 	env->_markVLHGCStats.addToSyncStallTime(startTime, endTime);
 	
@@ -347,7 +347,7 @@ MM_GlobalMarkingScheme::heapRemoveRange(MM_EnvironmentVLHGC *env, MM_MemorySubSp
  ****************************************
  */
 void
-MM_GlobalMarkingScheme::masterSetupForGC(MM_EnvironmentVLHGC *env)
+MM_GlobalMarkingScheme::mainSetupForGC(MM_EnvironmentVLHGC *env)
 {
 	/* Initialize the marking stack */
 	env->_cycleState->_workPackets->reset(env);
@@ -357,7 +357,7 @@ MM_GlobalMarkingScheme::masterSetupForGC(MM_EnvironmentVLHGC *env)
 }
 
 void
-MM_GlobalMarkingScheme::masterCleanupAfterGC(MM_EnvironmentVLHGC *env)
+MM_GlobalMarkingScheme::mainCleanupAfterGC(MM_EnvironmentVLHGC *env)
 {
 	_interRegionRememberedSet->setRegionsAsRebuildingComplete(env);
 }
@@ -774,7 +774,7 @@ MM_GlobalMarkingScheme::scanClassObject(MM_EnvironmentVLHGC *env, J9Object *clas
 			 * However we need to scan them for case of Anonymous classes. Its are unloaded on individual basis so it is important to reach each one
 			 */
 			if (J9_ARE_ANY_BITS_SET(J9CLASS_EXTENDED_FLAGS(classPtr), J9ClassIsAnonymous)) {
-				GC_ClassIteratorClassSlots classSlotIterator(classPtr);
+				GC_ClassIteratorClassSlots classSlotIterator(_javaVM, classPtr);
 				J9Class **classSlotPtr;
 				while(NULL != (classSlotPtr = classSlotIterator.nextSlot())) {
 					/* GC_ClassIteratorClassSlots can return NULL in *classSlotPtr so it should to be filtered out */
@@ -1192,8 +1192,10 @@ private:
 
 	virtual void doMonitorReference(J9ObjectMonitor *objectMonitor, GC_HashTableIterator *monitorReferenceIterator) {
 		J9ThreadAbstractMonitor * monitor = (J9ThreadAbstractMonitor*)objectMonitor->monitor;
+		MM_EnvironmentVLHGC::getEnvironment(_env)->_markVLHGCStats._monitorReferenceCandidates += 1;
 		if(!_markingScheme->isMarked((J9Object *)monitor->userData)) {
 			monitorReferenceIterator->removeSlot();
+			MM_EnvironmentVLHGC::getEnvironment(_env)->_markVLHGCStats._monitorReferenceCleared += 1;
 			/* We must call objectMonitorDestroy (as opposed to omrthread_monitor_destroy) when the
 			 * monitor is not internal to the GC */
 			static_cast<J9JavaVM*>(_omrVM->_language_vm)->internalVMFunctions->objectMonitorDestroy(static_cast<J9JavaVM*>(_omrVM->_language_vm), (J9VMThread *)_env->getLanguageVMThread(), (omrthread_monitor_t)monitor);
@@ -1237,8 +1239,8 @@ private:
 		MM_EnvironmentVLHGC::getEnvironment(_env)->_markVLHGCStats._doubleMappedArrayletsCandidates += 1;
 		if (!_markingScheme->isMarked(objectPtr)) {
 			MM_EnvironmentVLHGC::getEnvironment(_env)->_markVLHGCStats._doubleMappedArrayletsCleared += 1;
-			PORT_ACCESS_FROM_ENVIRONMENT(_env);
-			j9vmem_free_memory(identifier->address, identifier->size, identifier);
+			OMRPORT_ACCESS_FROM_OMRVM(_omrVM);
+			omrvmem_release_double_mapped_region(identifier->address, identifier->size, identifier);
 		}
     }
 #endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
@@ -1386,7 +1388,7 @@ MM_GlobalMarkingScheme::markLiveObjectsRoots(MM_EnvironmentVLHGC *env)
 		/* Setting the permanent class loaders to scanned without a locked operation is safe
 		 * Class loaders will not be rescanned until a thread synchronize is executed
 		 */
-		if(env->isMasterThread()) {
+		if(env->isMainThread()) {
 			scanClassLoaderSlots(env, _javaVM->systemClassLoader);
 			scanClassLoaderSlots(env, _javaVM->applicationClassLoader);
 		}
@@ -1455,7 +1457,7 @@ MM_GlobalMarkingScheme::handleOverflow(MM_EnvironmentVLHGC *env)
 	
 	if (packets->getOverflowFlag()) {
 		result = true;
-		if (env->_currentTask->synchronizeGCThreadsAndReleaseMaster(env, UNIQUE_ID)) {
+		if (env->_currentTask->synchronizeGCThreadsAndReleaseMain(env, UNIQUE_ID)) {
 			packets->clearOverflowFlag();
 			env->_currentTask->releaseSynchronizedGCThreads(env);
 		}

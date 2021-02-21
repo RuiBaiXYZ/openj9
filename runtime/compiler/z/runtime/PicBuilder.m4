@@ -327,31 +327,6 @@ LOAD_ADDR_FROM_TOC(r14,TR_S390jitResolveStaticMethod)
 
     BASR    r14,r14                     # Call jitResolveStaticMethod
 
-    J       LUnresolved_common_code
-
-    END_FUNC(_interpreterUnresolvedStaticGlue,intpUnrStG,12)
-
-ZZ ===================================================================
-ZZ PICBuilder routine _interpreterUnresolvedDirectVirtualGlue
-ZZ
-ZZ ===================================================================
-
-    START_FUNC(_interpreterUnresolvedDirectVirtualGlue,intpUnrDVG)
-
-    AlignSB(_intpUnrDirVG_B)
-    LR_GPR  rSB,r14                    # set up snippet base register
-
-LABEL(_interpreterUnresolvedDirectVirtualGlue_BODY)
-
-    L_GPR   r1,eq_codeRA_inSnippet(,rSB) # p1) Load code cache RA
-    L_GPR   r2,eq_cp_inSnippet(,rSB)     # p2) Load constant pool lit
-    XR_GPR  r3,r3
-    ICM     r3,7,eq_cpindex_inSnippet+1(rSB) # P3) Load cp index
-
-LOAD_ADDR_FROM_TOC(r14,TR_S390jitResolveSpecialMethod)
-
-    BASR    r14,r14                     # Call jitResolveSpecialMethod
-
 LABEL(LUnresolved_common_code)
 ZZ Check to see if this is a <clinit>.  We want to mask the clinit
 ZZ bit, to ensure that we have the correct aligned EP.
@@ -404,15 +379,6 @@ LOAD_ADDR_FROM_TOC(r14,TR_S390jitCallCFunction)
 
 ZZ Now we want to find the appropriate jit helper method
 ZZ to handle this resolved method (i.e. to patch code.)
-ZZ We have 3 types of methods:
-ZZ    1. Native
-ZZ    2. Sync
-ZZ    3. Not Sync
-ZZ  We want:
-ZZ     r1 - the helper glue function to patch the mainline code
-ZZ          on next iteration/call of the method.
-ZZ     r14 - VM Routine to method. This is the routine that will
-ZZ           be called at the end of this glue function.
 
 LABEL(LTest_isNative)
 
@@ -420,41 +386,18 @@ LOAD_ADDR_FROM_TOC(r14,TR_S390jitMethodIsNative)
     BASR    r14,r14                # Call jitMethodIsNative
 
     LTR_GPR r2,r2                  # test IsNative r2=0 -> not native
-    JE      LtestSync              # jump to IsSync test
+    JE      LregularMethodDispatch              # jump to IsSync test
 
-ZZ Load icallVMprJavaSendNativeStatic
-LOAD_ADDR_FROM_TOC(r14,TR_icallVMprJavaSendNativeStatic)
 
 ZZ Load nativeStaticHelper address for patching
 LOAD_ADDR_FROM_TOC(r1,TR_S390nativeStaticHelper)
 
     J       LupdSnippet
 
-LABEL(LtestSync)
+LABEL(LregularMethodDispatch)
 
-LOAD_ADDR_FROM_TOC(r14,TR_S390jitMethodIsSync)
-    BASR    r14,r14                        # Call
+LOAD_ADDR_FROM_TOC(r1,TR_S390interpreterStaticSpecialCallGlue)
 
-    XR_GPR  r3,r3
-    ICM     r3,1,eq_cpindex_inSnippet(rSB) # Load method table offset
-    LTR_GPR r2,r2                   # test IsSync r2=0 -> not sync
-    JE      LNotSync
-
-ZZ# Load appropriate SendStaticSync method
-LOAD_ADDR_FROM_TOC_IND_REG(r1,TR_S390interpreterSyncVoidStaticGlue,r3)
-
-ZZ# Load appropriate icallVMprJavaSendStatic
-LOAD_ADDR_FROM_TOC_IND_REG(r14,TR_icallVMprJavaSendStaticSync0,r3)
-
-    J       LupdSnippet
-
-LABEL(LNotSync)
-
-ZZ Load appropriate _interpreterStaticGlue
-LOAD_ADDR_FROM_TOC_IND_REG(r1,TR_S390interpreterVoidStaticGlue,r3)
-
-ZZ Load appropriate icallVMprJavaSendStatic
-LOAD_ADDR_FROM_TOC_IND_REG(r14,TR_icallVMprJavaSendStatic0,r3)
 
 LABEL(LupdSnippet)
 ZZ Check <clinit> for Patching:
@@ -473,6 +416,19 @@ ZZ   path.
 
 ZZ update method address in snippet
     ST_GPR  r1,eq_methodaddr_inSnippet(,rSB)
+    J Linvoke_Method
+
+    END_FUNC(_interpreterUnresolvedStaticGlue,intpUnrStG,12)
+
+
+    START_FUNC(_interpreterStaticSpecialCallGlue,intpStSpG)
+
+ZZ # align snippet base register
+    AlignSB(_intpStSpG_B)
+
+ZZ# copy snippet base register
+    LR_GPR  rSB,r14
+
 
 LABEL(Linvoke_Method)
 ZZ   Save the resolved entry point as argument 1 for the VM call
@@ -482,8 +438,6 @@ ZZ   stored in r14.
 ZZ  mask off the low bit in case it is masked for clinit
     NILL    r1,HEX(FFFE)
 
-    LR_GPR  r0,r14
-
 ZZ   Already compiled
     TM      eq_methodCompiledFlagOffset(r1),J9TR_MethodNotCompiledBit
     LR_GPR  r14,rSB
@@ -492,199 +446,10 @@ ZZ   Already compiled
 ZZ   Go through j2iTransition
 
     L_GPR   r14,eq_codeRA_inSnippet(rSB)  # Load code cache RA
-    LR_GPR  rEP,r0
+    
+LOAD_ADDR_FROM_TOC(rEP,TR_j2iTransition)
     BR      rEP
-
-    END_FUNC(_interpreterUnresolvedDirectVirtualGlue,intpUnrDVG,12)
-
-
-ZZ ===================================================================
-ZZ PICBuilder routine _interpreterVoidStaticGlue
-ZZ
-ZZ ===================================================================
-
-    START_FUNC(_interpreterVoidStaticGlue,intpVStG)
-
-ZZ # align snippet base register
-    AlignSB(_intpVStG_B)
-
-LABEL(_interpreterVoidStaticGlue_BODY)
-
-LOAD_ADDR_FROM_TOC(rEP,TR_icallVMprJavaSendStatic0)
-
-    J       LStaticGlueCallFixer
-
-    END_FUNC(_interpreterVoidStaticGlue,intpVStG,10)
-
-ZZ ===================================================================
-ZZ PICBuilder routine _interpreterSyncVoidStaticGlue
-ZZ
-ZZ ===================================================================
-    START_FUNC(_interpreterSyncVoidStaticGlue,intpSVStG)
-
-ZZ # align snippet base register
-    AlignSB(_intpSynVStG_B)
-
-LABEL(_interpreterSyncVoidStaticGlue_BODY)
-
-LOAD_ADDR_FROM_TOC(rEP,TR_icallVMprJavaSendStaticSync0)
-
-    J       LStaticGlueCallFixer
-
-    END_FUNC(_interpreterSyncVoidStaticGlue,intpSVStG,11)
-
-ZZ ===================================================================
-ZZ  PICBuilder routine - _interpreterIntStaticGlue
-ZZ
-ZZ ===================================================================
-
-    START_FUNC(_interpreterIntStaticGlue,intpIStG)
-
-ZZ # align snippet base register
-    AlignSB(_intpIStG_B)
-
-LABEL(_interpreterIntStaticGlue_BODY)
-
-LOAD_ADDR_FROM_TOC(rEP,TR_icallVMprJavaSendStatic1)
-
-    J       LStaticGlueCallFixer
-
-    END_FUNC(_interpreterIntStaticGlue,intpIStG,10)
-
-ZZ ===================================================================
-ZZ  PICBuilder routine - _interpreterSyncIntStaticGlue
-ZZ
-ZZ ===================================================================
-    START_FUNC(_interpreterSyncIntStaticGlue,intpSIStG)
-
-ZZ # align snippet base register
-    AlignSB(_intpSynIStG_B)
-
-LABEL(_interpreterSyncIntStaticGlue_BODY)
-
-LOAD_ADDR_FROM_TOC(rEP,TR_icallVMprJavaSendStaticSync1)
-
-    J       LStaticGlueCallFixer
-
-    END_FUNC(_interpreterSyncIntStaticGlue,intpSIStG,11)
-
-ZZ ===================================================================
-ZZ  PICBuilder routine - _interpreterLongStaticGlue
-ZZ
-ZZ ===================================================================
-    START_FUNC(_interpreterLongStaticGlue,intpLStG)
-
-ZZ # align snippet base register
-    AlignSB(_intpLStG_B)
-
-LABEL(_interpreterLongStaticGlue_BODY)
-
-LOAD_ADDR_FROM_TOC(rEP,TR_icallVMprJavaSendStaticSyncJ)
-
-    J       LStaticGlueCallFixer
-
-    END_FUNC(_interpreterLongStaticGlue,intpLStG,10)
-
-ZZ ===================================================================
-ZZ  PICBuilder routine - _interpreterSyncLongStaticGlue
-ZZ
-ZZ ===================================================================
-    START_FUNC(_interpreterSyncLongStaticGlue,intpSLStG)
-
-    AlignSB(_intpSynLStG_B)
-ZZ # align snippet base register
-
-LABEL(_interpreterSyncLongStaticGlue_BODY)
-
-LOAD_ADDR_FROM_TOC(rEP,TR_icallVMprJavaSendStaticSyncJ)
-
-    J       LStaticGlueCallFixer
-
-    END_FUNC(_interpreterSyncLongStaticGlue,intpSLStG,11)
-
-ZZ ===================================================================
-ZZ  PICBuilder routine - _interpreterFloatStaticGlue
-ZZ
-ZZ ===================================================================
-    START_FUNC(_interpreterFloatStaticGlue,intpFStG)
-
-ZZ # align snippet base register
-    AlignSB(_intpFStG_B)
-
-LABEL(_interpreterFloatStaticGlue_BODY)
-
-LOAD_ADDR_FROM_TOC(rEP,TR_icallVMprJavaSendStaticSyncF)
-
-    J       LStaticGlueCallFixer
-
-    END_FUNC(_interpreterFloatStaticGlue,intpFStG,10)
-
-ZZ ===================================================================
-ZZ  PICBuilder routine - _interpreterSyncFloatStaticGlue
-ZZ
-ZZ ===================================================================
-    START_FUNC(_interpreterSyncFloatStaticGlue,intpSFStG)
-
-ZZ # align snippet base register
-    AlignSB(_intpSynFStG_B)
-
-LABEL(_interpreterSyncFloatStaticGlue_BODY)
-
-LOAD_ADDR_FROM_TOC(rEP,TR_icallVMprJavaSendStaticSyncF)
-
-    J       LStaticGlueCallFixer
-
-    END_FUNC(_interpreterSyncFloatStaticGlue,intpSFStG,11)
-
-ZZ ===================================================================
-ZZ  PICBuilder routine - _interpreterDoubleStaticGlue
-ZZ
-ZZ ===================================================================
-    START_FUNC(_interpreterDoubleStaticGlue,intpDStG)
-
-ZZ # align snippet base register
-    AlignSB(_intpDStG_B)
-
-LABEL(_interpreterDoubleStaticGlue_BODY)
-
-LOAD_ADDR_FROM_TOC(rEP,TR_icallVMprJavaSendStaticSyncD)
-
-    J       LStaticGlueCallFixer
-
-    END_FUNC(_interpreterDoubleStaticGlue,intpDStG,10)
-
-ZZ ===================================================================
-ZZ  PICBuilder routine - _interpreterSyncDoubleStaticGlue
-ZZ
-ZZ ===================================================================
-    START_FUNC(_interpreterSyncDoubleStaticGlue,intpSDStG)
-
-ZZ # align snippet base register
-    AlignSB(_intpSynDStG_B)
-
-LABEL(_interpreterSyncDoubleStaticGlue_BODY)
-
-LOAD_ADDR_FROM_TOC(rEP,TR_icallVMprJavaSendStaticSyncD)
-
-
-ZZ ===================================================================
-ZZ
-ZZ  This glue code will be used by _interpreter*StaticGlue methods
-ZZ  Before Jumping to this Label,
-ZZ  Setup rEP with valid interpreter icallVMprJavaSend*Static*
-ZZ
-ZZ ===================================================================
-
-LABEL(LStaticGlueCallFixer)
-
-    L_GPR   r1,eq_methodptr_inSnippet(r14) # Load method pointer
-    NILL    r1,HEX(FFFE)           # clear <clinit> bit (169312)
-
-    TM      eq_methodCompiledFlagOffset(r1),J9TR_MethodNotCompiledBit
-    JZ      Ljitted            # Method is jitted?
-    L_GPR   r14,eq_codeRA_inSnippet(r14)  # Load code cache RA
-    BR      rEP                # Make the call to interpreter
-
+    
 LABEL(Ljitted)
 
 ifdef({MCC_SUPPORTED},{dnl
@@ -813,9 +578,8 @@ LABEL(Ljitted_end)
 
     BR      rEP  # jump to jitted code from the start to load args
 
-ZZ End of LStaticGlueCallFixer
+    END_FUNC(_interpreterStaticSpecialCallGlue,intpStSpG,11)
 
-    END_FUNC(_interpreterSyncDoubleStaticGlue,intpSDStG,11)
 
 ZZ ===================================================================
 ZZ  PICBuilder routine - _nativeStaticHelper
@@ -834,7 +598,7 @@ LABEL(_nativeStaticHelper_BODY)
 
     L_GPR   r14,eq_codeRA_inSnippet(r14)    # Load code cache RA
 
-LOAD_ADDR_FROM_TOC(rEP,TR_icallVMprJavaSendNativeStatic)
+LOAD_ADDR_FROM_TOC(rEP,TR_j2iTransition)
 
     BR      rEP                              # Make the call
 
@@ -1341,21 +1105,10 @@ ZZ  Check if it's a private method
     LR      r1,r2
     NILL    r1,J9TR_J9_VTABLE_INDEX_DIRECT_METHOD_FLAG
     JNZ     L_privateMethod
-ZZ  Skip patching if vft offset is smaller than -32768
-    C       r2,4(rEP)
-    JL      L_endPatch
 LABEL(LVirtualDispatch)
 
     L_GPR   r3,eq_patchVftInstr_inVUCallSnippet(r14)
-    XR      r1,r1      # clear r1
-    ICM     r1,1,0(r3) # first opcode byte for LY/LG is E3
-    CHI     r1,HEX(E3) # is LY/LG?
-    JZ      L_isLY
-    STH     r2,2(r3)    # Update the vft offset for A[G]HI
-    STH     r2,6(r3)    # Update the vft offset for L[G]HI
-    J       L_patchBRASL
-LABEL(L_isLY)
-    STH     r2,8(r3)    # Update the vft offset field for L[G]HI
+    ST      r2,8(r3)    # Update the vft offset field for LGFI
 ZZ Long Displacement patching for LY/LG
     LR      r1,r2
     SLL     r1,20
@@ -1761,6 +1514,12 @@ ifdef({J9ZOS390},{dnl
     ST_GPR  rEP,0(J9SP)
 })dnl
 
+ifdef({TR_HOST_64BIT},{dnl
+    AHI_GPR J9SP,-(16*PTR_SIZE)
+},{dnl
+    AHI_GPR J9SP,-(32*PTR_SIZE)
+})
+    SAVE_FP_REGS(J9SP)
     ST_GPR  J9SP,J9TR_VMThread_sp(r13)
 
     LA      CARG2,eq_implementerClass_inInterfaceSnippet(r14)
@@ -1800,6 +1559,14 @@ ZZ zLinux case
 
 ZZ Restore killed regs
     L_GPR  J9SP,J9TR_VMThread_sp(r13)
+    RESTORE_FP_REGS(J9SP)
+
+ifdef({TR_HOST_64BIT},{dnl
+    AHI_GPR J9SP,(16*PTR_SIZE)
+},{dnl
+    AHI_GPR J9SP,(32*PTR_SIZE)
+})
+
 ifdef({J9ZOS390},{dnl
     L_GPR  r0,(3*PTR_SIZE)(J9SP)
     L_GPR  r6,(2*PTR_SIZE)(J9SP)
@@ -2057,6 +1824,13 @@ ifdef({J9ZOS390},{dnl
     ST_GPR  r14,0(J9SP)
 })dnl
 
+ifdef({TR_HOST_64BIT},{dnl
+    AHI_GPR J9SP,-(16*PTR_SIZE)
+},{dnl
+    AHI_GPR J9SP,-(32*PTR_SIZE)
+})
+    SAVE_FP_REGS(J9SP)
+
     ST_GPR  J9SP,J9TR_VMThread_sp(r13)
 
 ZZ make the call
@@ -2094,6 +1868,15 @@ LOAD_ADDR_FROM_TOC(r14,TR_jitAddPicToPatchOnClassUnload)
 
 ZZ Restore killed regs
     L_GPR  J9SP,J9TR_VMThread_sp(r13)
+
+    RESTORE_FP_REGS(J9SP)
+
+ifdef({TR_HOST_64BIT},{dnl
+    AHI_GPR J9SP,(16*PTR_SIZE)
+},{dnl
+    AHI_GPR J9SP,(32*PTR_SIZE)
+})
+
 ifdef({J9ZOS390},{dnl
     L_GPR  r6,(2*PTR_SIZE)(J9SP)
     L_GPR  r7,PTR_SIZE(J9SP)

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -28,22 +28,7 @@
  * VARIABLE_FILE allows to run it in a custom configuration on a different server.
  *
  * Parameters:
- *   PLATFORMS: String - Comma separated platforms to build.
- *              Expected values: all or any of the following:
- *              aix_ppc-64_cmprssptrs,
- *              linux_x86-64,
- *              linux_x86-64_cmprssptrs,
- *              linux_ppc-64,
- *              linux_ppc-64_cmprssptrs_le,
- *              linux_390-64,
- *              linux_390-64_cmprssptrs,
- *              win_x86-64_cmprssptrs,
- *              win_x86 (Java 8 support only),
- *              zos_390-64_cmprssptrs (Java 11 support only),
- *              osx_x86-64 (Java 8 and Java 11 support only),
- *              osx_x86-64_cmprssptrs (Java 8 and Java 11 support only),
- *              aarch64_linux (Java 11 support only),
- *              aarch64_linux_xl (Java 11 support only)
+ *   PLATFORMS: String - Comma separated platforms to build, or `all`. For the list of platforms, see `id=` in the `.spec` files found in the buildspecs directory (the id should be the same as the spec file name without the `.spec`).
  *   OPENJ9_REPO: String - the OpenJ9 git repository URL: e.g. https://github.com/eclipse/openj9.git (default)
  *   OPENJ9_BRANCH: String - the OpenJ9 branch to clone from: e.g. master (default)
  *   OPENJ9_SHA: String - the last commit SHA of the OpenJ9 repository
@@ -81,59 +66,191 @@
  *   ENABLE_SUMMARY_AUTO_REFRESH: Boolean - flag to enable the downstream summary auto-refresh, default: false
  */
 
-CURRENT_RELEASES = ['8', '11', '14', 'next']
+CURRENT_RELEASES = ['8', '11', '15', '16', 'next']
 
-SPECS = ['ppc64_aix'      : CURRENT_RELEASES,
+SPECS = ['ppc64_aix' : CURRENT_RELEASES,
+         'ppc64_aix_cm' : CURRENT_RELEASES,
+         'ppc64_aix_uma' : CURRENT_RELEASES,
+         'ppc64_aix_xl' : CURRENT_RELEASES,
+         'ppc64_aix_xl_cm' : CURRENT_RELEASES,
+         'ppc64_aix_xl_uma' : CURRENT_RELEASES,
+         'ppc64_aix_mixed' : CURRENT_RELEASES,
          'ppc64le_linux'  : CURRENT_RELEASES,
-         'ppc64le_linux_cm' : ['8', '11'],
-         'ppc64le_linux_jit' : ['8', '11'],
+         'ppc64le_linux_cm' : CURRENT_RELEASES - '11',
+         'ppc64le_linux_uma' : CURRENT_RELEASES,
+         'ppc64le_linux_jit' : CURRENT_RELEASES,
          'ppc64le_linux_xl' : CURRENT_RELEASES,
+         'ppc64le_linux_xl_cm' : CURRENT_RELEASES - '11',
+         'ppc64le_linux_xl_uma' : CURRENT_RELEASES,
+         'ppc64le_linux_mixed' : CURRENT_RELEASES,
          's390x_linux'    : CURRENT_RELEASES,
-         's390x_linux_jit' : ['8', '11'],
+         's390x_linux_cm' : CURRENT_RELEASES - '11',
+         's390x_linux_uma' : CURRENT_RELEASES,
+         's390x_linux_jit' : CURRENT_RELEASES,
          's390x_linux_xl' : CURRENT_RELEASES,
+         's390x_linux_xl_cm' : CURRENT_RELEASES - '11',
+         's390x_linux_xl_uma' : CURRENT_RELEASES,
+         's390x_linux_mixed' : CURRENT_RELEASES,
          's390x_zos'      : ['11'],
-         'x86-64_linux_xl': CURRENT_RELEASES,
+         's390x_zos_cm'   : ['11'],
+         's390x_zos_uma'   : ['11'],
+         's390x_zos_xl'   : ['11'],
+         's390x_zos_xl_cm' : ['11'],
+         's390x_zos_mixed' : ['11'],
          'x86-64_linux'   : CURRENT_RELEASES,
-         'x86-64_linux_cm': ['8', '11'],
-         'x86-64_linux_jit' : ['8', '11'],
+         'x86-64_linux_cm': CURRENT_RELEASES - '11',
+         'x86-64_linux_uma' : CURRENT_RELEASES,
+         'x86-64_linux_xl': CURRENT_RELEASES,
+         'x86-64_linux_xl_cm': CURRENT_RELEASES - '11',
+         'x86-64_linux_xl_uma' : CURRENT_RELEASES,
+         'x86-64_linux_mixed' : CURRENT_RELEASES,
+         'x86-64_linux_jit' : CURRENT_RELEASES,
+         'x86-64_linux_valhalla'   : ['next'],
+         'x86-64_linux_vt_standard' : ['next'],
          'x86-64_mac_xl'  : CURRENT_RELEASES,
          'x86-64_mac'     : CURRENT_RELEASES,
+         'x86-64_mac_cm'  : CURRENT_RELEASES - '11',
+         'x86-64_mac_xl_cm'  : CURRENT_RELEASES - '11',
+         'x86-64_mac_mixed' : CURRENT_RELEASES,
+         'x86-64_mac_uma' : CURRENT_RELEASES,
+         'x86-64_mac_xl_uma' : CURRENT_RELEASES,
          'x86-32_windows' : ['8'],
+         'x86-32_windows_cm' : ['8'],
+         'x86-32_windows_uma' : ['8'],
          'x86-64_windows' : CURRENT_RELEASES,
+         'x86-64_windows_cm': CURRENT_RELEASES,
+         'x86-64_windows_uma': CURRENT_RELEASES,
          'x86-64_windows_xl' : CURRENT_RELEASES,
-         'aarch64_linux' : ['11'],
-         'aarch64_linux_xl' : ['11']]
+         'x86-64_windows_xl_cm': CURRENT_RELEASES,
+         'x86-64_windows_xl_uma' : CURRENT_RELEASES,
+         'x86-64_windows_mixed' : CURRENT_RELEASES,
+         'aarch64_linux' : CURRENT_RELEASES,
+         'aarch64_linux_cm': CURRENT_RELEASES,
+         'aarch64_linux_uma': CURRENT_RELEASES,
+         'aarch64_linux_xl' : CURRENT_RELEASES,
+         'aarch64_linux_xl_cm': CURRENT_RELEASES,
+         'aarch64_linux_xl_uma': CURRENT_RELEASES,
+         'aarch64_linux_mixed' : CURRENT_RELEASES,
+         'ppc64_aix_ojdk292' : CURRENT_RELEASES,
+         'ppc64_aix_xl_ojdk292' : CURRENT_RELEASES,
+         'ppc64le_linux_ojdk292' : CURRENT_RELEASES,
+         'ppc64le_linux_xl_ojdk292' : CURRENT_RELEASES,
+         's390x_linux_ojdk292' : CURRENT_RELEASES,
+         's390x_linux_xl_ojdk292' : CURRENT_RELEASES,
+         's390x_zos_ojdk292' : ['11'],
+         's390x_zos_xl_ojdk292' : ['11'],
+         'x86-64_linux_ojdk292' : CURRENT_RELEASES,
+         'x86-64_linux_xl_ojdk292' : CURRENT_RELEASES,
+         'x86-64_mac_ojdk292' : CURRENT_RELEASES,
+         'x86-64_mac_xl_ojdk292' : CURRENT_RELEASES,
+         'x86-32_windows_ojdk292' : ['8'],
+         'x86-64_windows_ojdk292' : CURRENT_RELEASES,
+         'x86-64_windows_xl_ojdk292' : CURRENT_RELEASES,
+         'aarch64_linux_ojdk292' : CURRENT_RELEASES,
+         'aarch64_linux_xl_ojdk292' : CURRENT_RELEASES]
 
 // SHORT_NAMES is used for PullRequest triggers
 // TODO Combine SHORT_NAMES and SPECS
 SHORT_NAMES = ['all' : ['ppc64le_linux','ppc64le_linux_xl','s390x_linux','s390x_linux_xl','x86-64_linux','x86-64_linux_xl','ppc64_aix','x86-64_windows','x86-32_windows','x86-64_mac'],
             'aix' : ['ppc64_aix'],
+            'aixcm': ['ppc64_aix_cm'],
+            'aixuma' : ['ppc64_aix_uma'],
+            'aixlargeheap' : ['ppc64_aix_xl'],
+            'aixxl' : ['ppc64_aix_xl'],
+            'aixxlcm' : ['ppc64_aix_xl_cm'],
+            'aixxluma' : ['ppc64_aix_xl_uma'],
+            'aixmxd' : ['ppc64_aix_mixed'],
             'zlinux' : ['s390x_linux'],
+            'zlinuxcm' : ['s390x_linux_cm'],
+            'zlinuxuma' : ['s390x_linux_uma'],
             'zlinuxjit' : ['s390x_linux_jit'],
             'zlinuxlargeheap' : ['s390x_linux_xl'],
             'zlinuxxl' : ['s390x_linux_xl'],
+            'zlinuxxlcm' : ['s390x_linux_xl_cm'],
+            'zlinuxxluma' : ['s390x_linux_xl_uma'],
+            'zlinuxmxd' : ['s390x_linux_mixed'],
             'plinux' : ['ppc64le_linux'],
             'plinuxcmake' : ['ppc64le_linux_cm'],
             'plinuxcm' : ['ppc64le_linux_cm'],
+            'plinuxuma' : ['ppc64le_linux_uma'],
             'plinuxjit' : ['ppc64le_linux_jit'],
             'plinuxlargeheap' : ['ppc64le_linux_xl'],
             'plinuxxl' : ['ppc64le_linux_xl'],
+            'plinuxxlcm' : ['ppc64le_linux_xl_cm'],
+            'plinuxxluma' : ['ppc64le_linux_xl_uma'],
+            'plinuxmxd' : ['ppc64le_linux_mixed'],
             'xlinuxlargeheap' : ['x86-64_linux_xl'],
             'xlinuxxl' : ['x86-64_linux_xl'],
             'xlinux' : ['x86-64_linux'],
             'xlinuxcmake' : ['x86-64_linux_cm'],
             'xlinuxcm' : ['x86-64_linux_cm'],
+            'xlinuxuma' : ['x86-64_linux_uma'],
+            'xlinuxxlcm' : ['x86-64_linux_xl_cm'],
+            'xlinuxxluma' : ['x86-64_linux_xl_uma'],
+            'xlinuxmxd' : ['x86-64_linux_mixed'],
             'xlinuxjit' : ['x86-64_linux_jit'],
+            'xlinuxval' : ['x86-64_linux_valhalla'],
+            'xlinuxvalst' : ['x86-64_linux_vt_standard'],
             'win32' : ['x86-32_windows'],
+            'win32cm' : ['x86-32_windows_cm'],
+            'win32uma' : ['x86-32_windows_uma'],
             'win' : ['x86-64_windows'],
+            'wincm' : ['x86-64_windows_cm'],
+            'winuma' : ['x86-64_windows_uma'],
             'winlargeheap' : ['x86-64_windows_xl'],
             'winxl' : ['x86-64_windows_xl'],
+            'winxlcm' : ['x86-64_windows_xl_cm'],
+            'winxluma' : ['x86-64_windows_xl_uma'],
+            'winmxd' : ['x86-64_windows_mixed'],
             'osx' : ['x86-64_mac'],
             'osxlargeheap' : ['x86-64_mac_xl'],
             'osxxl' : ['x86-64_mac_xl'],
+            'osxcm' : ['x86-64_mac_cm'],
+            'osxcmake': ['x86-64_mac_cm'],
+            'osxxlcm': ['x86-64_mac_xl_cm'],
+            'osxuma': ['x86-64_mac_uma'],
+            'osxxluma': ['x86-64_mac_xl_uma'],
+            'osxmxd': ['x86-64_mac_mixed'],
             'alinux64' : ['aarch64_linux'],
+            'alinux64cm' : ['aarch64_linux_cm'],
+            'alinux64uma' : ['aarch64_linux_uma'],
             'alinux64xl' : ['aarch64_linux_xl'],
-            'alinux64largeheap' : ['aarch64_linux_xl']]
+            'alinux64xlcm' : ['aarch64_linux_xl_cm'],
+            'alinux64xluma' : ['aarch64_linux_xl_uma'],
+            'alinux64largeheap' : ['aarch64_linux_xl'],
+            'alinux64mxd' : ['aarch64_linux_mixed'],
+            'zos' : ['s390x_zos'],
+            'zoscm' : ['s390x_zos_cm'],
+            'zosuma' : ['s390x_zos_uma'],
+            'zosxl' : ['s390x_zos_xl'],
+            'zoslargeheap' : ['s390x_zos_xl'],
+            'zosxlcm' : ['s390x_zos_xl_cm'],
+            'zosmxd' : ['s390x_zos_mixed'],
+            'aixojdk292' : ['ppc64_aix_ojdk292'],
+            'aixxlojdk292' : ['ppc64_aix_xl_ojdk292'],
+            'aixlargeheapojdk292' : ['ppc64_aix_xl_ojdk292'],
+            'plinuxojdk292' : ['ppc64le_linux_ojdk292'],
+            'plinuxxlojdk292' : ['ppc64le_linux_xl_ojdk292'],
+            'plinuxlargeheapojdk292' : ['ppc64le_linux_xl_ojdk292'],
+            'zlinuxojdk292' : ['s390x_linux_ojdk292'],
+            'zlinuxxlojdk292' : ['s390x_linux_xl_ojdk292'],
+            'zlinuxlargeheapojdk292' : ['s390x_linux_xl_ojdk292'],
+            'xlinuxojdk292' : ['x86-64_linux_ojdk292'],
+            'xlinuxxlojdk292' : ['x86-64_linux_xl_ojdk292'],
+            'xlinuxlargeheapojdk292' : ['x86-64_linux_xl_ojdk292'],
+            'win32ojdk292' : ['x86-32_windows_ojdk292'],
+            'winojdk292' : ['x86-64_windows_ojdk292'],
+            'winxlojdk292' : ['x86-64_windows_xl_ojdk292'],
+            'winlargeheapojdk292' : ['x86-64_windows_xl_ojdk292'],
+            'osxojdk292' : ['x86-64_mac_ojdk292'],
+            'osxxlojdk292' : ['x86-64_mac_xl_ojdk292'],
+            'osxlargeheapojdk292' : ['x86-64_mac_xl_ojdk292'],
+            'alinux64ojdk292' : ['aarch64_linux_ojdk292'],
+            'alinux64xlojdk292' : ['aarch64_linux_xl_ojdk292'],
+            'alinux64largeheapojdk292' : ['aarch64_linux_xl_ojdk292'],
+            'zosojdk292' : ['s390x_zos_ojdk292'],
+            'zosxlojdk292' : ['s390x_zos_xl_ojdk292'],
+            'zoslargeheapojdk292' : ['s390x_zos_xl_ojdk292']]
 
 // Initialize all PARAMETERS (params) to Groovy Variables even if they are not passed
 echo "Initialize all PARAMETERS..."
@@ -189,14 +306,14 @@ echo "SCM_REPO:'${SCM_REPO}'"
 SCM_BRANCH = 'refs/heads/master'
 if (params.SCM_BRANCH) {
     SCM_BRANCH = params.SCM_BRANCH
-} else if (ghprbPullId && ghprbGhRepository == 'eclipse/openj9') {
+} else if (ghprbPullId && ghprbGhRepository ==~ /.*\/openj9/) {
     SCM_BRANCH = sha1
 }
 echo "SCM_BRANCH:'${SCM_BRANCH}'"
 SCM_REFSPEC = ''
 if (params.SCM_REFSPEC) {
     SCM_REFSPEC = params.SCM_REFSPEC
-} else if (ghprbPullId && ghprbGhRepository == 'eclipse/openj9') {
+} else if (ghprbPullId && ghprbGhRepository ==~ /.*\/openj9/) {
     SCM_REFSPEC = "+refs/pull/${ghprbPullId}/merge:refs/remotes/origin/pr/${ghprbPullId}/merge"
 }
 echo "SCM_REFSPEC:'${SCM_REFSPEC}'"
@@ -256,7 +373,7 @@ try {
 
                     SHAS = buildFile.get_shas(OPENJDK_REPO, OPENJDK_BRANCH, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH)
 
-                    if (PERSONAL_BUILD) {
+                    if (PERSONAL_BUILD.equalsIgnoreCase('true')) {
                         // update build description
                         currentBuild.description += "<br/>${PLATFORMS}"
                     }
@@ -264,7 +381,7 @@ try {
                     def BUILD_NODES = get_node_labels(BUILD_NODE_LABELS, BUILD_SPECS.keySet())
                     def TEST_NODES = get_node_labels(TEST_NODE_LABELS, BUILD_SPECS.keySet())
 
-                    // Stash DSL file so we can quickly load it on master
+                    // Stash DSL file so we can quickly load it on Jenkins Manager node
                     if (AUTOMATIC_GENERATION != 'false') {
                         stash includes: 'buildenv/jenkins/jobs/pipelines/Pipeline_Template.groovy', name: 'DSL'
                     }
@@ -373,7 +490,6 @@ try {
     draw_summary_table()
 }
 
-
 def build(JOB_NAME, OPENJDK_REPO, OPENJDK_BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH, SPEC, SDK_VERSION, BUILD_NODE, TEST_NODE, EXTRA_GETSOURCE_OPTIONS, EXTRA_CONFIGURE_OPTIONS, EXTRA_MAKE_OPTIONS, OPENJDK_CLONE_DIR, ADOPTOPENJDK_REPO, ADOPTOPENJDK_BRANCH, AUTOMATIC_GENERATION, CUSTOM_DESCRIPTION, ARCHIVE_JAVADOC) {
     stage ("${JOB_NAME}") {
         JOB = build job: JOB_NAME,
@@ -439,7 +555,7 @@ def get_node_labels(NODE_LABELS, SPECS) {
         return LABELS
     }
 
-    if ((SPECS.size() == 1) && (NODE_LABELS.indexOf("=") == -1) ){
+    if ((SPECS.size() == 1) && (NODE_LABELS.indexOf("=") == -1)) {
         // single platform labels, e.g. NODE_LABELS = label1 && label2
         LABELS.put(SPECS[0], NODE_LABELS.trim())
     } else {
@@ -474,8 +590,8 @@ def get_pipeline_name(spec, version) {
 }
 
 /*
-* Returns an HTML summary table for the downstream builds.
-*/
+ * Returns an HTML summary table for the downstream builds.
+ */
 def get_summary_table(identifier) {
     // fetch the downstream builds of the current build
     if (!buildFile) {
@@ -506,7 +622,7 @@ def get_summary_table(identifier) {
     // table body
     summaryText += "<tbody>"
 
-    for (spec in BUILD_SPECS.keySet().sort()){
+    for (spec in BUILD_SPECS.keySet().sort()) {
         if (!VARIABLES."${spec}") {
             // unsupported spec (is not defined in variables file), skip it
             continue
@@ -528,12 +644,17 @@ def get_summary_table(identifier) {
             // check if this release is supported for this spec
             if (BUILD_SPECS.get(spec).contains(release)) {
                 def pipelineName = get_pipeline_name(spec, release)
-                def build = pipelineBuilds.get(pipelineName)
+                def build = null
+
+                if (pipelineBuilds.keySet().contains(pipelineName)) {
+                    build = pipelineBuilds.get(pipelineName).get(0)
+                }
 
                 if (build) {
                     pipelineLink = buildFile.get_build_embedded_status_link(build)
                     downstreamBuilds.putAll(buildFile.get_downstream_builds(build, pipelineName, downstreamJobNames.values()))
                     pipelineDuration = build.getDurationString()
+                    pipelineDuration = pipelineDuration.replaceAll(" and counting", "+")
 
                     if (build.getResult()) {
                         // pipeline finished, cache its status
@@ -542,11 +663,24 @@ def get_summary_table(identifier) {
                 }
             }
 
-            innerTable += "<tr><td>&nbsp;</td><td style=\"text-align: right;\">${pipelineLink}</td><td style=\"text-align: right;\">${pipelineDuration}</td></tr>"
+            innerTable += "<tr>"
+            innerTable += "<td>&nbsp;</td>"
+            innerTable += "<td style=\"text-align: right;\">${pipelineLink}</td>"
+            innerTable += "<td>&nbsp;</td>"
+            innerTable += "<td style=\"white-space: nowrap;\">${pipelineDuration}</td>"
+            innerTable += "</tr>"
 
             // add pipeline's downstream builds
             downstreamJobNames.each { label, jobName ->
-                def downstreamBuild = downstreamBuilds.get(jobName)
+                def downstreamBuild = null
+                // downstreamJobBuilds is a list of builds in descending order
+                def downstreamJobBuilds = downstreamBuilds.get(jobName)
+                if (downstreamJobBuilds) {
+                    // fetch the latest build
+                    downstreamBuild = downstreamJobBuilds.get(0)
+                    downstreamJobBuilds.remove(0)
+                }
+
                 def link = '&nbsp;'
                 def duration = '&nbsp;'
                 def aLabel = '&nbsp;'
@@ -554,6 +688,7 @@ def get_summary_table(identifier) {
                 if (downstreamBuild) {
                     link = buildFile.get_build_embedded_status_link(downstreamBuild)
                     duration = downstreamBuild.getDurationString()
+                    duration = duration.replaceAll(" and counting", "+")
                 }
 
                 if (showLabel) {
@@ -561,7 +696,18 @@ def get_summary_table(identifier) {
                     aLabel = label
                 }
 
-                innerTable += "<tr style=\"vertical-align: bottom;\"><td>${aLabel}</td><td style=\"text-align: right\">${link}</td><td style=\"text-align: right\">${duration}</td></tr>"
+                // show restart info if there are previous builds for this job
+                def restartImage = '&nbsp;'
+                if (downstreamJobBuilds && downstreamJobBuilds.size() > 0) {
+                    restartImage += "<img title=\"This build has been restarted ${downstreamJobBuilds.size()} time[s]!\" src=\"/static/images/24x24/refresh.png\" alt=\"Restarts\" style=\"display: inline-block;\" />"
+                }
+
+                innerTable += "<tr>"
+                innerTable += "<td>${aLabel}</td>"
+                innerTable += "<td style=\"text-align: right;\">${link}</td>"
+                innerTable += "<td>${restartImage}</td>"
+                innerTable += "<td style=\"text-align: right; white-space: nowrap;\">${duration}</td>"
+                innerTable += "</tr>"
             }
 
             innerTable += "</tbody></table>"
@@ -580,8 +726,8 @@ def get_summary_table(identifier) {
 }
 
 /*
-* Returns the sorted build releases.
-*/
+ * Returns the sorted build releases.
+ */
 def get_sorted_releases() {
     // not using comparator due to https://issues.jenkins-ci.org/browse/JENKINS-44924
 
@@ -616,7 +762,7 @@ def draw_summary_table() {
 }
 
 def refresh_summary_table() {
-    while(pipelinesStatus.values().isEmpty() || pipelinesStatus.values().contains('RUNNING')) {
+    while (pipelinesStatus.values().isEmpty() || pipelinesStatus.values().contains('RUNNING')) {
         sleep(time: SUMMARY_AUTO_REFRESH_TIME.toInteger(), unit: 'MINUTES')
         draw_summary_table()
     }

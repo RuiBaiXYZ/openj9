@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2018 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -24,6 +24,7 @@
 #include "jilconsts.h"
 #include "compile/Compilation.hpp"
 #include "env/jittypes.h"
+#include "env/VerboseLog.hpp"
 #include "infra/Monitor.hpp"
 #include "runtime/RuntimeAssumptions.hpp"
 #include "control/CompilationRuntime.hpp"
@@ -37,7 +38,7 @@ void preventAllocationOfBTLMemory(J9MemorySegment * &segment, J9JavaVM * javaVM,
    // Special code for zOS. If we allocated BTL memory (first 16MB), then we must
    // release this segment, failing the compilation and forcing to use only one compilation thread
    if (TR::Options::getCmdLineOptions()->getOption(TR_DontAllocateScratchBTL) &&
-      segment && ((uintptrj_t)(segment->heapBase) < (uintptrj_t)(1 << 24)))
+      segment && ((uintptr_t)(segment->heapBase) < (uintptr_t)(1 << 24)))
       {
       // If applicable, reduce the number of compilation threads to 1
       TR::CompilationInfo * compInfo = TR::CompilationInfo::get((J9JITConfig*)jitConfig);

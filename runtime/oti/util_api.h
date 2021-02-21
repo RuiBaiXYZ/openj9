@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -235,6 +235,23 @@ I_64 helperCLongMultiplyLong(I_64 a, I_64 b);
 */
 I_64 helperCLongRemainderLong(I_64 a, I_64 b);
 
+/* ---------------- dllloadinfo.c ---------------- */
+
+/**
+* @brief Retrieves the load info for the appropriate
+*        GC DLL based on reference mode.
+* @param[in] vm The Java VM.
+* @return J9VMDllLoadInfo for the GC DLL selected.
+*/
+J9VMDllLoadInfo *getGCDllLoadInfo(J9JavaVM *vm);
+
+/**
+* @brief Retrieves the load info for the appropriate
+*        VERBOSE DLL based on reference mode.
+* @param[in] vm The Java VM.
+* @return J9VMDllLoadInfo for the VERBOSE DLL selected.
+*/
+J9VMDllLoadInfo *getVerboseDllLoadInfo(J9JavaVM *vm);
 
 /* ---------------- eventframe.c ---------------- */
 
@@ -1275,6 +1292,27 @@ void validateLibrary(J9JavaVM *javaVM, J9NativeLibrary *library);
 /* ---------------- optinfo.c ---------------- */
 
 /**
+ * Retrieves number of permitted subclasses in this sealed class. Assumes that 
+ * ROM class parameter references a sealed class.
+ * 
+ * @param J9ROMClass sealed class
+ * @return U_32 number of permitted subclasses in optionalinfo
+ */
+U_32*
+getNumberOfPermittedSubclassesPtr(J9ROMClass *romClass);
+
+/**
+ * Find the permitted subclass name constant pool entry at index in the optional data of the ROM class parameter.
+ * This method assumes there is at least one permitted subclass in the ROM class.
+ * 
+ * @param U_32* permittedSubclassesCountPtr
+ * @param U_32 class index
+ * @return the permitted subclass name at index from ROM class
+ */
+J9UTF8*
+permittedSubclassesNameAtIndex(U_32* permittedSubclassesCountPtr, U_32 index);
+
+/**
  * Retrieves number of record components in this record. Assumes that 
  * ROM class parameter references a record class.
  * 
@@ -1651,17 +1689,6 @@ getOriginalROMMethod(J9Method * method);
  */
 J9ROMMethod *
 getOriginalROMMethodUnchecked(J9Method * method);
-
-/* ---------------- sleephelp.c ---------------- */
-
-/**
-* @brief
-* @param sleepTime
-* @return IDATA
-*/
-IDATA
-callThreadSleep(IDATA sleepTime);
-
 
 /* ---------------- subclass.c ---------------- */
 
@@ -2179,10 +2206,10 @@ jitClassRedefineEvent(J9VMThread * currentThread, J9JVMTIHCRJitEventData * jitEv
 void
 notifyGCOfClassReplacement(J9VMThread * currentThread, J9HashTable * classPairs, UDATA isFastHCR);
 
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
+#if JAVA_SPEC_VERSION >= 11
 void
 fixNestMembers(J9VMThread * currentThread, J9HashTable * classPairs);
-#endif /* defined(J9VM_OPT_VALHALLA_NESTMATES) */
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 #endif /* J9VM_INTERP_HOT_CODE_REPLACEMENT */
 
@@ -2270,7 +2297,7 @@ uint64_t
 getOpenJ9Sha();
 
 /**
- * If the class is a lambda class get the pointer to the last '$' sign of the class name which is in the format of HostClassName$$Lambda$<IndexNumber>/0000000000000000.
+ * If the class is a lambda class get the pointer to the last '$' sign of the class name which is in the format of HostClassName$$Lambda$<IndexNumber>/0x0000000000000000.
  * NULL otherwise.
  *
  * @param[in] className  pointer to the class name

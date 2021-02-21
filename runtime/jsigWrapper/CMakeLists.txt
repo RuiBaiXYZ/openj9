@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2019 IBM Corp. and others
+# Copyright (c) 2017, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,10 +20,7 @@
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
 
-# We dont want to suffix vm version to shared libs
-set(CMAKE_SHARED_LIBRARY_SUFFIX ${J9VM_OLD_SHARED_SUFFIX})
-
-add_library(jsig SHARED
+j9vm_add_library(jsig SHARED
 	jsig.c
 )
 
@@ -31,7 +28,6 @@ target_link_libraries(jsig
 	PRIVATE
 		j9vm_interface
 
-		omrsig
 		omrutil
 		${CMAKE_DL_LIBS}
 )
@@ -64,11 +60,9 @@ if(OMR_OS_LINUX)
 	)
 endif()
 
-if(J9VM_IS_NON_STAGING)
-	set_target_properties(jsig PROPERTIES
-		ARCHIVE_OUTPUT_DIRECTORY ${j9vm_BINARY_DIR}/lib
-	)
-endif()
+set_target_properties(jsig PROPERTIES
+	ARCHIVE_OUTPUT_DIRECTORY ${j9vm_BINARY_DIR}/lib
+)
 
 install(
 	TARGETS jsig

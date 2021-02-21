@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,6 +26,7 @@
 #include <string.h>
 #include "jilconsts.h"
 #include "jitprotos.h"
+#include "j9nonbuilder.h"
 #include "j9cfg.h"
 #include "j9comp.h"
 #include "j9consts.h"
@@ -68,6 +69,7 @@
 #include "control/CompilationThread.hpp"
 #include "control/CompilationRuntime.hpp"
 #include "runtime/HWProfiler.hpp"
+#include "omrformatconsts.h"
 
 typedef std::set<TR_GCStackMap*, std::less<TR_GCStackMap*>, TR::typed_allocator<TR_GCStackMap*, TR::Region&>> GCStackMapSet;
 
@@ -158,6 +160,22 @@ createByteCodeInfoRange(
    location += sizeof(int32_t);
    }
 
+/*
+ * use special catch type value to indicate to the VM the handler is synthetic handler so that OSR can be handled correctly
+ */
+static uint32_t
+useSpecialCatchTypeIfNecessary(TR_ExceptionTableEntry *e, bool fourByteOffsets, TR::Compilation *comp)
+   {
+   if (comp->getOption(TR_EnableOSR))
+      {
+      if ((fourByteOffsets && e->_catchType == J9_CATCHTYPE_VALUE_FOR_SYNTHETIC_HANDLER_4BYTES) ||
+          (!fourByteOffsets && e->_catchType == J9_CATCHTYPE_VALUE_FOR_SYNTHETIC_HANDLER_2BYTES) )
+         comp->failCompilation<TR::CompilationException>("Failed due to handler catch type value collides with special value reserved for synthetic handler");
+      if (e->_isSyntheticHandler)
+         return fourByteOffsets ? J9_CATCHTYPE_VALUE_FOR_SYNTHETIC_HANDLER_4BYTES : J9_CATCHTYPE_VALUE_FOR_SYNTHETIC_HANDLER_2BYTES;
+      }
+   return e->_catchType;
+   }
 
 static void
 createExceptionTable(
@@ -170,20 +188,21 @@ createExceptionTable(
 
    for (TR_ExceptionTableEntry * e = exceptionIterator.getFirst(); e; e = exceptionIterator.getNext())
       {
+      uint32_t catchType = useSpecialCatchTypeIfNecessary(e, fourByteOffsets, comp);
       if (fourByteOffsets)
          {
          *(uint32_t *)cursor = e->_instructionStartPC, cursor += 4;
          *(uint32_t *)cursor = e->_instructionEndPC, cursor += 4;
          *(uint32_t *)cursor = e->_instructionHandlerPC, cursor += 4;
-         *(uint32_t *)cursor = e->_catchType, cursor += 4;
+         *(uint32_t *)cursor = catchType, cursor += 4;
          if (comp->fej9()->isAOT_DEPRECATED_DO_NOT_USE()
 #if defined(J9VM_OPT_JITSERVER)
             || comp->isOutOfProcessCompilation()
 #endif
             )
-            *(uintptrj_t *)cursor = (uintptrj_t)e->_byteCodeInfo.getCallerIndex(), cursor += sizeof(uintptrj_t);
+            *(uintptr_t *)cursor = (uintptr_t)e->_byteCodeInfo.getCallerIndex(), cursor += sizeof(uintptr_t);
          else
-            *(uintptrj_t *)cursor = (uintptrj_t)e->_method->resolvedMethodAddress(), cursor += sizeof(uintptrj_t);
+            *(uintptr_t *)cursor = (uintptr_t)e->_method->resolvedMethodAddress(), cursor += sizeof(uintptr_t);
          }
       else
          {
@@ -192,7 +211,7 @@ createExceptionTable(
          *(uint16_t *)cursor = e->_instructionStartPC, cursor += 2;
          *(uint16_t *)cursor = e->_instructionEndPC, cursor += 2;
          *(uint16_t *)cursor = e->_instructionHandlerPC, cursor += 2;
-         *(uint16_t *)cursor = e->_catchType, cursor += 2;
+         *(uint16_t *)cursor = catchType, cursor += 2;
          }
 
       // Ensure that InstructionBoundaries are initialized properly.
@@ -321,7 +340,7 @@ createInternalPtrStackMapInJ9Format(
    //printf("JIT Address %x\n", location);
    //*((int32_t *) location) = (int16_t) trStackAtlas->getNumberOfInternalPtrs();
    //printf("Number of internal pointers = %d\n", (*((int16_t *) location)));
-   location += sizeof(intptrj_t);
+   location += sizeof(intptr_t);
 
    // Fill in the data now.
    //
@@ -329,7 +348,7 @@ createInternalPtrStackMapInJ9Format(
    // portion of the map will occupy.
    //
    if (debug("traceIP"))
-      printf("JIT Address %x\n", location);
+      printf("JIT Address %" OMR_PRIxPTR "\n", (uintptr_t)location);
    *location = (uint8_t) mapSize;
    if (debug("traceIP"))
       printf("Internal ptr map size = %d\n", *location);
@@ -340,15 +359,15 @@ createInternalPtrStackMapInJ9Format(
 
 
    if (debug("traceIP"))
-      printf("JIT Address %x\n", location);
+      printf("JIT Address %" OMR_PRIxPTR "\n", (uintptr_t)location);
    *((int16_t *) location) = (int16_t) indexOfFirstInternalPtr;
    if (debug("traceIP"))
-      printf("Index of first internal pointer = %d\n", (*((int16_t *) location)));
+      printf("Index of first internal pointer = %" OMR_PRId16 "\n", (*((int16_t *) location)));
    location += 2;
 
    int32_t offsetOfFirstInternalPtr = trStackAtlas->getOffsetOfFirstInternalPointer();
    if (debug("traceIP"))
-      printf("JIT Address %x\n", location);
+      printf("JIT Address %" OMR_PRIxPTR "\n", (uintptr_t)location);
    *((int16_t *) location) = (int16_t) offsetOfFirstInternalPtr;
    if (debug("traceIP"))
       printf("Offset of first internal pointer = %d\n", (*((int16_t *) location)));
@@ -357,7 +376,7 @@ createInternalPtrStackMapInJ9Format(
    // Fill in how many distinct pinning array temps exist
    //
    if (debug("traceIP"))
-      printf("JIT Address %x\n", location);
+      printf("JIT Address %" OMR_PRIxPTR "\n", (uintptr_t)location);
    *location = (uint8_t) (map->getNumDistinctPinningArrays() + numPinningArraysOnlyForInternalPtrRegs);
    if (debug("traceIP"))
       printf("Number of distinct pinning arrays = %d\n", *location);
@@ -383,7 +402,7 @@ createInternalPtrStackMapInJ9Format(
        //
        *location = (uint8_t) (currElement->getData()->getInternalPointerAuto()->getGCMapIndex() - indexOfFirstInternalPtr);
        if (debug("traceIP"))
-          printf("JIT : location %x first internal ptr index %d firstptr %d\n", location, currElement->getData()->getInternalPointerAuto()->getGCMapIndex(), indexOfFirstInternalPtr);
+          printf("JIT : location %" OMR_PRIxPTR " first internal ptr index %d firstptr %d\n", (uintptr_t)location, currElement->getData()->getInternalPointerAuto()->getGCMapIndex(), indexOfFirstInternalPtr);
        location++;
        int32_t numInternalPtrsForThisPinningArray = 1;
        //
@@ -400,7 +419,7 @@ createInternalPtrStackMapInJ9Format(
             {
             *location = (uint8_t) (internalPtrPair->getInternalPointerAuto()->getGCMapIndex() - indexOfFirstInternalPtr);
             if (debug("traceIP"))
-               printf("JIT : location %x internal ptr index %d firstptr %d\n", location, internalPtrPair->getInternalPointerAuto()->getGCMapIndex(), indexOfFirstInternalPtr);
+               printf("JIT : location %" OMR_PRIxPTR " internal ptr index %d firstptr %d\n", (uintptr_t)location, internalPtrPair->getInternalPointerAuto()->getGCMapIndex(), indexOfFirstInternalPtr);
             location++;
             numInternalPtrsForThisPinningArray++;
             searchElement = searchElement->getNextElement();
@@ -418,7 +437,7 @@ createInternalPtrStackMapInJ9Format(
        //
        *((location - numInternalPtrsForThisPinningArray) - 1) = numInternalPtrsForThisPinningArray;
        if (debug("traceIP"))
-          printf("In VMJ9 numInternalPtrs = %d and memory %x\n", numInternalPtrsForThisPinningArray, (location - numInternalPtrsForThisPinningArray));
+          printf("In VMJ9 numInternalPtrs = %d and memory %" OMR_PRIxPTR "\n", numInternalPtrsForThisPinningArray, (uintptr_t)(location - numInternalPtrsForThisPinningArray));
        totalPointers = totalPointers + 1 + numInternalPtrsForThisPinningArray;
        }
 
@@ -475,14 +494,15 @@ createStackMap(
       map->setRegisterBits((1<<cg->getInternalPtrMapBit()));
       if (debug("traceIP"))
          {
-         printf("JIT address %x (lowCode %x) method %s with 4 byte offsets (%d) for register map %d (GC map %x ip map %x)\n", location, lowCode, comp->signature(), fourByteOffsets, map->getRegisterMap(), map, map->getInternalPointerMap());
+         printf("JIT address %" OMR_PRIxPTR " (lowCode %" OMR_PRIxPTR ") method %s with 4 byte offsets (%d) for register map %d (GC map %" OMR_PRIxPTR " ip map %" OMR_PRIxPTR ")\n",\
+             (uintptr_t)location, (uintptr_t)lowCode, comp->signature(), fourByteOffsets, map->getRegisterMap(), (uintptr_t)map, (uintptr_t)map->getInternalPointerMap());
          fflush(stdout);
          }
       }
    else
       map->resetRegistersBits((1<<cg->getInternalPtrMapBit()));
 
-   uintptrj_t startLocation = (uintptrj_t) location;
+   uintptr_t startLocation = (uintptr_t) location;
 
    if (fourByteOffsets)
       {
@@ -530,7 +550,7 @@ createStackMap(
       *location = (uint8_t) internalPtrMap->getSize();
 
       if (debug("traceIP"))
-         printf("JIT Address %x Internal ptr map size = %d\n", location, *location);
+         printf("JIT Address %" OMR_PRIxPTR " Internal ptr map size = %d\n", (uintptr_t)location, *location);
 
       location++;
 
@@ -539,7 +559,7 @@ createStackMap(
       *location = (uint8_t) internalPtrMap->getNumDistinctPinningArrays();
 
       if (debug("traceIP"))
-         printf("JIT Address %x Num pinning arrays = %d\n", location, *location);
+         printf("JIT Address %" OMR_PRIxPTR " Num pinning arrays = %d\n", (uintptr_t)location, *location);
 
       location++;
 
@@ -553,7 +573,7 @@ createStackMap(
          //
          *location = (uint8_t) (currElement->getData()->getPinningArrayPointer()->getGCMapIndex() - indexOfFirstInternalPtr);
          if (debug("traceIP"))
-            printf("JIT Address %x Pinning array = %d\n", location, *location);
+            printf("JIT Address %" OMR_PRIxPTR " Pinning array = %d\n", (uintptr_t)location, *location);
          //
          // Skip over the byte corresponding to number of derived register pointers
          // per base array; to be filled in later.
@@ -564,7 +584,7 @@ createStackMap(
          //
          *location = (uint8_t) currElement->getData()->getInternalPtrRegNum();
          if (debug("traceIP"))
-            printf("JIT : internal ptr reg num %d address %x\n", *location, location);
+            printf("JIT : internal ptr reg num %d address %" OMR_PRIxPTR "\n", *location, (uintptr_t)location);
          location++;
 
          int32_t numInternalPtrsForThisPinningArray = 1;
@@ -582,7 +602,7 @@ createStackMap(
                {
                *location = (uint8_t) internalPtrPair->getInternalPtrRegNum();
                if (debug("traceIP"))
-                  printf("JIT : internal ptr reg num %d address %x\n", *location, location);
+                  printf("JIT : internal ptr reg num %d address %" OMR_PRIxPTR "\n", *location, (uintptr_t)location);
                location++;
                numInternalPtrsForThisPinningArray++;
                searchElement = searchElement->getNextElement();
@@ -600,7 +620,7 @@ createStackMap(
           //
          *((location - numInternalPtrsForThisPinningArray) - 1) = numInternalPtrsForThisPinningArray;
          if (debug("traceIP"))
-            printf("JIT Address %x Num internal ptrs for this array = %d\n", ((location - numInternalPtrsForThisPinningArray) - 1),numInternalPtrsForThisPinningArray);
+            printf("JIT Address %" OMR_PRIxPTR " Num internal ptrs for this array = %d\n", (uintptr_t)((location - numInternalPtrsForThisPinningArray) - 1), numInternalPtrsForThisPinningArray);
          }
       }
 
@@ -619,7 +639,7 @@ createStackMap(
 
    if (debug("traceIP"))
       {
-      printf("Start of map %x end of map %x (lowCode %x)\n", startLocation, (location+mapSize), lowCode);
+      printf("Start of map %" OMR_PRIxPTR " end of map %" OMR_PRIxPTR " (lowCode %" OMR_PRIxPTR ")\n", (uintptr_t)startLocation, (uintptr_t)(location + mapSize), (uintptr_t)lowCode);
       diagnostic("Map bits are being emitted at %x\n", location);
       diagnostic("Number of slots mapped %d\n", map->getNumberOfSlotsMapped());
       int mapBytes = (map->getNumberOfSlotsMapped() + 7) >> 3;
@@ -924,7 +944,7 @@ createStackAtlas(
    if (trStackAtlas->getStackAllocMap())
       {
       vmAtlas->stackAllocMap = cursor;
-      cursor += sizeof(uintptrj_t);
+      cursor += sizeof(uintptr_t);
       int32_t mapSizeInBytes = trStackAtlas->getStackAllocMap()->getMapSizeInBytes();
       memcpy(cursor, trStackAtlas->getStackAllocMap()->getMapBits(), mapSizeInBytes);
       cursor += numberOfMapBytes;
@@ -934,7 +954,7 @@ createStackAtlas(
 
    if (trStackAtlas->getStackAllocMap())
       {
-      cursor -= (numberOfMapBytes + sizeof(uintptrj_t));
+      cursor -= (numberOfMapBytes + sizeof(uintptr_t));
       }
 
    TR::ResolvedMethodSymbol * methodSymbol = comp->getJittedMethodSymbol();
@@ -983,9 +1003,9 @@ createStackAtlas(
          createStackMap(mapCursor, cg, cursor, fourByteOffsets, trStackAtlas, numberOfMapBytes, comp);
 
          if (vmAtlas->internalPointerMap && mapCursor == trStackAtlas->getParameterMap())
-            *((uintptrj_t *) vmAtlas->internalPointerMap) = (uintptrj_t) cursor;
+            *((uintptr_t *) vmAtlas->internalPointerMap) = (uintptr_t) cursor;
          if (vmAtlas->stackAllocMap && mapCursor == trStackAtlas->getParameterMap())
-            *((uintptrj_t *) vmAtlas->stackAllocMap) = (uintptrj_t) cursor;
+            *((uintptr_t *) vmAtlas->stackAllocMap) = (uintptr_t) cursor;
          }
       previousLowestCodeOffset = mapCursor->getLowestCodeOffset();
       mapCursor = nextMapCursor;
@@ -998,8 +1018,7 @@ createStackAtlas(
 void AOTRAS_traceMetaData(TR_J9VMBase *vm, TR_MethodMetaData *data, TR::Compilation *comp)
    {
    traceMsg(comp, "<relocatableDataMetaDataCG>\n");
-   J9JITDataCacheHeader *aotMethodHeader = (J9JITDataCacheHeader *)comp->getAotMethodDataStart();
-   TR_AOTMethodHeader *aotMethodHeaderEntry =  (TR_AOTMethodHeader *)(aotMethodHeader + 1);
+   TR_AOTMethodHeader *aotMethodHeaderEntry = comp->getAotMethodHeaderEntry();
 
    traceMsg(comp, "%s\n", comp->signature());
    traceMsg(comp, "%-12s", "startPC");
@@ -1153,8 +1172,7 @@ populateBodyInfo(
 #endif
          )
          {
-         J9JITDataCacheHeader *aotMethodHeader = (J9JITDataCacheHeader *)comp->getAotMethodDataStart();
-         TR_AOTMethodHeader *aotMethodHeaderEntry =  (TR_AOTMethodHeader *)(aotMethodHeader + 1);
+         TR_AOTMethodHeader *aotMethodHeaderEntry =  comp->getAotMethodHeaderEntry();
          aotMethodHeaderEntry->offsetToPersistentInfo = 0;
          }
 
@@ -1225,16 +1243,13 @@ static void populateInlineCalls(
          inlinedCallSite->_methodInfo = (TR_OpaqueMethodBlock*)-1;
          }
       memcpy(callSiteCursor, inlinedCallSite, sizeof(TR_InlinedCallSite) );
-      if (comp->getOption(TR_TraceRelocatableDataCG) || comp->getOption(TR_TraceRelocatableDataDetailsCG) || comp->getOption(TR_TraceReloCG))
+      if (comp->getOption(TR_TraceRelocatableDataCG) || comp->getOption(TR_TraceRelocatableDataDetailsCG))
          {
          traceMsg(comp, "inlineIdx %d, callSiteCursor %p, inlinedCallSite->methodInfo = %p\n", i, callSiteCursor, inlinedCallSite->_methodInfo);
          }
 
-      if (!vm->isAOT_DEPRECATED_DO_NOT_USE()
-#if defined(J9VM_OPT_JITSERVER)
-         && !comp->isOutOfProcessCompilation()
-#endif
-         ) // For AOT, we should only have returned resolved info about a method if the method came from same class loaders.
+      // For AOT, we should only have returned resolved info about a method if the method came from same class loaders.
+      if (!vm->isAOT_DEPRECATED_DO_NOT_USE())
          {
          TR_OpaqueClassBlock *clazzOfInlinedMethod = vm->getClassFromMethodBlock(inlinedCallSite->_methodInfo);
          if (comp->fej9()->isUnloadAssumptionRequired(clazzOfInlinedMethod, comp->getCurrentMethod()))
@@ -1249,11 +1264,31 @@ static void populateInlineCalls(
                        comp->fej9()->getClassLoader(clazzOfCallerMethod),
                        callSiteCursor);
                }
+
 #if (defined(TR_HOST_64BIT) && defined(TR_HOST_POWER))
-            createClassUnloadPicSite((void*) clazzOfInlinedMethod, (void*) (callSiteCursor+(comp->target().cpu.isBigEndian()?4:0)), 4, comp->getMetadataAssumptionList());
+            void *addressToBePatched = (void *)(callSiteCursor+(comp->target().cpu.isBigEndian()?4:0));
+            uint32_t size = 4;
 #else
-            createClassUnloadPicSite((void*) clazzOfInlinedMethod, (void*) callSiteCursor, sizeof(uintptrj_t), comp->getMetadataAssumptionList());
+            void *addressToBePatched = (void *)callSiteCursor;
+            uint32_t size = sizeof(uintptr_t);
 #endif
+#if defined(J9VM_OPT_JITSERVER)
+            if (comp->isOutOfProcessCompilation())
+               {
+               intptr_t offset = ((uint8_t*)addressToBePatched) - ((uint8_t*)data);
+               SerializedRuntimeAssumption* sra =
+                  new (comp->trHeapMemory()) SerializedRuntimeAssumption(RuntimeAssumptionOnClassUnload,
+                                                      (uintptr_t)clazzOfInlinedMethod,
+                                                      offset,
+                                                      size,
+                                                      true);
+               comp->getSerializedRuntimeAssumptions().push_front(sra);
+               }
+            else
+#endif
+               {
+               createClassUnloadPicSite((void*)clazzOfInlinedMethod, addressToBePatched, size, comp->getMetadataAssumptionList());
+               }
             }
          }
 
@@ -1376,7 +1411,7 @@ createMethodMetaData(
    TR_GCStackAllocMap * stackAllocMap = trStackAtlas->getStackAllocMap();
    if (stackAllocMap)
       {
-      tableSize += numberOfMapBytes + sizeof(uintptrj_t);
+      tableSize += numberOfMapBytes + sizeof(uintptr_t);
       }
 
    int32_t osrInfoOffset = -1;
@@ -1460,7 +1495,6 @@ createMethodMetaData(
    data->endWarmPC = data->endPC;
    data->codeCacheAlloc = (UDATA)comp->cg()->getBinaryBufferStart();
 
-   data->flags = 0;
    if (fourByteOffsets)
       data->flags |= JIT_METADATA_GC_MAP_32_BIT_OFFSETS;
 
@@ -1500,7 +1534,7 @@ createMethodMetaData(
       if (!comp->isOutOfProcessCompilation())
 #endif
          /* Align code caches */
-         codeCache->alignWarmCodeAlloc(3);
+         codeCache->alignWarmCodeAlloc(4);
 
       J9JITDataCacheHeader *aotMethodHeader = (J9JITDataCacheHeader *)comp->getAotMethodDataStart();
       TR_AOTMethodHeader *aotMethodHeaderEntry =  (TR_AOTMethodHeader *)(aotMethodHeader + 1);
@@ -1544,6 +1578,11 @@ createMethodMetaData(
           !vm->canMethodEnterEventBeHooked())
          {
          aotMethodHeaderEntry->flags |= TR_AOTMethodHeader_IsNotCapableOfMethodEnterTracing;
+         }
+
+      if (!vm->canExceptionEventBeHooked())
+         {
+         aotMethodHeaderEntry->flags |= TR_AOTMethodHeader_IsNotCapableOfExceptionHook;
          }
 
       if (comp->getOption(TR_DisableTM))

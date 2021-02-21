@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,14 +20,14 @@
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
-#ifndef TR_J9_PPC_CODEGENERATORBASE_INCL
-#define TR_J9_PPC_CODEGENERATORBASE_INCL
+#ifndef J9_POWER_CODEGENERATOR_INCL
+#define J9_POWER_CODEGENERATOR_INCL
 
 /*
  * The following #define and typedef must appear before any #includes in this file
  */
-#ifndef TRJ9_CODEGENERATORBASE_CONNECTOR
-#define TRJ9_CODEGENERATORBASE_CONNECTOR
+#ifndef J9_CODEGENERATOR_CONNECTOR
+#define J9_CODEGENERATOR_CONNECTOR
 namespace J9 { namespace Power { class CodeGenerator; } }
 namespace J9 { typedef J9::Power::CodeGenerator CodeGeneratorConnector; }
 #else
@@ -50,7 +50,7 @@ extern TR::Instruction *loadAddressRAM32(TR::CodeGenerator *cg,
 
 extern TR::Instruction *loadAddressRAM(TR::CodeGenerator *cg,
                                     TR::Node        *node,
-                                    intptrj_t         value,
+                                    intptr_t         value,
                                     TR::Register    *targetRegister);
 
 extern TR::Instruction *loadAddressJNI32(TR::CodeGenerator *cg,
@@ -60,7 +60,7 @@ extern TR::Instruction *loadAddressJNI32(TR::CodeGenerator *cg,
 
 extern TR::Instruction *loadAddressJNI(TR::CodeGenerator *cg,
                                     TR::Node        *node,
-                                    intptrj_t         value,
+                                    intptr_t         value,
                                     TR::Register    *targetRegister);
 
 namespace J9
@@ -71,9 +71,14 @@ namespace Power
 
 class OMR_EXTENSIBLE CodeGenerator : public J9::CodeGenerator
    {
-   public:
 
-   CodeGenerator();
+protected:
+
+   CodeGenerator(TR::Compilation *comp);
+
+public:
+
+   void initialize();
 
    TR::Recompilation *allocateRecompilationInfo();
 
@@ -101,6 +106,11 @@ class OMR_EXTENSIBLE CodeGenerator : public J9::CodeGenerator
    bool suppressInliningOfCryptoMethod(TR::RecognizedMethod method);
    bool inlineCryptoMethod(TR::Node *node, TR::Register *&resultReg);
 #endif
+
+   /**
+    * \brief Determines whether the code generator supports stack allocations
+    */
+   bool supportsStackAllocations() { return true; }
    };
 
 }

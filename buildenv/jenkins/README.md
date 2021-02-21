@@ -36,9 +36,6 @@ This folder contains Jenkins pipeline scripts that are used in the OpenJ9 Jenkin
     - Linux on x86-64 largeheap/non-compressed references
         - Spec: x86-64_linux_xl
         - Shortname: xlinuxlargeheap or xlinuxxl
-    - Linux on x86-64 with CMake
-        - Spec: x86-64_linux_cm
-        - Shortname: xlinuxcm or xlinuxcmake
     - Linux on x86-64 with JITServer
         - Spec x86-64_linux_jit
         - Shortname: xlinuxjit
@@ -54,9 +51,6 @@ This folder contains Jenkins pipeline scripts that are used in the OpenJ9 Jenkin
     - Linux on ppc64le largeheap/non-compressed references
         - Spec: ppc64le_linux_xl
         - Shortname: plinuxlargeheap or plinuxxl
-    - Linux on ppc64le with CMake
-        - Spec: ppc64le_linux_cm
-        - Shortname: plinuxcm or plinuxcmake
     - Linux on aarch64
         - Spec: aarch64_linux
         - Shortname: alinux64
@@ -66,6 +60,9 @@ This folder contains Jenkins pipeline scripts that are used in the OpenJ9 Jenkin
     - AIX on ppc64
         - Spec: ppc64_aix
         - Shortname: aix
+    - AIX on ppc64 largeheap/non-compressed references
+        - Spec: ppc64_aix_xl
+        - Shortname: aixlargeheap or aixxl
     - Windows on x86-64
         - Spec: x86-64_windows
         - shortname: win
@@ -84,14 +81,14 @@ This folder contains Jenkins pipeline scripts that are used in the OpenJ9 Jenkin
     - ALL
         - Launches a subset of 'all' platforms
         - ppc64le_linux, ppc64le_linux_xl, s390x_linux, s390x_linux_xl, x86-64_linux, x86-64_linux_xl, ppc64_aix, x86-64_windows, x86-32_windows, x86-64_mac
-
+- Many specs support a suffix of `_cm` or `_uma` (omit the leading underscore for shortnames) to override the default build system.
 - OpenJ9 committers can request builds by commenting in a pull request
     - Format: `Jenkins <build type> <level>.<group>[+<test_flag>] <platform>[,<platform>,...,<platform>] jdk<version>[,jdk<version>,...,jdk<version>]`
     - `<build type>` is compile | test
     - `<level>` is sanity | extended (required only for "test" `<build type>`)
     - `<group>` is functional | system
     - `<test_flag>` Optional: any TEST_FLAG is supported. See notes below.
-    - `<platform>` is one of the platform shorthands above
+    - `<platform>` is one of the (short or full) platform names above
     - `<version>` is the number of the supported release, e.g. 8 | 11 | next
 - Note: You can use keyword `all` for platform but not for test level/type or JDK versions.
 - Note: For backward compatibility `<level>.<test type>` equal to `sanity` or `extended` is acceptable and will map to `sanity.functional` and `extended.functional` respectively.
@@ -132,6 +129,12 @@ You can request a Pull Request build from the Eclipse OpenJ9 repository - [openj
     - `Jenkins test sanity zlinux jdk8 depends eclipse/omr#123`
 
 ###### Note: When specifying a dependent change in an OpenJDK extensions repo, you can only build the SDK version that matches the repo where the dependent change lives. Eg. You cannot build JDK8 with a PR in openj9-openjdk-jdk11.
+
+##### Building Release branch PRs
+
+- If you have a PR against a release branch, it can be tested with a PR build that specifies the OMR and Extensions repos.
+- Ex. Release PR against the `v0.20.0-release` branch specifying both OMR and Extensions
+    - `Jenkins compile plinux jdk11 depends eclipse/openj9-omr#v0.20.0-release ibmruntimes/openj9-openjdk-jdk11#openj9-0.20.0`
 
 ##### Testing Changes to Pipeline code
 

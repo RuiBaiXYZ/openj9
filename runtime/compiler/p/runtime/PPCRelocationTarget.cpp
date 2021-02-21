@@ -289,8 +289,6 @@ TR_PPCRelocationTarget::isOrderedPairRelocation(TR_RelocationRecord *reloRecord,
    switch (reloRecord->type(reloTarget))
       {
       case TR_AbsoluteMethodAddressOrderedPair:
-      case TR_ConstantPoolOrderedPair:
-      case TR_MethodObject:
          return true;
       }
 
@@ -303,10 +301,8 @@ TR_PPC32RelocationTarget::isOrderedPairRelocation(TR_RelocationRecord *reloRecor
    switch (reloRecord->type(reloTarget))
       {
       case TR_AbsoluteMethodAddressOrderedPair:
-      case TR_ConstantPoolOrderedPair:
       case TR_ClassAddress:
       case TR_ArbitraryClassAddress:
-      case TR_MethodObject:
       case TR_ArrayCopyHelper:
       case TR_ArrayCopyToc:
       case TR_GlobalValue:
@@ -323,7 +319,7 @@ TR_PPC32RelocationTarget::isOrderedPairRelocation(TR_RelocationRecord *reloRecor
 bool TR_PPCRelocationTarget::useTrampoline(uint8_t * helperAddress, uint8_t *baseLocation)
    {
    return
-      !reloRuntime()->comp()->target().cpu.isTargetWithinIFormBranchRange((intptrj_t)helperAddress, (intptrj_t)baseLocation) ||
+      !reloRuntime()->comp()->target().cpu.isTargetWithinIFormBranchRange((intptr_t)helperAddress, (intptr_t)baseLocation) ||
       TR::Options::getCmdLineOptions()->getOption(TR_StressTrampolines);
    }
 
@@ -343,19 +339,6 @@ void
 TR_PPCRelocationTarget::flushCache(uint8_t *codeStart, unsigned long size)
    {
    ppcCodeSync((unsigned char *)codeStart, (unsigned int) size);
-   }
-
-void
-TR_PPCRelocationTarget::patchMTIsolatedOffset(uint32_t offset, uint8_t *reloLocation)
-   {
-   /* apply constant to lis and ori instructions
-      lis  r0, high_16 bits
-      ori  r0, r0, low_16 bits
-    */
-   uint16_t highBits = offset >> 16;
-   uint16_t lowBits = offset &0xffff;
-   storeUnsigned16b(highBits, reloLocation+(reloRuntime()->comp()->target().cpu.isBigEndian()?2:0));
-   storeUnsigned16b(lowBits, reloLocation+(reloRuntime()->comp()->target().cpu.isBigEndian()?6:4));
    }
 
 void

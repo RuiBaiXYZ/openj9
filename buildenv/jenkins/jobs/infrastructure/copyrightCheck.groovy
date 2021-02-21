@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2019 IBM Corp. and others
+ * Copyright (c) 2017, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -53,25 +53,25 @@ timeout(time: 6, unit: 'HOURS') {
                         script: "date +%Y",
                         returnStdout: true
                     ).trim()
-                    
+
                     // Set a different Copyright regex depending on the Repo the PR is from
                     REGEX = "\'Copyright \\(c\\) ([0-9]{4}), ${DATE_YEAR}\'"
 
-                    WHITE_LIST = []
-                    if (fileExists("${WORKSPACE}/.copyright_whitelist")) {
-                        WHITE_LIST = readFile '.copyright_whitelist'
-                        WHITE_LIST = WHITE_LIST.tokenize("\n")
+                    IGNORE_LIST = []
+                    if (fileExists("${WORKSPACE}/.copyrightignore")) {
+                        IGNORE_LIST = readFile '.copyrightignore'
+                        IGNORE_LIST = IGNORE_LIST.tokenize("\n")
                     }
 
                     FILES_LIST.each() {
                         println "Checking file: '${it}'"
-                        if (WHITE_LIST.contains(it)) {
+                        if (IGNORE_LIST.contains(it)) {
                             echo "Ignoring file"
                         } else {
                             RESULT = sh (
                                 script: "grep -qE ${REGEX} '${it}'",
                                 returnStatus: true)
-                            if(RESULT != 0) {
+                            if (RESULT != 0) {
                                 echo "FAILURE - Copyright date in file: '${it}' appears to be incorrect"
                                 FAIL = true
                                 BAD_FILES << "${it}"

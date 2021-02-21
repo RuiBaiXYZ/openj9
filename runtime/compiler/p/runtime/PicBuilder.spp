@@ -1,4 +1,4 @@
-!! Copyright (c) 2000, 2020 IBM Corp. and others
+!! Copyright (c) 2000, 2021 IBM Corp. and others
 !!
 !! This program and the accompanying materials are made available under
 !! the terms of the Eclipse Public License 2.0 which accompanies this
@@ -64,6 +64,21 @@
 #define maskVFT(reg)    rlwinm reg, reg, 0, 0, 31-J9TR_RequiredClassAlignmentInBits
 #endif
 
+#if defined(OMR_GC_COMPRESSED_POINTERS)
+#if defined(OMR_GC_FULL_POINTERS)
+#define LOAD_CLASS(dest, src) \
+	laddr dest, J9TR_VMThreadCompressObjectReferences(r15) ; \
+	cmpli cr0, CmpAddr, dest, 0 ; \
+	laddr dest, J9TR_J9Object_class(src) ; \
+	beq $+8 ; \
+	lwz dest, J9TR_J9Object_class(src)
+#else /* OMR_GC_FULL_POINTERS */
+#define LOAD_CLASS(dest, src) lwz dest, J9TR_J9Object_class(src)
+#endif /* OMR_GC_FULL_POINTERS */
+#else /* OMR_GC_COMPRESSED_POINTERS */
+#define LOAD_CLASS(dest, src) laddr dest, J9TR_J9Object_class(src)
+#endif /* OMR_GC_COMPRESSED_POINTERS */
+
 #if defined(TR_HOST_64BIT) && defined(OMR_GC_COMPRESSED_POINTERS)
 /* extract isolated field address in TenantDataxxx
    MT_ComputeIsolatedFieldAddress(32/64/obj, element_shift size 2/3)
@@ -91,19 +106,6 @@
     rlwinm r3, r3, 2, 2, 31         				! r3 = col_index << 2
     addi   r3, r3, 8                                ! r3 = col_index*4 + 8
  */
-#define MT_ComputeStaticFieldAddress(TenantData, elem_shift_size) \
-    clrrdi r3, r3, 2 ;                              \
-    ld r4, TenantData(r15) ;                        \
-    ld r3, 0(r3);                                   \
-    sradi  r5, r3, 16 ;                             \
-    rlwinm r5, r5, 2, 2, 31 ;                       \
-    addi   r5, r5, 8 ;                              \
-    lwzx   r5, r5, r4 ;                             \
-    lwz    r4, 20(r7) ;                             \
-    sld    r5, r5, r4 ;                             \
-    rlwinm	r3, r3,0, 16, 31 ;                      \
-    rlwinm r3, r3, elem_shift_size, elem_shift_size, 31 ;                       \
-    addi   r3, r3, 8        ;
 
 /*
  * load jitResolveStaticField helper address into r8
@@ -116,61 +118,6 @@
     rlwinm	r4, r29,0, 5, 31				! Masking off flag bits
     bcctrl  BO_ALWAYS, CR0_LT				! Call to resolve: RTOC, r7
  */
-
-#define MT_CallHelper                                       \
-    mtspr   CTR, r8;				                        \
-    laddr	r3, 1*ALen+4(r7);   			                \
-    lwz	r29,1*ALen(r7);					                    \
-    laddr	r5, 0(r7);					                    \
-    rlwinm	r4, r29,0, 5, 31;				                \
-    bcctrl  BO_ALWAYS, CR0_LT
-
-#ifdef AIXPPC
-#define MT_ResovleStaticField                               \
-    ld      RTOC, J9TR_VMThread_jitTOC(J9VM_STRUCT);        \
-    laddr	r8, TOCjitResolveStaticField(RTOC);	            \
-    laddr	r8, 0(r8);					                    \
-    MT_CallHelper
-
-#define MT_ResovleStaticFieldSetter                         \
-    ld      RTOC, J9TR_VMThread_jitTOC(J9VM_STRUCT);        \
-    laddr	r8, TOCjitResolveStaticFieldSetter(RTOC);	    \
-    laddr	r8, 0(r8);					                    \
-    MT_CallHelper
-
-#elif defined(LINUXPPC64)
-#if defined(__LITTLE_ENDIAN__)
-#define MT_ResovleStaticField                               \
-    ld      RTOC, J9TR_VMThread_jitTOC(J9VM_STRUCT);        \
-    laddr	r8, TOCjitResolveStaticField@toc(RTOC);         \
-    MT_CallHelper
-
-#define MT_ResovleStaticFieldSetter                         \
-    ld      RTOC, J9TR_VMThread_jitTOC(J9VM_STRUCT);        \
-    laddr	r8, TOCjitResolveStaticFieldSetter@toc(RTOC);   \
-    MT_CallHelper
-#else
-#define MT_ResovleStaticField                               \
-    ld      RTOC, J9TR_VMThread_jitTOC(J9VM_STRUCT);        \
-    laddr	r8, TOCjitResolveStaticField@toc(RTOC);         \
-    laddr	r8, 0(r8);                                      \
-    MT_CallHelper
-
-#define MT_ResovleStaticFieldSetter                         \
-    ld      RTOC, J9TR_VMThread_jitTOC(J9VM_STRUCT);        \
-    laddr	r8, TOCjitResolveStaticFieldSetter@toc(RTOC);   \
-    laddr	r8, 0(r8);                                      \
-    MT_CallHelper
-#endif
-#else
-#define MT_ResovleStaticField                               \
-    laddr	r8, jitResolveStaticField@got(RTOC);            \
-    MT_CallHelper
-
-#define MT_ResovleStaticFieldSetter                               \
-    laddr	r8, jitResolveStaticFieldSetter@got(RTOC);            \
-    MT_CallHelper
-#endif
 
 #endif
 
@@ -683,7 +630,7 @@ _interpreterUnresolvedInstanceDataGlue:
 	cmpi    cr0, 0, r28, 0                                  ! and check if we are in a load sequence.
         lis     r9, lwz_r3_high                                 ! if so then use lwz r3,0(r11)
 	beq     .L_LoadTemplateInstruction                      !
-	lis     r9, stw_r4_high                                 ! else else use stw r4,0(r11)
+	lis     r9, stw_r4_high                                 ! else use stw r4,0(r11)
 .L_LoadTemplateInstruction:
 	lwz	r8, 2*ALen+8(r7)				! Load the template instruction
 	add	r3, r3, r4					! Add to the returned result
@@ -705,7 +652,7 @@ _interpreterUnresolvedInstanceDataGlue:
         cmpi    cr0, 0, r28, 0                                  ! and check if we are in a load sequence.
         lis     r9, lwz_r4_high                                 ! if so then use lwz r4,0(r11)
         beq     .L_lwz                                          !
-        lis     r9, stw_r5_high                                 ! else else use stw r5,0(r11)
+        lis     r9, stw_r5_high                                 ! else use stw r5,0(r11)
 .L_lwz:
         addi    r3, r3, 4                                       ! prepare immediate offset of upper word of long mem ref
         rlwimi  r9, r3, 0, 0x0000ffff                           ! r9 contains the instruction for upper word of long mem ref
@@ -2269,12 +2216,7 @@ _virtualUnresolvedHelper:
 .L.directDispatch:							! J9SP-96,r5(offset),r11,RTOC
 	laddr	r3, 7*ALen(J9SP)					! Restore object ptr: this
 	laddr	r0, VirtualRAOffset(r11)				! Load code cache RA
-#ifdef OMR_GC_COMPRESSED_POINTERS
-        lwz     r6, J9TR_J9Object_class(r3)                                               ! Load class offset
-        ! may need to convert class offset to J9Class
-#else
-	laddr	r6, J9TR_J9Object_class(r3)						! Load class pointer
-#endif
+	LOAD_CLASS(r6,r3)					! Load class pointer
 	maskVFT(r6)
 	mtspr   LR, r0							! Set up the return addr
 	laddrx	r8, r6, r5						! Load the vtable entry
@@ -2391,11 +2333,7 @@ _interfaceCallHelper:
 	laddr	r5, jitLookupInterfaceMethod@got(RTOC)		! Load the callee address
 #endif
 	mtspr	CTR, r5						! Prepare for long jump
-#ifdef OMR_GC_COMPRESSED_POINTERS
-	lwz	r3, J9TR_J9Object_class(r4)				! Load the class offset
-#else
-	laddr	r3, J9TR_J9Object_class(r4)				! Load the class
-#endif
+	LOAD_CLASS(r3,r4)					! Load the class
 	maskVFT(r3)
 	addi	r4, r11, 3*ALen					! Address of interface table&slot number
 	mr	r5, r11						! Load original RA for use inside jitLookupInterfaceMethod
@@ -2451,20 +2389,11 @@ _interfaceCallHelper:
 	mtspr	CTR, r5						! Prepare for long jump
 	mr	r5, r11						! Load code cache RA
 	addi	r4, r11, 3*ALen					! Address of interface table&slot number
-#ifdef OMR_GC_COMPRESSED_POINTERS
-	lwz	r3, J9TR_J9Object_class(r6)				! Load the class offset
-#else
-	laddr	r3, J9TR_J9Object_class(r6)				! Load the class
-#endif
+	LOAD_CLASS(r3,r6)					! Load the class
 	maskVFT(r3)
 	bcctrl	BO_ALWAYS, CR0_LT					! Call to look up method
 	laddr	r5, 7*ALen(J9SP)					! Load:  this
-#ifdef OMR_GC_COMPRESSED_POINTERS
-	lwz	r6, J9TR_J9Object_class(r5)				! Load the class offset
-	! may need to convert class offset to J9Class
-#else
-	laddr	r6, J9TR_J9Object_class(r5)				! Load the class
-#endif
+	LOAD_CLASS(r6,r5)					! Load the class
 	maskVFT(r6)
 	laddrx	r7, r6, r3					! Load method pointer
 	laddr	r8, J9TR_MethodPCStartOffset(r7)			! Load startPC field
@@ -2526,12 +2455,7 @@ _interfaceCallHelper:
 	neg	r4, r3
 	addi	r12, r4,J9TR_InterpVTableOffset			! Must set it up in r12
 	laddr	r3, 7*ALen(J9SP)					! Restore "this"
-#ifdef OMR_GC_COMPRESSED_POINTERS
-	lwz	r5, J9TR_J9Object_class(r3)				! class offset
-        ! may need to convert class offset to J9Class pointer
-#else
-	laddr	r5, J9TR_J9Object_class(r3)				! class pointer
-#endif
+ 	LOAD_CLASS(r5,r3)						! Load the class
 	maskVFT(r5)
 	laddrx	r4, r5, r12
 	mtspr	CTR, r4						! set up callee addr
@@ -2580,23 +2504,14 @@ _interfaceCompeteSlot2:
 	laddr	r5, jitLookupInterfaceMethod@got(RTOC)		! Load the callee address
 #endif
 	laddr	r6, 7*ALen(J9SP)					! Load "this"
-#ifdef OMR_GC_COMPRESSED_POINTERS
-	lwz	r3, J9TR_J9Object_class(r6)				! Load the class offset
-#else
-	laddr	r3, J9TR_J9Object_class(r6)				! Load the class
-#endif
+ 	LOAD_CLASS(r3,r6)							! Load the class
 	maskVFT(r3)
 	addi	r4, r11, 3*ALen					! Address of interface info
 	mtspr	CTR, r5						! Prepare for long jump
 	mr	r5, r11						! Load code cache RA
 	bcctrl	BO_ALWAYS, CR0_LT					! Call to look up
 	laddr	r5, 7*ALen(J9SP)					! Load:  this
-#ifdef OMR_GC_COMPRESSED_POINTERS
-	lwz	r6, J9TR_J9Object_class(r5)				! Load the class offset
-        ! may need to convert class offset to J9Class
-#else
-	laddr	r6, J9TR_J9Object_class(r5)				! Load the class
-#endif
+ 	LOAD_CLASS(r6,r5)							! Load the class
 	maskVFT(r6)
 	laddrx	r7, r6, r3					! Load method pointer
 	laddr	r5, J9TR_MethodPCStartOffset(r7)			! Load startPC/extra field
@@ -2721,11 +2636,7 @@ _interfaceSlotsUnavailable:
 #ifndef NO_HELPER_LASTITABLE_CHECK
         ! Before going to the VM helper, check if the receiver class lastITable matches the interface class
         ! of the method being called and if so, use it to quickly look up the vtable offset and make the call
-#ifdef OMR_GC_COMPRESSED_POINTERS
-        lwz     r10, J9TR_J9Object_class(r3)                    ! Load class
-#else
-        laddr   r10, J9TR_J9Object_class(r3)                    ! Load class
-#endif
+        LOAD_CLASS(r10,r3)										! Load the class
         maskVFT(r10)
         laddr   r12, 3*ALen(r11)                                ! Load the interface class of the method from the snippet
         laddr   r9, J9TR_J9Class_lastITable(r10)                ! Load the cached last ITable
@@ -2766,11 +2677,8 @@ _interfaceSlotsUnavailable:
 #else
 	laddr	r5, jitLookupInterfaceMethod@got(RTOC)		! Load address of final helper
 #endif
-#ifdef OMR_GC_COMPRESSED_POINTERS
-	lwz	r3, J9TR_J9Object_class(r3)				! Load class
-#else
-	laddr	r3, J9TR_J9Object_class(r3)				! Load class
-#endif
+	mr		r4, r3						! LOAD_CLASS cannot have identical source and destination
+	LOAD_CLASS(r3,r4)					! Load the class
 	maskVFT(r3)
 	addi	r4, r11, 3*ALen					! Address of interface info
 	mtspr	CTR, r5						! Prepare for long jump

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -19,7 +19,6 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
-
 
 #include "j2sever.h"
 #include "j9.h"
@@ -120,7 +119,8 @@ getClassAnnotationData(struct J9VMThread *vmThread, struct J9Class *declaringCla
 }
 
 jbyteArray
-getClassTypeAnnotationsAsByteArray(JNIEnv *env, jclass jlClass) {
+getClassTypeAnnotationsAsByteArray(JNIEnv *env, jclass jlClass)
+{
     jobject result = NULL;
     j9object_t clazz = NULL;
     J9VMThread *vmThread = (J9VMThread *) env;
@@ -153,7 +153,8 @@ getFieldAnnotationData(struct J9VMThread *vmThread, struct J9Class *declaringCla
 }
 
 jbyteArray
-getFieldTypeAnnotationsAsByteArray(JNIEnv *env, jobject jlrField) {
+getFieldTypeAnnotationsAsByteArray(JNIEnv *env, jobject jlrField)
+{
     jobject result = NULL;
     j9object_t fieldObject = NULL;
     J9VMThread *vmThread = (J9VMThread *) env;
@@ -829,6 +830,17 @@ createField(struct J9VMThread *vmThread, jfieldID fieldID)
 	J9VMJAVALANGREFLECTFIELD_SET_DECLARINGCLASS(vmThread, fieldObject, J9VM_J9CLASS_TO_HEAPCLASS(j9FieldID->declaringClass));
 #if defined(USE_SUN_REFLECT)
 	J9VMJAVALANGREFLECTFIELD_SET_MODIFIERS(vmThread, fieldObject, j9FieldID->field->modifiers & CFR_FIELD_ACCESS_MASK);
+#if JAVA_SPEC_VERSION >= 15
+	/* trust that static final fields and final record or hidden class fields will not be modified. */
+	if (J9_ARE_ALL_BITS_SET(j9FieldID->field->modifiers, J9AccFinal)) {
+		if (J9_ARE_ALL_BITS_SET(j9FieldID->field->modifiers, J9AccStatic)
+			|| J9ROMCLASS_IS_RECORD(j9FieldID->declaringClass->romClass)
+			|| J9ROMCLASS_IS_HIDDEN(j9FieldID->declaringClass->romClass)
+		) {
+			J9VMJAVALANGREFLECTFIELD_SET_TRUSTEDFINAL(vmThread, fieldObject, JNI_TRUE);
+		}
+	}
+#endif /* JAVA_SPEC_VERSION >= 15 */
 #endif
 
 	return fieldObject;
@@ -1121,6 +1133,21 @@ createStaticFieldObject(struct J9ROMFieldShape *romField, struct J9Class *declar
 	return field;
 }
 
+static j9object_t
+createFieldObject(J9VMThread *vmThread, J9ROMFieldShape *romField, J9Class *declaringClass, BOOLEAN isStaticField)
+{
+	UDATA inconsistentData = 0;
+	j9object_t field = NULL;
+
+	if (isStaticField) {
+		field = createStaticFieldObject(romField, declaringClass, NULL, vmThread, &inconsistentData);
+	} else {
+		field = createInstanceFieldObject(romField, declaringClass, NULL, vmThread, &inconsistentData);
+	}
+
+	return field;
+}
+
 static jfieldID
 reflectFieldToID(J9VMThread *vmThread, jobject reflectField)
 {
@@ -1182,6 +1209,7 @@ initializeReflection(J9JavaVM *javaVM)
 	reflectFunctions->idFromFieldObject = idFromFieldObject;
 	reflectFunctions->idFromMethodObject = idFromMethodObject;
 	reflectFunctions->idFromConstructorObject = idFromConstructorObject;
+	reflectFunctions->createFieldObject = createFieldObject;
 }
 
 /**
@@ -1200,8 +1228,8 @@ Java_java_lang_reflect_Array_multiNewArrayImpl(JNIEnv *env, jclass unusedClass, 
 	if (NULL != componentTypeClassObject) {
 		J9Class *componentTypeClass = J9VM_J9CLASS_FROM_HEAPCLASS(vmThread, componentTypeClassObject);
 
-		/* create an array class with one greater arity than desired */
-		UDATA count = dimensions + 1;
+		/* create an array class with the desired arity */
+		UDATA count = dimensions;
 		BOOLEAN exceptionIsPending = FALSE;
 
 		if (J9ROMCLASS_IS_ARRAY(componentTypeClass->romClass) && ((((J9ArrayClass *)componentTypeClass)->arity + dimensions) > J9_ARRAY_DIMENSION_LIMIT)) {
@@ -1725,7 +1753,8 @@ done:
  * an accessor method will have the same name as the component and take zero parameters.
  */
 static U_8
-isRecordComponentAccessorMethodMatch(J9Method *currentMethod, const char* componentName, U_16 componentNameLength, const char* componentSignature, U_16 componentSignatureLength) {
+isRecordComponentAccessorMethodMatch(J9Method *currentMethod, const char* componentName, U_16 componentNameLength, const char* componentSignature, U_16 componentSignatureLength)
+{
 	J9ROMMethod *romMethod = J9_ROM_METHOD_FROM_RAM_METHOD(currentMethod);
 
 	J9UTF8 *methodNameUtf8 = J9ROMMETHOD_NAME(romMethod);
@@ -1739,12 +1768,10 @@ isRecordComponentAccessorMethodMatch(J9Method *currentMethod, const char* compon
 	/* for a match methodSignature should be "()" + componentSignature */
 	if ((methodNameLength == componentNameLength)
 		&& (methodSignatureLength == (componentSignatureLength + 2))
+		&& (0 == memcmp(methodName, componentName, componentNameLength))
+		&& (0 == memcmp(methodSignature + 2, componentSignature, componentSignatureLength))
 	) {
-		if (0 == strcmp((const char*)methodName, componentName)) {
-			if ((0 == strncmp((const char*)methodSignature + 2, componentSignature, methodSignatureLength - 2))) {
-				return TRUE;
-			}
-		}
+		return TRUE;
 	}
 	return FALSE;
 }
@@ -1948,6 +1975,71 @@ heapoutofmemory:
 	vmFuncs->setHeapOutOfMemoryError(vmThread);
 	goto done;
 
+done:
+	vmFuncs->internalExitVMToJNI(vmThread);
+	return result;
+}
+
+/* Create an array of string names for class's PermittedSubclasses */
+jarray
+permittedSubclassesHelper(JNIEnv *env, jobject cls)
+{
+	J9VMThread *vmThread = (J9VMThread *)env;
+	J9JavaVM *vm = vmThread->javaVM;
+	J9InternalVMFunctions *vmFuncs = vm->internalVMFunctions;
+	J9MemoryManagerFunctions *mmFuncs = vm->memoryManagerFunctions;
+	J9Class *clazz = NULL;
+	J9ROMClass *romClass = NULL;
+	jarray result = NULL;
+	J9Class *stringClass = NULL;
+	J9Class *stringArrayClass = NULL;
+	U_32 *permittedSubclassesCountPtr = 0;
+	j9array_t stringArrayObject = NULL;
+	U_32 index = 0;
+
+	vmFuncs->internalEnterVMFromJNI(vmThread);
+
+	clazz = J9VM_J9CLASS_FROM_JCLASS(vmThread, (jclass)cls);
+	romClass = clazz->romClass;
+
+	/* allocate String array for results */
+	stringClass = J9VMJAVALANGSTRING(vm);
+	if (NULL != vmThread->currentException) {
+		goto done;
+	}
+	stringArrayClass = fetchArrayClass(vmThread, stringClass);
+	if (NULL != vmThread->currentException) {
+		goto done;
+	}
+
+	permittedSubclassesCountPtr = getNumberOfPermittedSubclassesPtr(romClass);
+
+	stringArrayObject = (j9array_t) mmFuncs->J9AllocateIndexableObject(vmThread, stringArrayClass,
+				*permittedSubclassesCountPtr, J9_GC_ALLOCATE_OBJECT_NON_INSTRUMENTABLE);
+	if (NULL == stringArrayObject) {
+		goto heapoutofmemory;
+	}
+
+	result = vmFuncs->j9jni_createLocalRef(env, (j9object_t)stringArrayObject);
+
+	for (; index < *permittedSubclassesCountPtr; index++) {
+		J9UTF8* nameUTF = NULL;
+		j9object_t nameString = NULL;
+
+		nameUTF = permittedSubclassesNameAtIndex(permittedSubclassesCountPtr, index);
+		/* Translates string to a dot seperated name which is needed in Java code to get the class object. */
+		nameString = mmFuncs->j9gc_createJavaLangString(vmThread, J9UTF8_DATA(nameUTF), (U_32) J9UTF8_LENGTH(nameUTF), J9_STR_INTERN | J9_STR_XLAT);
+		if (NULL == nameString) {
+			goto heapoutofmemory;
+		}
+
+		J9JAVAARRAYOFOBJECT_STORE(vmThread, stringArrayObject, index, nameString);
+	}
+	goto done;
+
+heapoutofmemory:
+	vmFuncs->setHeapOutOfMemoryError(vmThread);
+	goto done;
 done:
 	vmFuncs->internalExitVMToJNI(vmThread);
 	return result;

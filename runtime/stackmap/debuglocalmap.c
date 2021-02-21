@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include "cfreader.h"
 #include "j9.h"
 
 #include "pcstack.h" 
@@ -53,36 +54,6 @@
 #else
 #define PARALLEL_START_INDEX	(PARALLEL_WRITES - 1)
 #define	PARALLEL_INCREMENT		(-1)
-#endif
-
-#define PARAM_8(index, offset) ((index) [offset])
-
-#ifdef J9VM_ENV_LITTLE_ENDIAN
-#define PARAM_16(index, offset)				\
-	( ( ((U_16) (index)[offset])		)	\
-	| ( ((U_16) (index)[offset + 1]) << 8)	\
-	)
-#else
-#define PARAM_16(index, offset)			\
-	( ( ((U_16) (index)[offset]) << 8)	\
-	| ( ((U_16) (index)[offset + 1]) )	\
-	)
-#endif
-
-#ifdef J9VM_ENV_LITTLE_ENDIAN
-#define PARAM_32(index, offset)				\
-	( ( ((U_32) (index)[offset])		  )	\
-	| ( ((U_32) (index)[offset + 1]) << 8 )	\
-	| ( ((U_32) (index)[offset + 2]) << 16)	\
-	| ( ((U_32) (index)[offset + 3]) << 24)	\
-	)
-#else
-#define PARAM_32(index, offset)				\
-	( ( ((U_32) (index)[offset])	 << 24)	\
-	| ( ((U_32) (index)[offset + 1]) << 16)	\
-	| ( ((U_32) (index)[offset + 2]) << 8 )	\
-	| ( ((U_32) (index)[offset + 3])	  ) \
-	)
 #endif
 
 typedef struct DebugLocalMap {
@@ -624,7 +595,7 @@ validateLocalSlot(J9VMThread *currentThread, J9Method *ramMethod, U_32 offsetPC,
 		return J9_SLOT_VALIDATE_ERROR_NATIVE_METHOD;
 	}
 
-	/* Make sure the the slot number is in range of the args and temps */
+	/* Make sure the slot number is in range of the args and temps */
 
 	if ((slotSignature == 'D') || (slotSignature == 'J')) {
 		if ((slot + 1) >= argTempCount) {
